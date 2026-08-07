@@ -109,8 +109,12 @@ extends Resource
 @export_range(2.0, 50.0, 1.0) var bite_radius: float = 18.0
 ## Minimum time between accepted bite clicks.
 @export_range(0.05, 2.0, 0.01) var bite_cooldown: float = 0.45
-## Fraction of a tissue region removed by one successful bite.
-@export_range(0.01, 1.0, 0.01) var bite_damage: float = 0.28
+## How deep one bite drives into the tissue lattice, at the centre of the jaws,
+## in hit points — so it is read against TissueGrid's layer costs rather than as
+## a fraction of anything. Skin is 1.0 and muscle 2.2, so the default clears
+## skin and most of the muscle under the middle of the bite and only grazes the
+## rim. Bone is 6.0 and yields at half rate, so it takes several more.
+@export_range(0.2, 8.0, 0.05) var bite_damage: float = 2.6
 
 # --------------------------------------------------------------- growth ----
 @export_group("Growth")
@@ -173,7 +177,7 @@ const SCHEMA: Array = [
 	{"prop": "bite_reach", "label": "Bite reach", "min": 2.0, "max": 60.0, "step": 1.0},
 	{"prop": "bite_radius", "label": "Bite radius", "min": 2.0, "max": 50.0, "step": 1.0},
 	{"prop": "bite_cooldown", "label": "Bite cooldown", "min": 0.05, "max": 2.0, "step": 0.01},
-	{"prop": "bite_damage", "label": "Tissue damage", "min": 0.01, "max": 1.0, "step": 0.01},
+	{"prop": "bite_damage", "label": "Bite depth", "min": 0.2, "max": 8.0, "step": 0.05},
 ]
 
 

@@ -37,9 +37,9 @@ Eating the amber pellets grows the creature; every system scales off a single
 `size_scale`, so the body, limbs and stride all grow together.
 
 A stationary second creature starts ahead of the player as the first combat
-slice. Bites resolve against its generated head, torso sections, limb bones and
-feet. Successful hits remove persistent regional tissue and leave paper-cut
-wounds with a rust-coloured flesh rim that remain bound to the moving anatomy.
+slice. A click throws the head forward in a lunge and the bite resolves at full
+extension, eating into a lattice of body cells layered skin over muscle over
+bone. Tissue that comes off falls into the world as meat and can be eaten.
 
 ## How it works
 
@@ -58,7 +58,9 @@ input ──▶ head position ──▶ spine ──▶ body shape ──▶ lim
 | [Constraints.gd](scripts/creature/Constraints.gd) | the two projection primitives everything is built from |
 | [Spine.gd](scripts/creature/Spine.gd) | the particle chain and its relaxation solve |
 | [BodyShape.gd](scripts/creature/BodyShape.gd) | outline, head, eyes, limb sockets, tail — all derived from the spine |
-| [AnatomyState.gd](scripts/creature/AnatomyState.gd) | anatomical hit-testing, regional tissue health and pose-bound wounds |
+| [AnatomyState.gd](scripts/creature/AnatomyState.gd) | anatomical hit-testing — which creature, and which structure of it |
+| [TissueGrid.gd](scripts/creature/TissueGrid.gd) | the body-space cell lattice: skin over muscle over bone, and what a bite does to it |
+| [ScrapField.gd](scripts/world/ScrapField.gd) | tissue knocked loose, as meat lying in the world |
 | [Fabrik.gd](scripts/creature/Fabrik.gd) | generic FABRIK chain solver |
 | [Limb.gd](scripts/creature/Limb.gd) | one arm/leg: bones + step-cycle state |
 | [Gait.gd](scripts/creature/Gait.gd) | where feet want to be, when they pick up, where they land |
@@ -186,6 +188,75 @@ limb-lengths *inside* the torso.
 All of it is computed in the socket's own (outward, forward) frame, so the
 limits mean the same thing on both flanks and at any heading.
 
+### Tissue
+
+Damage lives in a lattice of body cells — 26 x 7 over the body, 8 x 3 per limb
+— and each cell is a stack of three tissues in *depth*, because top-down means
+you are looking down through them: skin over muscle over bone. A bite spends a
+penetration budget strictly outside-in, so nothing under a layer can be touched
+until that layer is gone, and the colour of a cell is simply whatever is now
+uppermost in it. Each layer also darkens toward the one beneath as it thins, so
+a bite that has not broken through still shows how far it got.
+
+Bone is not just thicker. It exists only where there is a skeleton — skull,
+vertebrae down the midline, ribs on alternating columns over the chest, a core
+down each limb — it yields at half the incoming depth, and it *stops the bite*,
+since there is nothing behind it to reach. Flesh with no bone under it can be
+eaten clean through into a hole; a rib takes several more bites, and a bite
+landing between two ribs reaches the muscle they do not cover.
+
+Two decisions carry the rest of it:
+
+- **Cells are addressed in body space, and the lattice's dimensions are
+  constants.** The pose is rebuilt from the spine every tick, so world-space
+  damage is impossible; only the cell *corners* are re-derived each tick. Making
+  the dimensions constants rather than functions of `segment_count` is what
+  stops the tuning panel silently remapping existing damage when it restructures
+  the spine underneath it.
+- **A bite selects cells by testing their solved world centres.** The body-space
+  mapping is curved, tapered and per-tick, and has no cheap inverse; the direct
+  test is exact, needs no special case at the snout cap or the elbow, and lets
+  one bite straddle several structures — jaws closing on a flank catch the leg
+  over it, which a query routed through a single hit region could not express.
+
+Destroyed skin and muscle come off as chunks, which fly, settle, and stay as
+meat until something eats them. A creature never eats its own: without that
+rule, jaws closing on a victim's head shed straight into the victim's own mouth
+volume, and being bitten feeds you.
+
+#### Keeping it cheap
+
+Per tick the lattice only re-derives cross-sections — about sixty for a whole
+creature — and everything priced per *cell* is deferred to the rare ticks a bite
+lands on. Intact skin is already on screen as the body fill, so the lattice
+draws purely as an overlay of what has been lost: cost tracks the damage, not
+the ~180 cells, and an untouched creature costs one early return per patch.
+
+The cells that do draw, and the loose chunks, go out as single indexed triangle
+arrays rather than a polygon apiece. That one is worth stating with numbers,
+because it is not a micro-optimisation: Godot issues one canvas command per
+`draw_colored_polygon`, and a badly chewed pair of creatures with a saturated
+scrap field reaches a few hundred a frame. Measured in a 1280x760 window, that
+alone cost **5.5 ms/frame** and took the scene from 120 to 72 fps. Batched, the
+same worst case costs **0.29 ms** — under 2% of a 60 fps budget, a 19x
+reduction. The interior cell seams are one `draw_multiline` for the same reason.
+
+### The lunge
+
+A click does not resolve a bite. It starts an animation with a hit frame: a
+0.07 s wind-up that rocks the head back and opens the jaws, a 0.08 s throw, and
+a 0.18 s settle — and the bite resolves at full extension, against the pose the
+jaws actually arrived at. The gape snaps shut on that same frame, so the
+animation states exactly when the damage happened.
+
+The throw is fed to **the spine's head point, not to `head_pos`**. That is the
+load-bearing detail, twice over. The body has to follow it through the
+constraint solve — that is what makes it whip rather than slide — and it must
+never accumulate into the motion integrator, or every strike would walk the
+creature forward by its own reach. `head_pos` stays the creature's honest
+position throughout, which is also what keeps the camera still while the body
+lunges.
+
 ## Tuning
 
 Press `F1` for live sliders (generated from `CreatureParams.SCHEMA` — add a
@@ -206,6 +277,8 @@ The parameters worth reaching for first:
 | Sprawling vs. tucked legs | `stance_width`, `stance_reach`, `arm/leg_length` |
 | Marching vs. loose legs | `diagonal_coupling` (1 = strict trot, 0 = independent) |
 | Wider / tighter leg sweep | `limb_swing_deg`, `limb_max_reach` |
+| Bites that bite deeper | `bite_damage` up (hit points of penetration: skin is 1.0, muscle 3.0, bone 6.0 at half rate) |
+| Crisper, more legible wounds | `bite_radius` down |
 
 Four couplings are easy to trip over:
 
@@ -243,6 +316,13 @@ godot --headless --path . --script tests/UIInteractionTest.gd # HUD interactions
 godot --headless --path . --script tests/CombatTest.gd    # bite/anatomy slice
 ```
 
+`CombatTest` covers the tissue rules that are easy to regress: bites eat
+outside-in and never touch a layer through an intact one; they damage only where
+they land; bone survives several times longer than the flesh beside it; damage
+outlives both a procedural rebuild *and* a change of segment count; and the
+lunge extends, resolves at its apex, snaps its jaws shut, and leaves the
+creature standing exactly where it started.
+
 `SimTest` drives each preset through idle → walk → turn → pivot → idle and
 asserts that segment lengths hold, bends stay inside the limit, IK bones keep
 their length, the gait never lifts both diagonals at once, a resting creature's
@@ -269,6 +349,16 @@ Deliberate, in the interest of a stable and readable prototype:
   letting the foot **skid** along the edge of its envelope. Nothing slows the
   creature down to keep its feet under it, so at extreme turn rates the plant is
   approximate — but the limb stays inside a plausible pose while it happens.
+- Shed meat is edible by any creature — consumption is resolved over the whole
+  `creatures` group — but nothing seeks it out, because the second creature has
+  no AI. In practice only the player eats.
+- Tissue never heals and cells never regrow, so damage is strictly cumulative.
+- A bite's penetration budget is spent per cell and any remainder is discarded;
+  it does not spill into neighbours. Bone therefore blocks depth but never
+  deflects it sideways.
+- The default `bite_radius` is comparable to the body's half-width, so a bite
+  near the midline tends to take the full width of the body and wounds read as
+  bands. Narrower jaws make the cell structure more legible.
 - The body fill is drawn as a strip of quads between spine cross-sections, so a
   very sharp bend can overlap slightly on the inside of the curve. It is
   invisible at opaque fill and avoids depending on concave polygon

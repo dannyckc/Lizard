@@ -1,9 +1,17 @@
 ## Persistent tissue state layered over the creature's procedural pose.
 ##
-## The pose is rebuilt every physics tick, so damage cannot be stored in the
-## generated polygon itself. Hits are instead bound to anatomical coordinates
-## (a spine parameter, or a limb segment + interpolation value) and the view
-## maps them back onto the latest solved pose when drawing.
+## Two jobs, kept apart because they answer different questions:
+##
+##   * `hit_test()` asks *what did those jaws close on* — which creature, and
+##     which anatomical structure of it — by querying the same procedural
+##     primitives the view draws. The world uses it to pick a single target when
+##     several bodies overlap one bite volume.
+##   * `tissue` is the voxel-like lattice that then actually loses material, in
+##     body-space cells that survive the pose being rebuilt each tick.
+##
+## Damage is applied through the lattice by *position*, not through the region
+## the hit test named: a hit region identifies a target, while a bite covers an
+## area that can straddle several structures at once.
 class_name AnatomyState
 extends RefCounted
 
@@ -32,34 +40,17 @@ class Hit extends RefCounted:
 	var limb_u: float = 0.0
 
 
-class Wound extends RefCounted:
-	var region_id: String = ""
-	var kind: int = TORSO
-	var spine_t: float = 0.0
-	var local_forward: float = 0.0
-	var lateral: float = 0.0
-	var limb_key: String = ""
-	var limb_segment: int = -1
-	var limb_u: float = 0.0
-	## Stored in unscaled creature pixels so growth keeps the wound attached.
-	var radius: float = 1.0
-	var damage: float = 0.0
-
-
-## 1.0 means intact tissue and 0.0 means the region has been fully eaten.
-## Regions are registered lazily because segment count and limb layout are
-## procedural and can change through the tuning panel.
-var region_health: Dictionary = {}
-var wounds: Array[Wound] = []
+var tissue: TissueGrid = TissueGrid.new()
 
 
 func reset() -> void:
-	region_health.clear()
-	wounds.clear()
+	tissue.reset()
 
 
-func health_of(region_id: String) -> float:
-	return float(region_health.get(region_id, 1.0))
+## Re-derives the lattice's world geometry from the pose solved this tick. Must
+## run after the body and limbs are rebuilt and before anything bites.
+func update(creature: Node) -> void:
+	tissue.update(creature)
 
 
 ## Finds the anatomical region overlapped most deeply by a circular bite.
@@ -153,30 +144,10 @@ func hit_test(creature: Node, bite_center: Vector2, bite_radius: float) -> Hit:
 	return best
 
 
-## Removes tissue and records a persistent, pose-relative wound. Returns the
-## damage actually applied, which may be smaller when almost no tissue remains.
-func apply_bite(hit: Hit, damage: float, wound_radius: float, creature_scale: float) -> float:
-	if hit == null:
-		return 0.0
-	var before: float = health_of(hit.region_id)
-	var applied: float = minf(maxf(damage, 0.0), before)
-	if applied <= 0.0:
-		return 0.0
-	region_health[hit.region_id] = before - applied
-
-	var wound := Wound.new()
-	wound.region_id = hit.region_id
-	wound.kind = hit.kind
-	wound.spine_t = hit.spine_t
-	wound.local_forward = hit.local_forward
-	wound.lateral = hit.lateral
-	wound.limb_key = hit.limb_key
-	wound.limb_segment = hit.limb_segment
-	wound.limb_u = hit.limb_u
-	wound.radius = maxf(wound_radius / maxf(creature_scale, 0.001), 1.0)
-	wound.damage = applied
-	wounds.append(wound)
-	return applied
+## Erodes every cell the bite circle covers, outside-in. Returns the tissue
+## actually removed, and appends whatever broke off to `shed`.
+func apply_bite(center: Vector2, radius: float, depth: float, shed: Array) -> float:
+	return tissue.bite(center, radius, depth, shed)
 
 
 static func _segment_u(point: Vector2, a: Vector2, b: Vector2) -> float:

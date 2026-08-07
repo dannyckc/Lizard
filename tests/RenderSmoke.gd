@@ -42,7 +42,7 @@ func _process(_delta: float) -> bool:
 func _physics_process(_delta: float) -> bool:
 	ticks += 1
 	if ticks == 30:
-		_scar_target()  # exercise head, torso, bone and foot wound draw paths
+		_scar_target()  # exercise the skin, muscle, bone and cavity cell draws
 	if ticks == 120:
 		main.get_node("Creature").params.tail_enabled = false  # exercise tail clipping
 	if ticks >= 240:
@@ -50,12 +50,18 @@ func _physics_process(_delta: float) -> bool:
 		var stepped: bool = false
 		for limb in c.gait.limbs:
 			stepped = stepped or limb.planted != limb.ideal
-		print("render smoke OK — %d draws / %d ticks | speed %.0f px/s | travelled %.0f px | outline %d verts | feet moved: %s"
-			% [draws, ticks, c.speed, c.head_pos.length(), c.body.outline.size(), str(stepped)])
+		var target: Creature = main.get_node("TargetCreature")
+		print("render smoke OK — %d draws / %d ticks | speed %.0f px/s | travelled %.0f px | outline %d verts | feet moved: %s | target integrity %.2f | %d scraps"
+			% [draws, ticks, c.speed, c.head_pos.length(), c.body.outline.size(),
+				str(stepped), target.anatomy.tissue.integrity(),
+				main.get_node("ScrapField").scraps.size()])
 		quit()
 	return false
 
 
+## Chews each structure hard enough to expose every layer the cell renderer can
+## draw — thinned skin, muscle, worn bone and a hole clean through — and sheds
+## enough tissue to exercise the scrap field's spawn, settle and draw paths.
 func _scar_target() -> void:
 	var target: Creature = main.get_node("TargetCreature")
 	var points: Array[Vector2] = [target.body.head.pos]
@@ -66,6 +72,5 @@ func _scar_target() -> void:
 	points.append(limb.joints[1].lerp(limb.joints[2], 0.5))
 	points.append(limb.joints[2])
 	for point in points:
-		var hit: AnatomyState.Hit = target.query_bite(point, 1.0)
-		if hit != null:
-			target.apply_bite_hit(hit, 0.2, 7.0)
+		for _repeat in 6:
+			target.apply_bite(point, 9.0, 3.0)

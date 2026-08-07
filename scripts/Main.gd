@@ -13,6 +13,7 @@ const INK := Color("14140f")
 const COL_GRID := Color(INK, 0.13)
 
 @onready var food_field: FoodField = $FoodField
+@onready var scrap_field: ScrapField = $ScrapField
 @onready var creature: Creature = $Creature
 @onready var view: CreatureView = $Creature/View
 @onready var target_creature: Creature = $TargetCreature
@@ -29,6 +30,10 @@ func _ready() -> void:
 	camera.zoom = Vector2(DEFAULT_ZOOM, DEFAULT_ZOOM)
 	camera.global_position = creature.head_pos
 	creature.bite_started.connect(_on_creature_bite_started)
+	# Any creature can be bitten, so any creature can shed. Children are ready
+	# before their parent, so the group is already populated here.
+	for node in get_tree().get_nodes_in_group("creatures"):
+		(node as Creature).tissue_shed.connect(_on_tissue_shed.bind(node))
 	food_field.refresh(creature.head_pos)
 	_build_ui()
 
@@ -92,6 +97,17 @@ func _physics_process(_delta: float) -> void:
 	if eaten > 0:
 		creature.feed(eaten)
 
+	# Torn-off tissue is meat, and meat belongs to whoever's jaws reach it — so
+	# this is resolved over every creature rather than only the player's.
+	for node in get_tree().get_nodes_in_group("creatures"):
+		var scavenger := node as Creature
+		if scavenger == null or scavenger.body == null:
+			continue
+		var scavenged: int = scrap_field.consume(
+			scavenger.body.head.pos, scavenger.mouth_radius(), scavenger)
+		if scavenged > 0:
+			scavenger.feed(scavenged)
+
 
 func _process(delta: float) -> void:
 	# The editorial HUD treats the creature as a specimen: keep it centred while
@@ -114,7 +130,7 @@ func _update_hud() -> void:
 		state = "turning"
 	if creature.command.sprint and creature.speed_norm > 0.7:
 		state = "running"
-	if creature.bite_feedback_remaining > 0.0:
+	if creature.is_lunging():
 		state = "biting"
 
 	hud.update_metrics(
@@ -140,6 +156,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				target_creature.reset(target_creature.spawn_position, target_creature.spawn_heading)
 				food_field.pellets.clear()
 				food_field.refresh(creature.head_pos)
+				scrap_field.clear()
 				camera.global_position = creature.head_pos
 				hud.reset_hint()
 	elif event is InputEventMouseButton and event.pressed:
@@ -162,10 +179,13 @@ func _on_species_selected(_preset_name: String) -> void:
 	creature.rebuild()
 
 
-## Resolves one circular bite against every current procedural creature, then
-## damages only the deepest anatomical overlap. This is intentionally owned by
-## the world rather than either participant so target update order cannot cause
-## multiple hits from one click as more creatures are introduced.
+## Resolves one bite, fired at the apex of the biter's lunge.
+##
+## The hit test picks a single victim — the body overlapped most deeply — and
+## only then does the bite erode that creature's tissue, by position, across
+## whatever structures of it the jaws actually cover. Owned by the world rather
+## than by either participant so creature update order cannot turn one strike
+## into several hits as more creatures are introduced.
 func _on_creature_bite_started(center: Vector2, radius: float) -> void:
 	var best_target: Creature = null
 	var best_hit: AnatomyState.Hit = null
@@ -180,13 +200,14 @@ func _on_creature_bite_started(center: Vector2, radius: float) -> void:
 
 	var connected: bool = false
 	if best_target != null:
-		var removed: float = best_target.apply_bite_hit(
-			best_hit,
-			creature.params.bite_damage,
-			radius * 0.58
-		)
+		var removed: float = best_target.apply_bite(
+			center, radius, creature.params.bite_damage)
 		connected = removed > 0.0
 	creature.resolve_bite(connected)
+
+
+func _on_tissue_shed(chunks: Array, origin: Vector2, source: Creature) -> void:
+	scrap_field.scatter(chunks, origin, source)
 
 
 ## Sparse one-pixel registration dots from the design's specimen-sheet field.
