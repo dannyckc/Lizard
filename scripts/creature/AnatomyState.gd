@@ -86,7 +86,7 @@ func hit_test(creature: Node, bite_center: Vector2, bite_radius: float) -> Hit:
 	for i in range(1, last):
 		var a: Vector2 = spine.points[i]
 		var b: Vector2 = spine.points[i + 1]
-		var u: float = _segment_u(bite_center, a, b)
+		var u: float = segment_u(bite_center, a, b)
 		var axis: Vector2 = a.lerp(b, u)
 		var tissue_radius: float = lerpf(body.widths[i], body.widths[i + 1], u)
 		var radial: Vector2 = bite_center - axis
@@ -112,7 +112,7 @@ func hit_test(creature: Node, bite_center: Vector2, bite_radius: float) -> Hit:
 		for segment in 2:
 			var la: Vector2 = limb.joints[segment]
 			var lb: Vector2 = limb.joints[segment + 1]
-			var limb_u: float = _segment_u(bite_center, la, lb)
+			var limb_u: float = segment_u(bite_center, la, lb)
 			var limb_axis: Vector2 = la.lerp(lb, limb_u)
 			var limb_radius: float = (widths.x if segment == 0 else widths.y) * 0.5
 			var limb_score: float = bite_center.distance_to(limb_axis) - limb_radius
@@ -150,7 +150,10 @@ func apply_bite(center: Vector2, radius: float, depth: float, shed: Array) -> fl
 	return tissue.bite(center, radius, depth, shed)
 
 
-static func _segment_u(point: Vector2, a: Vector2, b: Vector2) -> float:
+## Where along `a`->`b` the closest point to `point` lies, clamped to the
+## segment. Shared with Creature's body-contact query, which walks the same
+## spine capsules this hit test does.
+static func segment_u(point: Vector2, a: Vector2, b: Vector2) -> float:
 	var ab: Vector2 = b - a
 	var length_squared: float = ab.length_squared()
 	if length_squared < 0.000001:

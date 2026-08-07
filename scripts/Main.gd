@@ -138,7 +138,7 @@ func _update_hud() -> void:
 		int(absf(creature.speed)),
 		stepping,
 		creature.food_eaten,
-		creature.size_scale,
+		creature.anatomy.tissue.integrity(),
 		creature.spine.size()
 	)
 

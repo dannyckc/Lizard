@@ -22,11 +22,16 @@ const COL_EYE := PAPER
 # just the body fill, so it needs no colour of its own.
 const COL_MUSCLE := Color("9c3b26")
 const COL_MUSCLE_DEEP := Color("5f2114")
-## Bone has to be a tone, not a highlight: a cell eaten through shows the paper
-## ground, and at anything close to paper the two states are indistinguishable —
-## you could not tell a skeleton from a hole.
+## Bone has to be a tone, not a highlight, and it has to darken as it is ground
+## down rather than pale out: a cell eaten clean through shows the ground, and
+## at anything close to paper the two states are indistinguishable — you could
+## not tell a skeleton from a hole in one.
 const COL_BONE := Color("c9bda0")
-const COL_CAVITY := Color("e8e4da")
+const COL_BONE_WORN := Color("a08d68")
+## A cell with nothing left in it is a hole, so it is drawn as the paper the
+## world is drawn on. Where the skeleton runs there is bone to stop the bite;
+## everywhere else flesh is all there is, and eating it opens the body.
+const COL_GROUND := PAPER
 ## Cell seams, faint enough to read as scale texture rather than as a grid.
 const COL_SEAM := Color(PAPER, 0.085)
 
@@ -222,6 +227,11 @@ func _draw_limb_cells(tissue: TissueGrid, from_col: int, to_col: int) -> void:
 ## Each layer also darkens toward the one beneath as it thins, so a bite that
 ## has not yet broken through still shows how deep it got — penetration reads as
 ## a gradient, and breaching a layer as a step change.
+##
+## The last case is the one that carries the skeleton: a cell with no bone under
+## it has nothing left once its muscle is gone, so it falls straight through to
+## the ground. Bone is the only thing that stops that, which is what makes the
+## frame legible — the ribs stay as pale bars across an open body cavity.
 func _cell_color(patch: TissueGrid.Patch, cell: int) -> Color:
 	var base: int = cell * TissueGrid.LAYERS
 	var skin: float = patch.hp[base + TissueGrid.SKIN]
@@ -232,8 +242,8 @@ func _cell_color(patch: TissueGrid.Patch, cell: int) -> Color:
 		return COL_MUSCLE.lerp(COL_MUSCLE_DEEP, 1.0 - muscle / TissueGrid.MUSCLE_HP)
 	var bone: float = patch.hp[base + TissueGrid.BONE]
 	if bone > 0.0:
-		return COL_BONE.lerp(COL_CAVITY, 0.5 * (1.0 - bone / TissueGrid.BONE_HP))
-	return COL_CAVITY
+		return COL_BONE.lerp(COL_BONE_WORN, 1.0 - bone / TissueGrid.BONE_HP)
+	return COL_GROUND
 
 
 ## The cell seams, as one batched multiline over the whole body.

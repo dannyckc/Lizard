@@ -40,9 +40,32 @@ var move_dir: Vector2 = Vector2.RIGHT
 ## Speed as a 0..1 fraction of top speed. Drives stride, step timing and sway.
 var speed_norm: float = 0.0
 
-# --- growth (the evolution hook) --------------------------------------------
 var food_eaten: int = 0
+## Uniform scale on the whole creature — body, limbs, stride, reach and bite all
+## read off it. Growth has been taken out for now, so it is pinned at 1.0 and
+## nothing writes to it; it is left in place as the single value a growth system
+## will drive when one lands, rather than as a multiplier to be re-threaded
+## through forty call sites later.
 var size_scale: float = 1.0
+
+# --- collision --------------------------------------------------------------
+## Fraction of a contact each creature resolves on its own. Both parties run the
+## same pass against each other, so a half each separates them exactly once —
+## and no creature ever writes to another's state, which is what keeps this
+## order-independent however many of them end up in one pile.
+const CONTACT_SHARE: float = 0.5
+## Ceiling on how far one tick may push a single body point. A deep overlap —
+## two creatures spawned inside each other, or a segment count change that
+## lengthens a body through its neighbour — then unwinds over several ticks
+## instead of catapulting the chain apart in one. It has to stay comfortably
+## above how far a creature travels in a tick (about 5 px at a sprint) or a
+## body walks into another faster than the correction pushes it out.
+const MAX_CONTACT_PUSH: float = 12.0
+
+## Bounding circle around the whole body, refreshed with the pose. Only used to
+## reject creature pairs before the per-point contact walk.
+var bounds_center: Vector2 = Vector2.ZERO
+var bounds_radius: float = 0.0
 
 # --- bite state -------------------------------------------------------------
 ## The strike is an animation with a hit frame, not an instant event. A click
@@ -94,6 +117,7 @@ func rebuild() -> void:
 	# Existing damage is kept — it lives in body space precisely so a structural
 	# rebuild cannot wash it off — but its world geometry is now stale.
 	anatomy.update(self)
+	_update_bounds()
 
 
 func reset(at: Vector2 = Vector2.ZERO, facing: float = 0.0) -> void:
@@ -103,7 +127,6 @@ func reset(at: Vector2 = Vector2.ZERO, facing: float = 0.0) -> void:
 	ang_vel = 0.0
 	move_dir = Vector2.RIGHT.rotated(heading)
 	food_eaten = 0
-	size_scale = 1.0
 	command = MovementInput.Command.new()
 	anatomy.reset()
 	bite_cooldown_remaining = 0.0
@@ -132,6 +155,10 @@ func _physics_process(delta: float) -> void:
 	_advance_lunge(delta)
 
 	_integrate_motion(delta)
+	# Between "where input put the head" and "where the body follows it to", so
+	# the silhouette, the limbs and the tissue lattice are all built from the
+	# corrected pose within this same tick rather than a tick behind it.
+	_resolve_contacts()
 
 	# The lunge is fed to the spine rather than to `head_pos`, which stays the
 	# creature's honest position: the throw has to be something the body follows
@@ -143,6 +170,7 @@ func _physics_process(delta: float) -> void:
 	body.build(spine, params, size_scale)
 	gait.update(delta, body, move_dir, speed_norm, params, size_scale)
 	anatomy.update(self)
+	_update_bounds()
 
 	# Resolve at full extension, once the pose above is the lunged one, so the
 	# bite is tested against where the jaws have genuinely arrived. The clock is
@@ -155,11 +183,6 @@ func _physics_process(delta: float) -> void:
 	if bite_time >= LUNGE_TOTAL:
 		bite_time = -1.0
 		lunge_offset = 0.0
-
-	# Grow smoothly toward the size earned by eating, so the body has time to
-	# settle into new segment lengths instead of snapping.
-	var target_scale: float = clampf(1.0 + float(food_eaten) * params.growth_per_food, 1.0, params.max_scale)
-	size_scale = lerpf(size_scale, target_scale, 1.0 - exp(-2.0 * delta))
 
 
 ## Advances the strike clock and resolves it to a forward displacement.
@@ -245,6 +268,125 @@ func _integrate_motion(delta: float) -> void:
 	move_dir = Vector2.RIGHT.rotated(heading)
 	head_pos += move_dir * (speed * delta)
 	speed_norm = clampf(absf(speed) / maxf(p.move_speed * size_scale, 1.0), 0.0, 1.0)
+
+
+# ------------------------------------------------------------- collision ----
+
+## Pushes this creature out of any other creature it is standing inside.
+##
+## Each creature resolves its own half of every contact and never touches
+## another's state, so the result does not depend on the order the group is
+## ticked in — the same reason the rest of the chain is strictly one-way. The
+## bodies tested against are the ones solved last tick; at 60 Hz that is a few
+## pixels of staleness, and a positional correction is iterative anyway, so it
+## costs nothing but buys back the whole ordering problem.
+##
+## Bodies collide, limbs do not. Legs here are kinematic — they neither carry
+## weight nor receive it — so colliding them would only jam two creatures apart
+## at arm's length while their bodies still read as clear of each other.
+func _resolve_contacts() -> void:
+	if spine == null or body == null or not is_inside_tree():
+		return
+	var last: int = mini(body.last_index, spine.size() - 1)
+	# The single deepest contact anywhere on the body, kept unclamped so the
+	# brake below can read how squarely it opposes travel.
+	var deepest: Vector2 = Vector2.ZERO
+	for node in get_tree().get_nodes_in_group("creatures"):
+		var other := node as Creature
+		if other == null or other == self or other.body == null or other.spine == null:
+			continue
+		# Both bounds are a tick old, so right at the boundary this can reject a
+		# pair whose true overlap is a pixel or two. That contact is caught on
+		# the next tick, which is the whole tolerance a positional correction
+		# works to anyway.
+		if bounds_center.distance_to(other.bounds_center) > bounds_radius + other.bounds_radius:
+			continue
+		for i in range(last + 1):
+			# Point 0 is the head, and the head is placed rather than simulated,
+			# so its contact has to move `head_pos` — the spine's copy of it is
+			# overwritten from there a few lines later.
+			var at: Vector2 = head_pos if i == 0 else spine.points[i]
+			var push: Vector2 = other.push_out_of_body(at, body.widths[i])
+			if push == Vector2.ZERO:
+				continue
+			if push.length_squared() > deepest.length_squared():
+				deepest = push
+			push = push.limit_length(MAX_CONTACT_PUSH) * CONTACT_SHARE
+			if i == 0:
+				head_pos += push
+			else:
+				spine.displace(i, push)
+	_brake_into(deepest)
+
+
+## Sheds the part of the forward speed that is driving into a contact.
+##
+## Position alone is not enough, and the difference is not subtle. Corrected
+## only positionally, a creature walking into another keeps walking: it either
+## grinds through, or — measured — shoves a stationary creature across the world
+## ahead of it at its own full speed, with no resistance at all. Scaling `speed`
+## by how squarely the contact opposes travel stops it dead head-on and leaves
+## it entirely free to slide along a flank, which is the difference between
+## another creature reading as solid and reading as sticky.
+##
+## Heading is deliberately untouched, so a creature pressed against another can
+## always turn away and walk off. Nothing here has mass, so contact is symmetric
+## and neither party can push the other.
+func _brake_into(push: Vector2) -> void:
+	if push == Vector2.ZERO or is_zero_approx(speed):
+		return
+	var into: float = -(move_dir * speed).normalized().dot(push.normalized())
+	if into > 0.0:
+		speed = move_toward(speed, 0.0, absf(speed) * into)
+
+
+## The displacement that would just lift a circle of `radius` at `at` clear of
+## this creature's body, or ZERO if it is already clear.
+##
+## Tested against the same chain of variable-radius capsules the view fills, so
+## creatures collide with exactly the silhouette that is drawn. Only the deepest
+## overlap is returned: consecutive capsules share their end caps, so summing
+## them would push out by several times the actual penetration.
+func push_out_of_body(at: Vector2, radius: float) -> Vector2:
+	if body == null or spine == null:
+		return Vector2.ZERO
+	var last: int = mini(body.last_index, spine.size() - 1)
+	var deepest: float = 0.0
+	var out: Vector2 = Vector2.ZERO
+	for i in range(last):
+		var a: Vector2 = spine.points[i]
+		var b: Vector2 = spine.points[i + 1]
+		var u: float = AnatomyState.segment_u(at, a, b)
+		var axis: Vector2 = a.lerp(b, u)
+		var delta: Vector2 = at - axis
+		var distance: float = delta.length()
+		var overlap: float = radius + lerpf(body.widths[i], body.widths[i + 1], u) - distance
+		if overlap <= deepest:
+			continue
+		deepest = overlap
+		# Dead centre on the axis there is no direction to leave by, so fall back
+		# to the flank normal — sideways is the shortest way out of a body that
+		# is far longer than it is wide.
+		out = (delta / distance if distance > 0.0001 else spine.perps[i]) * overlap
+	return out
+
+
+## Refreshes the broad-phase bounding circle from the pose just solved. Built
+## from the body's own cross-sections rather than from arc length, so a coiled
+## creature gets a tight bound instead of one sized for a straight one.
+func _update_bounds() -> void:
+	if spine == null or body == null:
+		return
+	var last: int = mini(body.last_index, spine.size() - 1)
+	var lo: Vector2 = spine.points[0]
+	var hi: Vector2 = lo
+	for i in range(last + 1):
+		var w: float = body.widths[i]
+		var at: Vector2 = spine.points[i]
+		lo = Vector2(minf(lo.x, at.x - w), minf(lo.y, at.y - w))
+		hi = Vector2(maxf(hi.x, at.x + w), maxf(hi.y, at.y + w))
+	bounds_center = (lo + hi) * 0.5
+	bounds_radius = lo.distance_to(hi) * 0.5
 
 
 ## Head-first collision test used by the food field.

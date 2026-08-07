@@ -1,7 +1,8 @@
 ## Scattered pellets that keep the world populated around the player and give
-## the prototype something to do. Eating them grows the creature, which is the
-## only "evolution" hook here — it feeds Creature.size_scale, and every system
-## above already scales off that, so the body, limbs and stride grow together.
+## the prototype something to do. Eating one increments Creature.food_eaten and
+## nothing more: growth has been taken out until there is a real system for it,
+## so food is currently a counter the HUD reads rather than an input to anything
+## the creature does.
 class_name FoodField
 extends Node2D
 

@@ -111,15 +111,11 @@ extends Resource
 @export_range(0.05, 2.0, 0.01) var bite_cooldown: float = 0.45
 ## How deep one bite drives into the tissue lattice, at the centre of the jaws,
 ## in hit points — so it is read against TissueGrid's layer costs rather than as
-## a fraction of anything. Skin is 1.0 and muscle 2.2, so the default clears
-## skin and most of the muscle under the middle of the bite and only grazes the
-## rim. Bone is 6.0 and yields at half rate, so it takes several more.
+## a fraction of anything. Skin is 0.4, so the default strips it across nearly
+## the full width of the jaws in one go; muscle is 5.5, so tearing through it
+## takes three bites on the same spot or a deeper one. Bone is 6.0 and yields at
+## half rate, so it takes several more again.
 @export_range(0.2, 8.0, 0.05) var bite_damage: float = 2.6
-
-# --------------------------------------------------------------- growth ----
-@export_group("Growth")
-@export_range(0.0, 0.2, 0.005) var growth_per_food: float = 0.035
-@export_range(1.0, 4.0, 0.05) var max_scale: float = 2.2
 
 
 ## Drives the runtime tuning panel. Rows with "group" are section headers.
@@ -220,9 +216,6 @@ func copy_from(other: CreatureParams) -> void:
 	for row in SCHEMA:
 		if row.has("prop"):
 			set(row["prop"], other.get(row["prop"]))
-	# Not schema-listed, so copied explicitly.
-	growth_per_food = other.growth_per_food
-	max_scale = other.max_scale
 
 
 ## Applies a PRESETS entry on top of a fresh set of defaults.

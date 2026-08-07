@@ -56,12 +56,16 @@ func _process(delta: float) -> void:
 	)
 
 
+## `integrity` is the fraction of the creature's own tissue it still has, 1.0
+## intact. It reads out where the growth multiplier used to, because growth is
+## gone for now and biomass you are losing is the live number this prototype
+## actually has.
 func update_metrics(
 	state_name: String,
 	speed: int,
 	airborne: int,
 	food: int,
-	size_scale: float,
+	integrity: float,
 	segments: int
 ) -> void:
 	if _stats.is_empty():
@@ -70,7 +74,7 @@ func update_metrics(
 	_stats["SPEED"].text = "%03d PX/S" % speed
 	_stats["AIRBORNE"].text = "%d/4" % airborne
 	_stats["SEGMENTS"].text = str(segments)
-	_biomass_value.text = "×%.2f" % size_scale
+	_biomass_value.text = "%03d%%" % int(round(clampf(integrity, 0.0, 1.0) * 100.0))
 	_food_value.text = "FOOD %03d" % food
 	_stage_value.text = "STAGE %02d" % (int(floor(float(food) / 12.0)) + 1)
 	_biomass_meter.progress = float(food % 12) / 12.0
@@ -252,7 +256,7 @@ func _build_biomass_and_legend() -> void:
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	biomass_header.add_child(spacer)
-	_biomass_value = _label("×1.00", 10, _mono_tracked, INK)
+	_biomass_value = _label("100%", 10, _mono_tracked, INK)
 	biomass_header.add_child(_biomass_value)
 
 	_biomass_meter = BiomassMeter.new()

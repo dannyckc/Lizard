@@ -129,6 +129,21 @@ func step(delta: float, head_pos: Vector2, p: CreatureParams, speed_norm: float,
 	_compute_frames()
 
 
+## Moves one body point without giving it velocity.
+##
+## `prev` is shifted by the same amount for exactly the reason step 2 above
+## does it: Verlet reads velocity as `points - prev`, so an external correction
+## applied to `points` alone is handed to the integrator as real motion, carried
+## forward at `spine_damping` and re-injected next tick. A creature resting
+## against another would push itself off it and oscillate. Point 0 is refused
+## because it is placed, not simulated — the head is corrected at its source.
+func displace(i: int, offset: Vector2) -> void:
+	if i <= 0 or i >= points.size():
+		return
+	points[i] += offset
+	prev[i] += offset
+
+
 ## Local forward/perpendicular basis at every spine point. The body shape and
 ## the limb anchors are built entirely out of these, which is what keeps the
 ## silhouette readable while the chain bends.

@@ -1,5 +1,5 @@
 ## Focused first-slice test for mouse aim, anatomy queries, the layered tissue
-## lattice and the one-click/one-bite cooldown contract.
+## lattice, body-vs-body contacts and the one-click/one-bite cooldown contract.
 ##
 ##   /Applications/Godot.app/Contents/MacOS/Godot --headless \
 ##       --path . --script tests/CombatTest.gd
@@ -59,6 +59,7 @@ func _run_checks() -> void:
 	_check(limb_hit != null and limb_hit.kind == AnatomyState.LIMB,
 		"drawn limb capsule did not resolve to limb tissue")
 
+	_check_skeleton(target)
 	_check_tissue(target)
 
 	# Mouse aim turns without secretly applying forward throttle.
@@ -118,8 +119,50 @@ func _run_checks() -> void:
 	_check(target.anatomy.tissue.integrity() < before,
 		"a tick longer than the whole lunge stepped over its hit frame")
 
+	_check_contacts(player, target)
+
 	main.queue_free()
 	_finish()
+
+
+## The skeleton has to stay a frame rather than spread into a plate. If bone
+## covers most of the body there is no such thing as eating through it: every
+## wound bottoms out on the same pale surface, nothing ever opens onto the
+## ground, and the skull, ribs and vertebrae stop being distinguishable.
+func _check_skeleton(target: Creature) -> void:
+	var body: TissueGrid.Patch = target.anatomy.tissue.patch(TissueGrid.BODY_KEY)
+	var boned: int = 0
+	for cell in body.cells:
+		boned += body.bone[cell]
+	var covered: float = float(boned) / float(body.cells)
+	_check(covered < 0.5,
+		"bone covers %.0f%% of the body — that is a plate, not a skeleton" % (covered * 100.0))
+
+	# Bone per column, so the *shape* can be asserted rather than just the total.
+	# A column carrying only the vertebral column counts 1.
+	var per_column: PackedInt32Array = PackedInt32Array()
+	per_column.resize(body.cols)
+	for c in body.cols:
+		var n: int = 0
+		for r in body.rows:
+			n += body.bone[c * body.rows + r]
+		per_column[c] = n
+
+	# Every crossbar over the torso — girdle or rib — must have a flesh-only
+	# column either side of it, or the chest is one continuous shell and a bite
+	# can never land between two ribs.
+	var freestanding: int = 0
+	for c in range(TissueGrid.HEAD_COLS, TissueGrid.HEAD_COLS + TissueGrid.TORSO_COLS):
+		if per_column[c] > 1 and per_column[c - 1] == 1 and per_column[c + 1] == 1:
+			freestanding += 1
+	_check(freestanding >= 3,
+		"only %d free-standing crossbars over the torso — the ribcage is not a cage" % freestanding)
+
+	# Behind the hips there is nothing but vertebrae.
+	var tail_clear: bool = true
+	for c in range(TissueGrid.HEAD_COLS + TissueGrid.TORSO_COLS, body.cols):
+		tail_clear = tail_clear and per_column[c] == 1
+	_check(tail_clear, "the tail carries more than a vertebral column")
 
 
 ## The layered lattice: bites eat strictly outside-in, land only where they
@@ -162,6 +205,10 @@ func _check_tissue(target: Creature) -> void:
 	_check(body.hp[base + TissueGrid.MUSCLE] <= 0.0,
 		"repeated bites never ate through skin and muscle")
 	_check(shed.size() >= 2, "destroyed skin and muscle shed no edible chunks")
+	# Nothing under the flesh there, so eating it opens a hole clean through to
+	# the ground rather than bottoming out on a skeleton.
+	_check(body.hp[base + TissueGrid.BONE] <= 0.0,
+		"a cell with no skeleton under it still had bone left to stop the bite")
 
 	# Bone is not merely more tissue: it yields at half rate and stops the bite,
 	# so a skeletal cell has to outlast the flesh beside it by a wide margin.
@@ -193,6 +240,78 @@ func _check_tissue(target: Creature) -> void:
 		"restructuring the spine remapped or erased existing damage")
 
 
+## Bodies are solid. A creature driven at another is stopped by it, two that
+## start inside each other push apart without stretching either spine, and a
+## creature with nobody near it is not displaced by the pass at all.
+func _check_contacts(player: Creature, target: Creature) -> void:
+	# Held at full throttle straight into a stationary body for four seconds —
+	# twice as long as it takes to cover the gap.
+	player.reset(Vector2.ZERO, 0.0)
+	target.reset(Vector2(220.0, 0.0), PI)
+	var drive := MovementInput.Command.new()
+	drive.throttle = 1.0
+	for _i in 240:
+		player.command = drive
+		player._physics_process(TICK)
+		target._physics_process(TICK)
+	var nose_to_nose: float = player.head_pos.distance_to(target.head_pos)
+	_check(player.head_pos.x < target.head_pos.x,
+		"a creature driven at another walked straight through it")
+	_check(nose_to_nose < player.body.head_radius + target.body.head_radius + 6.0,
+		"the driven creature stopped %.0f px short of anything to stop it" % nose_to_nose)
+	_check(absf(player.speed) < player.params.move_speed * 0.25,
+		"a creature pressed against another kept its walking speed (%.0f px/s)" % player.speed)
+	_check(_deepest_overlap(player, target) < 1.0,
+		"a creature driven at another came to rest inside it")
+
+	# Laid down alongside each other, deeply interpenetrating: the worst case for
+	# a chain solve, since the correction has to survive the constraint pass that
+	# runs immediately after it.
+	player.reset(Vector2.ZERO, 0.0)
+	target.reset(Vector2(-70.0, 5.0), 0.0)
+	var overlap_before: float = _deepest_overlap(player, target)
+	_check(overlap_before > 10.0,
+		"the contact case did not start overlapping (%.1f px) — it proves nothing" % overlap_before)
+
+	for _i in 180:
+		player._physics_process(TICK)
+		target._physics_process(TICK)
+	var overlap_after: float = _deepest_overlap(player, target)
+	_check(overlap_after < 1.0,
+		"two creatures inside each other never separated (%.1f px still overlapping)" % overlap_after)
+	_check(_worst_segment_error(player) < 0.05 and _worst_segment_error(target) < 0.05,
+		"contact pushes stretched a spine past its segment lengths")
+
+	# Nothing near it, nothing done to it: the contact pass must be inert at range
+	# or every creature in the world would drift.
+	player.reset(Vector2.ZERO, 0.0)
+	target.reset(Vector2(900.0, 0.0), 0.0)
+	var undisturbed: Vector2 = player.head_pos
+	for _i in 30:
+		player._physics_process(TICK)
+		target._physics_process(TICK)
+	_check(player.head_pos.is_equal_approx(undisturbed),
+		"a creature with nobody near it was displaced by the contact pass")
+
+
+## Deepest interpenetration of `a`'s body into `b`'s, in pixels.
+func _deepest_overlap(a: Creature, b: Creature) -> float:
+	var worst: float = 0.0
+	var last: int = mini(a.body.last_index, a.spine.size() - 1)
+	for i in range(last + 1):
+		worst = maxf(worst, b.push_out_of_body(a.spine.points[i], a.body.widths[i]).length())
+	return worst
+
+
+func _worst_segment_error(creature: Creature) -> float:
+	var seg_len: float = creature.params.segment_length * creature.size_scale
+	var worst: float = 0.0
+	for i in range(1, creature.spine.size()):
+		var d: float = creature.spine.points[i - 1].distance_to(creature.spine.points[i])
+		worst = maxf(worst, absf(d - seg_len) / seg_len)
+	return worst
+
+
 func _nearest_cell(patch: TissueGrid.Patch, at: Vector2) -> int:
 	var best: int = 0
 	var best_distance: float = INF
@@ -211,7 +330,7 @@ func _check(condition: bool, message: String) -> void:
 
 func _finish() -> void:
 	if failures.is_empty():
-		print("combat slice OK — target, anatomy, layered tissue, lunge, aim and cooldown")
+		print("combat slice OK — target, anatomy, layered tissue, lunge, aim, cooldown and body contacts")
 		quit(0)
 	else:
 		for failure in failures:

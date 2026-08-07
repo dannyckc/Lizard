@@ -33,13 +33,16 @@ godot --path . --editor   # open the editor
 | `R` | reset |
 | mouse wheel | zoom |
 
-Eating the amber pellets grows the creature; every system scales off a single
-`size_scale`, so the body, limbs and stride all grow together.
+Eating the amber pellets counts toward `food_eaten` and nothing else for now —
+growth has been taken out until there is a real system for it. `size_scale` is
+still threaded through every system, pinned at 1.0, as the single value that
+system will drive when it lands.
 
 A stationary second creature starts ahead of the player as the first combat
 slice. A click throws the head forward in a lunge and the bite resolves at full
 extension, eating into a lattice of body cells layered skin over muscle over
 bone. Tissue that comes off falls into the world as meat and can be eaten.
+Bodies are solid, so the two creatures can be walked into rather than through.
 
 ## How it works
 
@@ -48,13 +51,13 @@ reason the thing is stable without a global solver — nothing downstream can ev
 invalidate something upstream.
 
 ```
-input ──▶ head position ──▶ spine ──▶ body shape ──▶ limbs
+input ──▶ head position ──▶ contacts ──▶ spine ──▶ body shape ──▶ limbs
 ```
 
 | File | Responsibility |
 |---|---|
 | [MovementInput.gd](scripts/MovementInput.gd) | devices → an abstract `{throttle, turn, sprint}` command |
-| [Creature.gd](scripts/creature/Creature.gd) | motion integration; drives the four systems below in order |
+| [Creature.gd](scripts/creature/Creature.gd) | motion integration and body-vs-body contacts; drives the four systems below in order |
 | [Constraints.gd](scripts/creature/Constraints.gd) | the two projection primitives everything is built from |
 | [Spine.gd](scripts/creature/Spine.gd) | the particle chain and its relaxation solve |
 | [BodyShape.gd](scripts/creature/BodyShape.gd) | outline, head, eyes, limb sockets, tail — all derived from the spine |
@@ -123,6 +126,38 @@ reach limit below leaves the foot: hard against the limit, chain nearly straight
 passes get the joint about seven eighths of the way out and leave the foot
 overshooting its target, which reads as the leg locking out rigid precisely when
 the creature is working hardest.
+
+### Bodies are solid
+
+Creatures collide with each other, against the same chain of variable-radius
+capsules the view fills — so what you cannot walk through is exactly what is
+drawn. Limbs are excluded: legs here are kinematic, they neither carry weight
+nor receive it, and colliding them would only jam two creatures apart at arm's
+length while their bodies still read as clear.
+
+Two decisions make it fit the one-way tick chain rather than fight it:
+
+- **Each creature resolves its own half of every contact and never writes to
+  another's state.** Both parties run the same pass, so a half each separates
+  them exactly once and the result cannot depend on the order the group is
+  ticked in. The bodies tested against are the ones solved last tick — a few
+  pixels of staleness at 60 Hz, and a positional correction is iterative anyway.
+- **Corrections are applied between the motion integration and the spine
+  solve**, so the silhouette, the limbs and the tissue lattice are all built
+  from the corrected pose within the same tick instead of a tick behind it. A
+  push on the head moves `head_pos`; a push on a body point shifts `points` and
+  `prev` together, which keeps it pure displacement for exactly the Verlet
+  reason the undulation does the same.
+
+Position alone is not enough, and the difference is not subtle. Corrected only
+positionally, a creature walking into another keeps walking: measured, it shoved
+a stationary creature 800 px across the world ahead of it at its own full speed,
+with no resistance at all — the correction simply could not outrun the
+throttle. So a contact also sheds the part of `speed` that is driving into it,
+scaled by how squarely it opposes travel. Head-on that stops the creature dead;
+along a flank it is nearly zero, so bodies slide past each other freely. Heading
+is deliberately untouched, so a creature pressed against another can always turn
+away and leave.
 
 ### Gait
 
@@ -198,12 +233,46 @@ until that layer is gone, and the colour of a cell is simply whatever is now
 uppermost in it. Each layer also darkens toward the one beneath as it thins, so
 a bite that has not broken through still shows how far it got.
 
-Bone is not just thicker. It exists only where there is a skeleton — skull,
-vertebrae down the midline, ribs on alternating columns over the chest, a core
-down each limb — it yields at half the incoming depth, and it *stops the bite*,
-since there is nothing behind it to reach. Flesh with no bone under it can be
-eaten clean through into a hole; a rib takes several more bites, and a bite
-landing between two ribs reaches the muscle they do not cover.
+Skin is a rind and muscle is where the fight is: at the default `bite_damage`
+one bite strips skin across nearly the full width of the jaws, three tear
+through the muscle under the middle of them, and seven get through bone. So a
+bite always *opens* the body, and a kill is always either repeated bites or a
+deeper one.
+
+#### The skeleton is a frame
+
+Bone is not just thicker, and it does not lie under the whole body. It exists
+only where there is an actual skeleton, laid out in body space:
+
+```
+......#.......#...........   ← only the girdles reach the flank
+####..#.#.#.#.#...........
+####..#.#.#.#.#...........
+##########################   ← vertebrae, one cell wide, snout to tail tip
+####..#.#.#.#.#...........
+####..#.#.#.#.#...........
+......#.......#...........
+^--^  ^-------^  ^-------^
+skull  ribcage   loin + tail
+```
+
+A skull filling the head cap but not the cheeks; a vertebral column one cell
+wide running the whole length; a full-width girdle under each pair of limb
+sockets; three ribs between them on alternating columns; a core down each limb.
+That is 36% of the body's cells, and the sparseness is the point. Bone yields at
+half the incoming depth and then *stops the bite*, since there is nothing behind
+it to reach — so wherever it runs, a wound bottoms out on a pale bar, and
+wherever it does not, flesh is all there is and eating through it **opens a hole
+clean to the ground**. Both states have to exist for either to read: if bone sat
+under most of the body every wound would end on the same surface and you could
+not tell a skeleton from a hole. The alternation is what makes the ribcage a
+cage rather than a shell — a bite landing between two ribs reaches the muscle
+they do not cover, and one landing on a rib does not.
+
+The layout is fixed in body space for the same reason the grid dimensions are:
+it has to name the same cells after the tuning panel has restructured the spine
+underneath it. The girdle columns therefore mirror the *default* `front_limb_t`
+and `rear_limb_t` rather than tracking them live.
 
 Two decisions carry the rest of it:
 
@@ -277,7 +346,7 @@ The parameters worth reaching for first:
 | Sprawling vs. tucked legs | `stance_width`, `stance_reach`, `arm/leg_length` |
 | Marching vs. loose legs | `diagonal_coupling` (1 = strict trot, 0 = independent) |
 | Wider / tighter leg sweep | `limb_swing_deg`, `limb_max_reach` |
-| Bites that bite deeper | `bite_damage` up (hit points of penetration: skin is 1.0, muscle 3.0, bone 6.0 at half rate) |
+| Bites that bite deeper | `bite_damage` up (hit points of penetration: skin is 0.4, muscle 5.5, bone 6.0 at half rate) |
 | Crisper, more legible wounds | `bite_radius` down |
 
 Four couplings are easy to trip over:
@@ -323,6 +392,18 @@ outlives both a procedural rebuild *and* a change of segment count; and the
 lunge extends, resolves at its apex, snaps its jaws shut, and leaves the
 creature standing exactly where it started.
 
+It also asserts the skeleton is still a *frame* — bone under less than half the
+body, at least three free-standing crossbars over the torso with flesh either
+side, nothing but vertebrae behind the hips — and that flesh with no bone under
+it is eaten clean through rather than bottoming out. Those are shape claims, not
+totals, so they catch a skeleton that has quietly spread into a plate.
+
+And it covers contacts: a creature driven at another for four seconds at full
+throttle ends up stopped against it rather than through it and with its speed
+collapsed; two creatures started deeply inside each other separate without
+either spine stretching; and a creature with nobody near it is not displaced at
+all. Each fails loudly if the contact pass is removed.
+
 `SimTest` drives each preset through idle → walk → turn → pivot → idle and
 asserts that segment lengths hold, bends stay inside the limit, IK bones keep
 their length, the gait never lifts both diagonals at once, a resting creature's
@@ -341,8 +422,17 @@ the only thing that sees that cause.
 
 Deliberate, in the interest of a stable and readable prototype:
 
-- No collision, no terrain, no physical ground contact — "lift" is faked as a
-  screen-space offset plus a shadow gap, since top-down has no vertical axis.
+- Creatures collide with each other, but nothing else does: no terrain, no
+  physical ground contact — "lift" is faked as a screen-space offset plus a
+  shadow gap, since top-down has no vertical axis.
+- Contacts have no mass behind them. Both parties resolve an equal half, so
+  nothing can shove anything: leaning on another creature nudges it at about
+  4 px/s, which is the accelerate-then-brake cycle leaking through rather than a
+  modelled push.
+- Growth is gone for now. Food is still eaten and counted, `size_scale` is still
+  threaded through every system, but nothing writes to it — it is left as the
+  hook a real growth system will drive rather than a multiplier to be
+  re-threaded through forty call sites later.
 - Feet are placed kinematically; they don't push the body. The body leads and
   the legs follow, not the other way round.
 - Because of that, a body moving faster than its legs can step is resolved by

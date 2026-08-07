@@ -5,8 +5,8 @@
 ## stored in world space. The lattice is therefore defined in *body* space — a
 ## fixed grid of (station, lateral) cells — and only its corner positions are
 ## re-derived each tick from the current pose. Damage lives in the body-space
-## cells, so it stays welded to the anatomy through bends, growth, and any
-## procedural rebuild.
+## cells, so it stays welded to the anatomy through any bend or procedural
+## rebuild.
 ##
 ## Grid dimensions are deliberately constants rather than functions of
 ## `segment_count`: the cell a bite destroyed has to still be the same cell
@@ -26,11 +26,17 @@ const MUSCLE: int = 1
 const BONE: int = 2
 const LAYERS: int = 3
 
-const SKIN_HP: float = 1.0
-## Thick enough that a bite at default depth cannot clear skin and muscle in one
-## go. Muscle is the only layer whose *state* is worth reading — skin is a thin
-## rind and bone is a wall — so it has to survive long enough to be seen.
-const MUSCLE_HP: float = 3.0
+## Skin is a rind, not armour: any bite worth the name strips it, and at the
+## default depth one strips it across nearly the whole width of the jaws. It
+## exists to be broken through, so what a bite reads as is *opening* the body
+## rather than scratching it.
+const SKIN_HP: float = 0.4
+## Muscle is where a fight actually happens. Deep enough that the default bite
+## takes three passes over the same spot to tear through — so a kill is either
+## several bites or a stronger one, never a graze. It is also the only layer
+## whose *state* is worth reading, skin being a rind and bone a wall, so it has
+## to survive long enough to be seen thinning.
+const MUSCLE_HP: float = 5.5
 ## Bone is not merely thicker — it also yields at BONE_YIELD of the incoming
 ## depth and then consumes the rest of the bite, so a skeleton takes roughly an
 ## order of magnitude more work to breach than the flesh laid over it.
@@ -57,12 +63,36 @@ const LIMB_COLS: int = LIMB_BONE_COLS + LIMB_FOOT_COLS
 const LIMB_ROWS: int = 3
 const LIMB_KEYS: Array[String] = ["FL", "FR", "RL", "RR"]
 
-## The skull fills the head cap out to here, as a fraction of half-width.
+# --- skeleton layout --------------------------------------------------------
+# The skeleton is a *frame*, not a plate: a skull, a vertebral column one cell
+# wide running neck to tail tip, a girdle under each pair of limb sockets, and
+# ribs on alternating columns between them. Everywhere else the body is flesh
+# over nothing, and a bite that gets through it opens a hole clean to the ground
+# — which is the whole point of laying the skeleton out sparsely. If bone sat
+# under most of the body there would be no such thing as eating through it, and
+# every wound would bottom out on the same pale surface.
+#
+# Like the grid dimensions, the layout is fixed in body space rather than read
+# from the params: it has to name the same cells after the tuning panel has
+# restructured the spine underneath it. The girdle columns therefore mirror the
+# *default* front_limb_t / rear_limb_t instead of tracking them live.
+
+## The skull fills the head cap out to here, as a fraction of half-width, so the
+## cheeks stay flesh and the head is not one solid disc of bone.
 const SKULL_SPAN: float = 0.72
 ## Ribs reach this far out from the midline, over the chest.
 const RIB_SPAN: float = 0.78
-## Fraction of the torso, measured back from the neck, that is ribcage.
-const RIBCAGE_END: float = 0.55
+## Girdles run the full width — they are what the limb bones hang off, so they
+## have to reach the flank the sockets sit on.
+const GIRDLE_SPAN: float = 0.95
+## Torso columns carrying the pectoral and pelvic girdles. TORSO_COLS spans the
+## whole clipped spine, so a column index reads directly as a fraction of body
+## length: 2/20 and 10/20 land within one cell of the default shoulder
+## (front_limb_t 0.16) and hip (rear_limb_t 0.46) sockets. Both are even, which
+## is what leaves a clear column of flesh between each girdle and the nearest
+## rib instead of the two fusing into one wide bar.
+const SHOULDER_COL: int = 2
+const PELVIS_COL: int = 10
 
 
 ## One chunk of tissue a bite knocked loose, in world space.
@@ -416,21 +446,29 @@ func _erode(p: Patch, cell: int, budget: float, at: Vector2, shed: Array) -> flo
 
 # -------------------------------------------------------------- skeletons ----
 
-## Skull over the head cap, vertebrae down the midline the whole length, and a
-## ribcage over the chest. Ribs sit on alternating columns so a bite landing
-## between two of them reaches the muscle underneath — which is what makes the
-## skeleton read as structure rather than as one solid plate.
+## Skull, vertebral column, two limb girdles and a ribcage between them — see
+## the skeleton layout constants above for why it is this sparse.
 func _body_has_bone(col: int, v: float) -> bool:
 	var lateral: float = absf(v)
+	# Skull: the head cap, with a margin of flesh left at the cheeks.
 	if col < HEAD_COLS:
 		return lateral <= SKULL_SPAN
-	# Vertebrae run the midline the whole way, neck to tail tip.
+	# Vertebrae run the midline the whole way, neck to tail tip. Only the row
+	# straddling the spine has its centre at zero, which is why BODY_ROWS is odd.
 	if lateral <= 1.0 / float(BODY_ROWS):
 		return true
 	var torso: int = col - HEAD_COLS
+	# Past the torso is tail: vertebrae and nothing else.
 	if torso >= TORSO_COLS:
 		return false
-	return float(torso) / float(TORSO_COLS) <= RIBCAGE_END \
+	# Girdles: full-width bars under the limb sockets, so the limb bones read as
+	# attached to the axial skeleton rather than floating alongside it.
+	if torso == SHOULDER_COL or torso == PELVIS_COL:
+		return lateral <= GIRDLE_SPAN
+	# Ribs: alternating columns between the girdles, so a bite landing in a gap
+	# reaches the muscle the ribs do not cover. That alternation is what makes
+	# the cage read as structure instead of as one plate over the chest.
+	return torso > SHOULDER_COL and torso < PELVIS_COL \
 		and torso % 2 == 0 and lateral <= RIB_SPAN
 
 
