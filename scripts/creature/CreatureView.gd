@@ -18,6 +18,7 @@ const COL_BODY_HEAD := INK
 const COL_BODY_TAIL := INK
 const COL_LIMB := INK
 const COL_EYE := PAPER
+const COL_FLESH := Color("a64b36")
 
 const COL_DBG_SPINE := Color(INK, 0.55)
 const COL_DBG_RANGE := Color(INK, 0.07)
@@ -57,12 +58,17 @@ func _draw() -> void:
 
 	for limb in creature.gait.limbs:
 		_draw_limb(limb)
+	_draw_limb_wounds(false)
 
 	_draw_body_fill(body, COL_BODY_HEAD, COL_BODY_TAIL, Vector2.ZERO)
 	_draw_head(body)
+	_draw_body_wounds()
 
 	for limb in creature.gait.limbs:
 		_draw_foot(limb)
+	_draw_limb_wounds(true)
+
+	_draw_bite_feedback()
 
 	if debug:
 		_draw_debug()
@@ -128,6 +134,74 @@ func _draw_foot(limb: Limb) -> void:
 	draw_circle(Vector2.ZERO, shadow_r, Color(INK, maxf(0.035, 0.13 - limb.lift * 0.004)))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	draw_circle(lifted, r, INK)
+
+
+# ---------------------------------------------------------------- wounds ----
+
+func _draw_body_wounds() -> void:
+	for wound in creature.anatomy.wounds:
+		if wound.kind == AnatomyState.LIMB:
+			continue
+		var pos: Vector2
+		if wound.kind == AnatomyState.HEAD:
+			var head: Spine.Frame = creature.body.head
+			pos = head.pos \
+				+ head.fwd * (wound.local_forward * creature.body.head_radius) \
+				+ head.perp * (wound.lateral * creature.body.head_radius)
+		else:
+			var frame: Spine.Frame = creature.spine.sample(wound.spine_t)
+			var idx: int = clampi(
+				int(round(wound.spine_t * float(creature.spine.size() - 1))),
+				0,
+				creature.body.widths.size() - 1
+			)
+			pos = frame.pos + frame.perp * (wound.lateral * creature.body.widths[idx])
+		_draw_wound_mark(pos, wound.radius * creature.size_scale)
+
+
+## Draws either bone wounds or foot wounds. Feet have to be cut after their
+## filled circles are rendered, while bone wounds belong below the torso.
+func _draw_limb_wounds(feet_only: bool) -> void:
+	for wound in creature.anatomy.wounds:
+		if wound.kind != AnatomyState.LIMB:
+			continue
+		var is_foot: bool = wound.limb_segment == 2
+		if is_foot != feet_only:
+			continue
+		var limb: Limb = _find_limb(wound.limb_key)
+		if limb == null:
+			continue
+		var pos: Vector2
+		if is_foot:
+			pos = limb.joints[2]
+		else:
+			pos = limb.joints[wound.limb_segment].lerp(
+				limb.joints[wound.limb_segment + 1], wound.limb_u)
+		_draw_wound_mark(pos, wound.radius * creature.size_scale)
+
+
+func _draw_wound_mark(pos: Vector2, radius: float) -> void:
+	var r: float = maxf(radius, 1.5)
+	# A restrained rust rim keeps the editorial palette while the paper centre
+	# reads as flesh that is genuinely absent rather than a decal on top.
+	draw_circle(pos, r, COL_FLESH)
+	draw_circle(pos, r * 0.72, PAPER)
+
+
+func _find_limb(key: String) -> Limb:
+	for limb in creature.gait.limbs:
+		if limb.key == key:
+			return limb
+	return null
+
+
+func _draw_bite_feedback() -> void:
+	if creature.bite_feedback_remaining <= 0.0:
+		return
+	var fade: float = clampf(creature.bite_feedback_remaining / 0.14, 0.0, 1.0)
+	var color: Color = Color(COL_FLESH if creature.bite_connected else INK, 0.18 + fade * 0.52)
+	draw_arc(creature.bite_feedback_center, creature.bite_feedback_radius,
+		0.0, TAU, 28, color, 1.6, true)
 
 
 # ----------------------------------------------------------------- debug ----

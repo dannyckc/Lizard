@@ -101,6 +101,17 @@ extends Resource
 @export_range(0.0, 160.0, 1.0) var turn_pivot: float = 46.0
 @export_range(1.0, 3.0, 0.05) var sprint_multiplier: float = 1.55
 
+# --------------------------------------------------------------- combat ----
+@export_group("Combat")
+## How far the centre of the bite reaches beyond the front of the head.
+@export_range(2.0, 60.0, 1.0) var bite_reach: float = 22.0
+## Radius of the circular anatomical query at the end of the jaws.
+@export_range(2.0, 50.0, 1.0) var bite_radius: float = 18.0
+## Minimum time between accepted bite clicks.
+@export_range(0.05, 2.0, 0.01) var bite_cooldown: float = 0.45
+## Fraction of a tissue region removed by one successful bite.
+@export_range(0.01, 1.0, 0.01) var bite_damage: float = 0.28
+
 # --------------------------------------------------------------- growth ----
 @export_group("Growth")
 @export_range(0.0, 0.2, 0.005) var growth_per_food: float = 0.035
@@ -157,6 +168,12 @@ const SCHEMA: Array = [
 	{"prop": "turn_responsiveness", "label": "Turn response", "min": 1.0, "max": 20.0, "step": 0.1},
 	{"prop": "turn_pivot", "label": "Turn pivot", "min": 0.0, "max": 160.0, "step": 1.0},
 	{"prop": "sprint_multiplier", "label": "Sprint multiplier", "min": 1.0, "max": 3.0, "step": 0.05},
+
+	{"group": "Combat"},
+	{"prop": "bite_reach", "label": "Bite reach", "min": 2.0, "max": 60.0, "step": 1.0},
+	{"prop": "bite_radius", "label": "Bite radius", "min": 2.0, "max": 50.0, "step": 1.0},
+	{"prop": "bite_cooldown", "label": "Bite cooldown", "min": 0.05, "max": 2.0, "step": 0.01},
+	{"prop": "bite_damage", "label": "Tissue damage", "min": 0.01, "max": 1.0, "step": 0.01},
 ]
 
 

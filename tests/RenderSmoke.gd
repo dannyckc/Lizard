@@ -41,6 +41,8 @@ func _process(_delta: float) -> bool:
 
 func _physics_process(_delta: float) -> bool:
 	ticks += 1
+	if ticks == 30:
+		_scar_target()  # exercise head, torso, bone and foot wound draw paths
 	if ticks == 120:
 		main.get_node("Creature").params.tail_enabled = false  # exercise tail clipping
 	if ticks >= 240:
@@ -52,3 +54,18 @@ func _physics_process(_delta: float) -> bool:
 			% [draws, ticks, c.speed, c.head_pos.length(), c.body.outline.size(), str(stepped)])
 		quit()
 	return false
+
+
+func _scar_target() -> void:
+	var target: Creature = main.get_node("TargetCreature")
+	var points: Array[Vector2] = [target.body.head.pos]
+	var torso_i: int = mini(4, target.body.last_index - 1)
+	points.append(target.spine.points[torso_i]
+		+ target.spine.perps[torso_i] * target.body.widths[torso_i])
+	var limb: Limb = target.gait.limbs[0]
+	points.append(limb.joints[1].lerp(limb.joints[2], 0.5))
+	points.append(limb.joints[2])
+	for point in points:
+		var hit: AnatomyState.Hit = target.query_bite(point, 1.0)
+		if hit != null:
+			target.apply_bite_hit(hit, 0.2, 7.0)

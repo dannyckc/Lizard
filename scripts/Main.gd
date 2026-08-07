@@ -15,6 +15,8 @@ const COL_GRID := Color(INK, 0.13)
 @onready var food_field: FoodField = $FoodField
 @onready var creature: Creature = $Creature
 @onready var view: CreatureView = $Creature/View
+@onready var target_creature: Creature = $TargetCreature
+@onready var target_view: CreatureView = $TargetCreature/View
 @onready var camera: Camera2D = $Camera2D
 
 var input := MovementInput.new()
@@ -26,6 +28,7 @@ func _ready() -> void:
 	camera.make_current()
 	camera.zoom = Vector2(DEFAULT_ZOOM, DEFAULT_ZOOM)
 	camera.global_position = creature.head_pos
+	creature.bite_started.connect(_on_creature_bite_started)
 	food_field.refresh(creature.head_pos)
 	_build_ui()
 
@@ -111,6 +114,8 @@ func _update_hud() -> void:
 		state = "turning"
 	if creature.command.sprint and creature.speed_norm > 0.7:
 		state = "running"
+	if creature.bite_feedback_remaining > 0.0:
+		state = "biting"
 
 	hud.update_metrics(
 		state,
@@ -129,8 +134,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				hud.toggle_panel()
 			KEY_F2:
 				view.debug = not view.debug
+				target_view.debug = view.debug
 			KEY_R:
 				creature.reset()
+				target_creature.reset(target_creature.spawn_position, target_creature.spawn_heading)
 				food_field.pellets.clear()
 				food_field.refresh(creature.head_pos)
 				camera.global_position = creature.head_pos
@@ -140,6 +147,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_zoom_by(1.1)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_zoom_by(1.0 / 1.1)
+		elif event.button_index == MOUSE_BUTTON_LEFT:
+			creature.request_bite(get_global_mouse_position())
 
 
 func _zoom_by(factor: float) -> void:
@@ -151,6 +160,33 @@ func _on_species_selected(_preset_name: String) -> void:
 	# Rebuild immediately so structural changes (especially segment count) feel
 	# as responsive as the sliders and tabs look.
 	creature.rebuild()
+
+
+## Resolves one circular bite against every current procedural creature, then
+## damages only the deepest anatomical overlap. This is intentionally owned by
+## the world rather than either participant so target update order cannot cause
+## multiple hits from one click as more creatures are introduced.
+func _on_creature_bite_started(center: Vector2, radius: float) -> void:
+	var best_target: Creature = null
+	var best_hit: AnatomyState.Hit = null
+	for node in get_tree().get_nodes_in_group("creatures"):
+		var candidate := node as Creature
+		if candidate == null or candidate == creature:
+			continue
+		var hit: AnatomyState.Hit = candidate.query_bite(center, radius)
+		if hit != null and (best_hit == null or hit.score < best_hit.score):
+			best_target = candidate
+			best_hit = hit
+
+	var connected: bool = false
+	if best_target != null:
+		var removed: float = best_target.apply_bite_hit(
+			best_hit,
+			creature.params.bite_damage,
+			radius * 0.58
+		)
+		connected = removed > 0.0
+	creature.resolve_bite(connected)
 
 
 ## Sparse one-pixel registration dots from the design's specimen-sheet field.

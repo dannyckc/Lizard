@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=8 format=3]
 
 [ext_resource type="Script" path="res://scripts/Main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/FoodField.gd" id="2_food"]
@@ -7,6 +7,9 @@
 [ext_resource type="Script" path="res://scripts/creature/CreatureParams.gd" id="5_params"]
 
 [sub_resource type="Resource" id="Resource_params"]
+script = ExtResource("5_params")
+
+[sub_resource type="Resource" id="Resource_target_params"]
 script = ExtResource("5_params")
 
 [node name="Main" type="Node2D"]
@@ -20,6 +23,15 @@ script = ExtResource("3_creature")
 params = SubResource("Resource_params")
 
 [node name="View" type="Node2D" parent="Creature"]
+script = ExtResource("4_view")
+
+[node name="TargetCreature" type="Node2D" parent="."]
+script = ExtResource("3_creature")
+params = SubResource("Resource_target_params")
+spawn_position = Vector2(360, 0)
+spawn_heading = 3.14159265
+
+[node name="View" type="Node2D" parent="TargetCreature"]
 script = ExtResource("4_view")
 
 [node name="Camera2D" type="Camera2D" parent="."]

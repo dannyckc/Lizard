@@ -25,7 +25,8 @@ godot --path . --editor   # open the editor
 | | |
 |---|---|
 | `W` `A` `S` `D` / arrows | move and turn |
-| hold left mouse | steer the head toward the cursor |
+| move mouse | aim the head toward the cursor |
+| left click | bite (anatomical hit + cooldown) |
 | `Shift` | sprint |
 | `F1` | show/hide the tuning panel |
 | `F2` | toggle debug draw |
@@ -34,6 +35,11 @@ godot --path . --editor   # open the editor
 
 Eating the amber pellets grows the creature; every system scales off a single
 `size_scale`, so the body, limbs and stride all grow together.
+
+A stationary second creature starts ahead of the player as the first combat
+slice. Bites resolve against its generated head, torso sections, limb bones and
+feet. Successful hits remove persistent regional tissue and leave paper-cut
+wounds with a rust-coloured flesh rim that remain bound to the moving anatomy.
 
 ## How it works
 
@@ -52,6 +58,7 @@ input ──▶ head position ──▶ spine ──▶ body shape ──▶ lim
 | [Constraints.gd](scripts/creature/Constraints.gd) | the two projection primitives everything is built from |
 | [Spine.gd](scripts/creature/Spine.gd) | the particle chain and its relaxation solve |
 | [BodyShape.gd](scripts/creature/BodyShape.gd) | outline, head, eyes, limb sockets, tail — all derived from the spine |
+| [AnatomyState.gd](scripts/creature/AnatomyState.gd) | anatomical hit-testing, regional tissue health and pose-bound wounds |
 | [Fabrik.gd](scripts/creature/Fabrik.gd) | generic FABRIK chain solver |
 | [Limb.gd](scripts/creature/Limb.gd) | one arm/leg: bones + step-cycle state |
 | [Gait.gd](scripts/creature/Gait.gd) | where feet want to be, when they pick up, where they land |
@@ -227,12 +234,13 @@ defaults (6 and 6) are already past the point of visible improvement.
 
 ## Tests
 
-Two headless checks, both worth re-running after retuning:
+Four headless checks cover simulation, rendering, UI and combat:
 
 ```sh
 godot --headless --path . --script tests/SimTest.gd      # simulation invariants
 godot --headless --path . --script tests/RenderSmoke.gd  # every draw path
 godot --headless --path . --script tests/UIInteractionTest.gd # HUD interactions
+godot --headless --path . --script tests/CombatTest.gd    # bite/anatomy slice
 ```
 
 `SimTest` drives each preset through idle → walk → turn → pivot → idle and
