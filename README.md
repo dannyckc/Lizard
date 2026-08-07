@@ -230,14 +230,15 @@ Damage lives in a lattice of body cells — 32 x 7 over the body, 10 x 3 per lim
 you are looking down through them: skin over muscle over bone. A bite spends a
 penetration budget strictly outside-in, so nothing under a layer can be touched
 until that layer is gone, and the colour of a cell is simply whatever is now
-uppermost in it. Each layer also darkens toward the one beneath as it thins, so
-a bite that has not broken through still shows how far it got.
+uppermost in it. Skin holds its dark surface as a continuous membrane until it
+tears; exposed muscle darkens as it is depleted and carries close longitudinal
+fibres so it reads as dense tissue rather than a coloured tile.
 
 The lattice is not an overlay on the creature — it *is* the creature. The body
 is drawn cell by cell rather than as a silhouette with the wounds painted over
 it, which is the whole reason a wound can be a hole (see below).
 
-Skin is a rind and muscle is where the fight is: at the default `bite_damage`
+Skin is a thin, stretchy rind and muscle is where the fight is: at the default `bite_damage`
 one bite strips skin across nearly the full width of the jaws, three tear
 through the muscle under the middle of them, and seven get through bone. So a
 bite always *opens* the body, and a kill is always either repeated bites or a
@@ -309,9 +310,9 @@ creature pays nothing for any of it.
 
 Drawing the body from its cells has one cost worth naming: the lattice is the
 outline now, so the snout and tail caps need enough columns to read as round
-without a `draw_circle` under them, and the interior seams have to skip the
-columns crowded against a cap's tip — eight columns share the first two pixels
-of the snout, and every seam in that stretch lands on the last one.
+without a `draw_circle` under them. The lattice remains simulation data rather
+than surface texture: visible grid seams are omitted, skin gets uninterrupted
+tension lines, and muscle gets its own denser grain.
 
 Two decisions carry the rest of it:
 
@@ -327,10 +328,13 @@ Two decisions carry the rest of it:
   one bite straddle several structures — jaws closing on a flank catch the leg
   over it, which a query routed through a single hit region could not express.
 
-Destroyed skin and muscle come off as chunks, which fly, settle, and stay as
-meat until something eats them. A creature never eats its own: without that
-rule, jaws closing on a victim's head shed straight into the victim's own mouth
-volume, and being bitten feeds you.
+Destroyed skin and muscle come off as chunks. Adjacent destroyed cells from one
+tear are joined by layer and anatomical patch before they enter the world, so a
+bite produces a few cohesive pieces rather than a spray of lattice cells. Their
+area becomes inertia: broad pieces move less, tumble slowly, settle close to the
+wound, retain their tissue grain, and stay as meat until something eats them. A
+creature never eats its own: without that rule, a victim's shed tissue would
+land in its own mouth volume and being bitten would feed it.
 
 #### Keeping it cheap
 
@@ -347,22 +351,22 @@ shadows cost three draw calls and no geometry at all. A whole creature — torso
 four limbs, every shadow — is **0.29 ms** of mesh building, and it gets cheaper
 as the creature is eaten because destroyed cells are skipped.
 
-The cells, and the loose chunks, go out as single indexed triangle arrays rather
+The cells, and the loose organic chunks, go out as single indexed triangle arrays rather
 than a polygon apiece. That one is worth stating with numbers, because it is not
 a micro-optimisation: Godot issues one canvas command per `draw_colored_polygon`,
 and a chewed pair of creatures with a saturated scrap field reached a few hundred
 a frame. Measured in a 1280x760 window, that alone cost **5.5 ms/frame** and took
 the scene from 120 to 72 fps. Drawn as cells the whole creature is about twenty
-commands, shadows included. The interior seams are one `draw_multiline` for the
-same reason.
+commands, shadows included. Skin tension and muscle fibres are each one
+`draw_multiline` for the same reason.
 
 ### The lunge
 
 A click does not resolve a bite. It starts an animation with a hit frame: a
-0.07 s wind-up that rocks the head back and opens the jaws, a 0.08 s throw, and
-a 0.18 s settle — and the bite resolves at full extension, against the pose the
-jaws actually arrived at. The gape snaps shut on that same frame, so the
-animation states exactly when the damage happened.
+0.07 s wind-up that rocks the head back, a 0.08 s forward throw, and a 0.18 s
+settle. The bite resolves at full extension, against the pose the snout actually
+reached. There is no sideways mouth wedge in the top-down silhouette; a brief
+world-space **Bite** cue marks the exact impact point instead.
 
 The throw is fed to **the spine's head point, not to `head_pos`**. That is the
 load-bearing detail, twice over. The body has to follow it through the
@@ -435,8 +439,9 @@ godot --headless --path . --script tests/CombatTest.gd    # bite/anatomy slice
 outside-in and never touch a layer through an intact one; they damage only where
 they land; bone survives several times longer than the flesh beside it; damage
 outlives both a procedural rebuild *and* a change of segment count; and the
-lunge extends, resolves at its apex, snaps its jaws shut, and leaves the
-creature standing exactly where it started.
+lunge extends, resolves at its apex, shows its Bite cue only on impact, and
+leaves the creature standing exactly where it started. It also checks that shed
+tissue is aggregated into weighty pieces rather than cell-sized particles.
 
 It also asserts the skeleton is still a *frame* — bone under less than half the
 body, at least three free-standing crossbars over the torso with flesh either
@@ -504,7 +509,7 @@ Deliberate, in the interest of a stable and readable prototype:
   deflects it sideways.
 - The default `bite_radius` is comparable to the body's half-width, so a bite
   near the midline tends to take the full width of the body and wounds read as
-  bands. Narrower jaws make the cell structure more legible.
+  bands. Narrower bites produce more localised wounds.
 - The body fill is drawn as a strip of quads between spine cross-sections, so a
   very sharp bend can overlap slightly on the inside of the curve. It is
   invisible at opaque fill and avoids depending on concave polygon

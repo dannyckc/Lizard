@@ -79,7 +79,7 @@ func _run_checks() -> void:
 	player._physics_process(TICK)
 	_check(player.is_lunging(), "an accepted bite did not start a lunge")
 	_check(player.lunge_offset < 0.0, "the lunge skipped its wind-up")
-	_check(player.jaw_open() > 0.0, "the jaws never opened")
+	_check(not main.bite_cue.is_showing(), "the Bite cue appeared before impact")
 	_check(is_equal_approx(target.anatomy.tissue.integrity(), 1.0),
 		"the bite landed before the lunge had extended")
 
@@ -93,7 +93,7 @@ func _run_checks() -> void:
 		"the lunge never resolved into a bite on the nearby target")
 	_check(extension > player.params.bite_reach * 0.5,
 		"the head was never thrown appreciably forward (%.1f px)" % extension)
-	_check(is_equal_approx(player.jaw_open(), 0.0), "the jaws did not snap shut on impact")
+	_check(main.bite_cue.is_showing(), "the bite impact did not show its world-space Bite cue")
 	# The whole reason the throw is fed to the spine and not to the motion
 	# state: a strike must not walk the creature forward by its own reach.
 	_check(player.head_pos.is_equal_approx(stand),
@@ -292,6 +292,27 @@ func _check_tissue(target: Creature) -> void:
 	var base: int = cell * TissueGrid.LAYERS
 	_check(body.bone[cell] == 0, "the flank sample sits over bone, not flesh")
 
+	# The damage solver stays cell-precise, but neighbouring cells destroyed by
+	# one tear must leave as fewer, larger pieces rather than one scrap each.
+	var cohort := TissueGrid.new()
+	cohort.update(target)
+	var cohort_shed: Array = []
+	cohort.bite(flank, 12.0, 8.0, cohort_shed)
+	var cohort_body: TissueGrid.Patch = cohort.patch(TissueGrid.BODY_KEY)
+	var destroyed_layers: int = 0
+	for cohort_cell in cohort_body.cells:
+		var cohort_base: int = cohort_cell * TissueGrid.LAYERS
+		destroyed_layers += 1 if cohort_body.hp[cohort_base + TissueGrid.SKIN] <= 0.0 else 0
+		destroyed_layers += 1 if cohort_body.hp[cohort_base + TissueGrid.MUSCLE] <= 0.0 else 0
+	_check(destroyed_layers > cohort_shed.size(),
+		"one bite still emitted one loose scrap per destroyed tissue cell")
+	var reference_extent: float = cohort_body.extent_of(_nearest_cell(cohort_body, flank))
+	var largest_piece: float = 0.0
+	for piece in cohort_shed:
+		largest_piece = maxf(largest_piece, piece.size)
+	_check(largest_piece > reference_extent * 1.25,
+		"adjacent destroyed cells did not form a visibly larger piece")
+
 	var elsewhere: int = _nearest_cell(body, target.body.head.pos)
 	var elsewhere_before: float = body.hp[elsewhere * TissueGrid.LAYERS]
 
@@ -312,6 +333,10 @@ func _check_tissue(target: Creature) -> void:
 	_check(body.hp[base + TissueGrid.MUSCLE] <= 0.0,
 		"repeated bites never ate through skin and muscle")
 	_check(shed.size() >= 2, "destroyed skin and muscle shed no edible chunks")
+	var found_weighty_piece: bool = false
+	for piece in shed:
+		found_weighty_piece = found_weighty_piece or (piece.size > 3.0 and piece.mass > 9.0)
+	_check(found_weighty_piece, "shed tissue still consisted only of cell-sized pixels")
 	# Nothing under the flesh there, so eating it opens a hole clean through to
 	# the ground rather than bottoming out on a skeleton.
 	_check(body.hp[base + TissueGrid.BONE] <= 0.0,

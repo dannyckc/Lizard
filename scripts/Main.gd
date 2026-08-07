@@ -18,6 +18,7 @@ const COL_GRID := Color(INK, 0.13)
 @onready var view: CreatureView = $Creature/View
 @onready var target_creature: Creature = $TargetCreature
 @onready var target_view: CreatureView = $TargetCreature/View
+@onready var bite_cue: BiteCue = $BiteCue
 @onready var camera: Camera2D = $Camera2D
 
 var input := MovementInput.new()
@@ -187,6 +188,7 @@ func _on_species_selected(_preset_name: String) -> void:
 ## than by either participant so creature update order cannot turn one strike
 ## into several hits as more creatures are introduced.
 func _on_creature_bite_started(center: Vector2, radius: float) -> void:
+	bite_cue.show_at(center)
 	var best_target: Creature = null
 	var best_hit: AnatomyState.Hit = null
 	for node in get_tree().get_nodes_in_group("creatures"):

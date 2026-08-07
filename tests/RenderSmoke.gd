@@ -1,6 +1,6 @@
 ## Boots the real Main scene headless and walks the creature for a few seconds
-## with the debug overlay on, so every _draw() path (body fill, outline, limbs,
-## planted + stepping feet, debug wedges, HUD, grid) actually executes. Catches
+## with the debug overlay on, so every _draw() path (body fill, tissue grain,
+## limbs, planted + stepping feet, Bite cue, HUD, grid) actually executes. Catches
 ## bad draw arguments and scene wiring mistakes that a pure-simulation test
 ## cannot.
 ##
@@ -64,6 +64,7 @@ func _physics_process(_delta: float) -> bool:
 ## enough tissue to exercise the scrap field's spawn, settle and draw paths.
 func _scar_target() -> void:
 	var target: Creature = main.get_node("TargetCreature")
+	main.get_node("BiteCue").show_at(target.body.head.pos)
 	var points: Array[Vector2] = [target.body.head.pos]
 	var torso_i: int = mini(4, target.body.last_index - 1)
 	points.append(target.spine.points[torso_i]

@@ -119,6 +119,18 @@ class Shed extends RefCounted:
 	var pos: Vector2 = Vector2.ZERO
 	var layer: int = 0
 	var size: float = 3.0
+	## Approximate plan-view area. Loose tissue uses this as inertia so a broad
+	## torn flap lands with weight instead of moving like a single cell.
+	var mass: float = 9.0
+	## Major-axis direction and elongation retained from the tissue it occupied.
+	## The world renderer uses these to make an organic piece rather than a tile.
+	var angle: float = 0.0
+	var aspect: float = 1.2
+	## Temporary topology carried only until one bite has joined neighbouring
+	## destroyed cells into cohesive pieces.
+	var patch_key: String = ""
+	var col: int = 0
+	var row: int = 0
 
 
 ## A rectangular cell lattice over one anatomical structure.
@@ -271,6 +283,15 @@ class Patch extends RefCounted:
 		var i: int = (cell / rows) * _stride + (cell % rows)
 		return (verts[i].distance_to(verts[i + _stride + 1])
 			+ verts[i + 1].distance_to(verts[i + _stride])) * 0.25
+
+	## Long axis of a cell in the solved pose. A severed piece keeps this grain,
+	## which is especially important for muscle: it should read as fibres torn
+	## across a body, not as a square ejected from a grid.
+	func angle_of(cell: int) -> float:
+		var i: int = (cell / rows) * _stride + (cell % rows)
+		var a: Vector2 = (verts[i] + verts[i + 1]) * 0.5
+		var b: Vector2 = (verts[i + _stride] + verts[i + _stride + 1]) * 0.5
+		return (b - a).angle()
 
 	## Fills `out` with the cell's four corners, wound consistently. Takes the
 	## buffer rather than returning one so a redraw allocates nothing.
@@ -468,6 +489,10 @@ func bite(center: Vector2, radius: float, depth: float, shed: Array) -> float:
 	if r2 <= 0.0 or depth <= 0.0:
 		return 0.0
 	var removed: float = 0.0
+	# Destruction is still resolved at cell precision, but loose tissue is not.
+	# Hold the cells from this strike locally and join adjacent ones below before
+	# the world ever sees them.
+	var loose: Array = []
 	for key in patches:
 		var p: Patch = patches[key]
 		if not p.live:
@@ -483,7 +508,8 @@ func bite(center: Vector2, radius: float, depth: float, shed: Array) -> float:
 			# Rounded falloff: full depth at the centre of the jaws tapering to
 			# a graze at the rim, which is what makes damage read as landing
 			# where the bite landed rather than as a uniform stamp.
-			removed += _erode(p, cell, depth * (1.0 - d2 / r2), at, shed)
+			removed += _erode(p, cell, depth * (1.0 - d2 / r2), at, loose)
+	_coalesce_shed(loose, shed)
 	return removed
 
 
@@ -511,6 +537,11 @@ func _erode(p: Patch, cell: int, budget: float, at: Vector2, shed: Array) -> flo
 			chunk.pos = at
 			chunk.layer = layer
 			chunk.size = maxf(p.extent_of(cell) * 0.9, 1.5)
+			chunk.mass = chunk.size * chunk.size
+			chunk.angle = p.angle_of(cell)
+			chunk.patch_key = p.key
+			chunk.col = cell / p.rows
+			chunk.row = cell % p.rows
 			shed.append(chunk)
 
 	if removed <= 0.0:
@@ -522,6 +553,61 @@ func _erode(p: Patch, cell: int, budget: float, at: Vector2, shed: Array) -> flo
 	if p.hp[base + SKIN] <= 0.0 and p.hp[base + MUSCLE] <= 0.0 and p.hp[base + BONE] <= 0.0:
 		p.retire(cell)
 	return removed
+
+
+## Joins orthogonally adjacent cells from the same tissue layer and anatomical
+## patch into one torn piece. The lattice remains useful collision/damage data,
+## but it no longer dictates the scale of the visible meat.
+func _coalesce_shed(loose: Array, shed: Array) -> void:
+	if loose.is_empty():
+		return
+	var joined := PackedByteArray()
+	joined.resize(loose.size())
+	joined.fill(0)
+
+	for start in loose.size():
+		if joined[start] != 0:
+			continue
+		var seed: Shed = loose[start]
+		var pending: Array[int] = [start]
+		joined[start] = 1
+		var members: Array[int] = []
+		while not pending.is_empty():
+			var current: int = pending.pop_back()
+			members.append(current)
+			var a: Shed = loose[current]
+			for candidate in loose.size():
+				if joined[candidate] != 0:
+					continue
+				var b: Shed = loose[candidate]
+				if b.layer != seed.layer or b.patch_key != seed.patch_key:
+					continue
+				if absi(a.col - b.col) + absi(a.row - b.row) != 1:
+					continue
+				joined[candidate] = 1
+				pending.append(candidate)
+
+		var piece := Shed.new()
+		piece.layer = seed.layer
+		piece.patch_key = seed.patch_key
+		var weighted_pos := Vector2.ZERO
+		var grain := Vector2.ZERO
+		var area: float = 0.0
+		for member in members:
+			var cell_piece: Shed = loose[member]
+			area += cell_piece.mass
+			weighted_pos += cell_piece.pos * cell_piece.mass
+			# Double-angle averaging treats an axis as an axis: left-to-right and
+			# right-to-left fibres are the same grain rather than opposites.
+			grain += Vector2(cos(cell_piece.angle * 2.0), sin(cell_piece.angle * 2.0)) \
+				* cell_piece.mass
+		piece.mass = area
+		piece.pos = weighted_pos / maxf(area, 0.001)
+		piece.angle = grain.angle() * 0.5 if grain.length_squared() > 0.0001 else seed.angle
+		piece.size = maxf(sqrt(area) * 1.08, seed.size)
+		var count_stretch: float = sqrt(float(members.size())) * 0.12
+		piece.aspect = clampf((1.45 if piece.layer == SKIN else 1.25) + count_stretch, 1.2, 2.15)
+		shed.append(piece)
 
 
 # ----------------------------------------------------------------- voids ----

@@ -14,18 +14,20 @@
 class_name ScrapField
 extends Node2D
 
-## Hard ceiling on live chunks. A sustained fight sheds faster than anything
-## eats, so the oldest scraps are dropped rather than letting the array — and
-## the per-frame integration over it — grow without bound.
-const MAX_SCRAPS: int = 160
+## Hard ceiling on live chunks. Cells from one tear are coalesced before they
+## arrive here, so this is a ceiling on pieces of meat rather than pixels.
+const MAX_SCRAPS: int = 96
 ## Velocity retained per second while a chunk is still flying.
-const DRAG: float = 5.5
+const DRAG: float = 8.5
 ## Below this speed a chunk is considered to have come to rest, and stops
 ## costing anything but a draw.
-const SETTLE_SPEED: float = 8.0
+const SETTLE_SPEED: float = 5.0
 
-const COL_SKIN := Color("2b241c")
+const BLOB_VERTS: int = 10
+const COL_SKIN := Color("211c17")
 const COL_MUSCLE := Color("9c3b26")
+const COL_MUSCLE_DEEP := Color("5f2114")
+const COL_SHADOW := Color("14140f", 0.075)
 
 
 class Scrap extends RefCounted:
@@ -34,8 +36,13 @@ class Scrap extends RefCounted:
 	var angle: float = 0.0
 	var spin: float = 0.0
 	var size: float = 3.0
+	var mass: float = 9.0
+	var aspect: float = 1.2
 	var layer: int = 0
 	var settled: bool = false
+	## Stable irregular radii for the organic outline. Generated once, never per
+	## draw, so a resting piece keeps its shape.
+	var shape := PackedFloat32Array()
 	## Instance id of the creature this came off, held as an id rather than a
 	## reference so a scrap can outlive its former owner.
 	var source_id: int = 0
@@ -48,6 +55,7 @@ var _rng := RandomNumberGenerator.new()
 var _points := PackedVector2Array()
 var _colors := PackedColorArray()
 var _indices := PackedInt32Array()
+var _flat := PackedColorArray([COL_SHADOW])
 
 
 func _ready() -> void:
@@ -55,8 +63,9 @@ func _ready() -> void:
 	z_index = 2  # above the food pellets, below the creatures
 
 
-## Throws a bite's worth of shed tissue outward from `origin` — the jaw that
-## took it — so the spray reads as having been torn out in that direction.
+## Pulls a bite's worth of shed tissue a short distance outward from `origin`.
+## Broad pieces carry more inertia and barely tumble; this is a heavy tear, not
+## a particle spray.
 ## `source` is the creature it came off, which is the one creature that may not
 ## then eat it.
 func scatter(chunks: Array, origin: Vector2, source: Node) -> void:
@@ -65,14 +74,23 @@ func scatter(chunks: Array, origin: Vector2, source: Node) -> void:
 		var scrap := Scrap.new()
 		scrap.pos = chunk.pos
 		scrap.size = chunk.size
+		scrap.mass = chunk.mass
+		scrap.aspect = chunk.aspect
 		scrap.layer = chunk.layer
 		scrap.source_id = source_id
 		var away: Vector2 = chunk.pos - origin
 		var dir: Vector2 = away.normalized() if away.length_squared() > 1.0 \
 			else Vector2.RIGHT.rotated(_rng.randf() * TAU)
-		scrap.vel = dir.rotated(_rng.randfn(0.0, 0.45)) * _rng.randf_range(60.0, 190.0)
-		scrap.angle = _rng.randf() * TAU
-		scrap.spin = _rng.randfn(0.0, 7.0)
+		var weight: float = clampf(8.0 / maxf(scrap.size, 8.0), 0.34, 1.0)
+		var impulse: float = _rng.randf_range(42.0, 88.0) * weight
+		if scrap.layer == TissueGrid.MUSCLE:
+			impulse *= 0.78
+		scrap.vel = dir.rotated(_rng.randfn(0.0, 0.18)) * impulse
+		scrap.angle = chunk.angle + _rng.randfn(0.0, 0.16)
+		scrap.spin = _rng.randfn(0.0, 2.1) * weight
+		scrap.shape.resize(BLOB_VERTS)
+		for k in BLOB_VERTS:
+			scrap.shape[k] = _rng.randf_range(0.86, 1.10)
 		scraps.append(scrap)
 
 	var excess: int = scraps.size() - MAX_SCRAPS
@@ -123,38 +141,57 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 
-## Drawn as rotated squares: the same cell the chunk was torn out of, now loose.
-##
-## Emitted as one indexed triangle array, for the reason spelled out in
-## CreatureView._build — a full field is 160 chunks, and 160 separate
-## polygon commands a frame is a measurable slice of the budget on its own.
+## Drawn as weighty irregular blobs whose area matches the joined tissue cells.
+## A subtle shadow anchors each piece and muscle retains visible longitudinal
+## grain after it is severed.
 func _draw() -> void:
 	var count: int = scraps.size()
 	if count == 0:
 		return
-	if _points.size() != count * 4:
-		_points.resize(count * 4)
-		_colors.resize(count * 4)
-		_indices.resize(count * 6)
+	var points_per_blob: int = BLOB_VERTS + 1  # centre + perimeter
+	if _points.size() != count * points_per_blob:
+		_points.resize(count * points_per_blob)
+		_colors.resize(count * points_per_blob)
+		_indices.resize(count * BLOB_VERTS * 3)
 	var v: int = 0
 	var t: int = 0
 	for scrap in scraps:
-		var u: Vector2 = Vector2.RIGHT.rotated(scrap.angle) * (scrap.size * 0.5)
-		var w := Vector2(-u.y, u.x)
-		_points[v] = scrap.pos - u - w
-		_points[v + 1] = scrap.pos + u - w
-		_points[v + 2] = scrap.pos + u + w
-		_points[v + 3] = scrap.pos - u + w
+		var major: float = sqrt(scrap.aspect)
+		var minor: float = 1.0 / major
+		var radius: float = scrap.size * 0.5
 		var color: Color = COL_SKIN if scrap.layer == TissueGrid.SKIN else COL_MUSCLE
-		for k in 4:
-			_colors[v + k] = color
-		_indices[t] = v
-		_indices[t + 1] = v + 1
-		_indices[t + 2] = v + 2
-		_indices[t + 3] = v
-		_indices[t + 4] = v + 2
-		_indices[t + 5] = v + 3
-		v += 4
-		t += 6
+		_points[v] = scrap.pos
+		_colors[v] = color
+		for k in BLOB_VERTS:
+			var theta: float = TAU * float(k) / float(BLOB_VERTS)
+			var local := Vector2(cos(theta) * major, sin(theta) * minor) \
+				* (radius * scrap.shape[k])
+			_points[v + k + 1] = scrap.pos + local.rotated(scrap.angle)
+			_colors[v + k + 1] = color
+		for k in BLOB_VERTS:
+			_indices[t] = v
+			_indices[t + 1] = v + k + 1
+			_indices[t + 2] = v + ((k + 1) % BLOB_VERTS) + 1
+			t += 3
+		v += points_per_blob
+
+	draw_set_transform(Vector2(0.0, 2.5), 0.0, Vector2.ONE)
+	RenderingServer.canvas_item_add_triangle_array(
+		get_canvas_item(), _indices, _points, _flat)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	RenderingServer.canvas_item_add_triangle_array(
 		get_canvas_item(), _indices, _points, _colors)
+
+	# A few uninterrupted strands sell muscle density without outlining the
+	# polygon or revealing the simulation cells that made it.
+	for scrap in scraps:
+		if scrap.layer != TissueGrid.MUSCLE:
+			continue
+		var axis: Vector2 = Vector2.RIGHT.rotated(scrap.angle)
+		var across := Vector2(-axis.y, axis.x)
+		var half_length: float = scrap.size * sqrt(scrap.aspect) * 0.29
+		var spacing: float = scrap.size / sqrt(scrap.aspect) * 0.12
+		for strand in range(-1, 2):
+			var offset: Vector2 = across * (float(strand) * spacing)
+			draw_line(scrap.pos - axis * half_length + offset,
+				scrap.pos + axis * half_length + offset, COL_MUSCLE_DEEP, 0.8, true)

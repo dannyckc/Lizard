@@ -39,11 +39,10 @@ const COL_MUSCLE_DEEP := Color("5f2114")
 ## not tell a skeleton from a hole in one.
 const COL_BONE := Color("c9bda0")
 const COL_BONE_WORN := Color("a08d68")
-## Cell seams, faint enough to read as scale texture rather than as a grid.
-const COL_SEAM := Color(PAPER, 0.085)
-## Shortest seam worth stroking, in world pixels — below about a line's own
-## width a seam is a dot, not a seam. See _seam.
-const SEAM_MIN: float = 1.5
+## Material grain. Skin gets a few long, quiet tension lines; exposed muscle
+## gets close dark fibres. Neither follows the cell boundaries.
+const COL_SKIN_TENSION := Color(PAPER, 0.045)
+const COL_MUSCLE_FIBRE := Color("3f160f", 0.62)
 ## Limbs sit close to the ground, so they get one tight shadow rather than the
 ## torso's three.
 const COL_SHADOW_LIMB := Color(INK, 0.05)
@@ -62,7 +61,8 @@ var creature: Creature
 ## Reused geometry buffers. _draw runs every frame for every creature, so the
 ## cell layer allocates nothing per frame — it writes into these instead.
 var _quad := PackedVector2Array([Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO])
-var _seams := PackedVector2Array()
+var _skin_lines := PackedVector2Array()
+var _muscle_lines := PackedVector2Array()
 var _mesh_points := PackedVector2Array()
 var _mesh_colors := PackedColorArray()
 var _mesh_indices := PackedInt32Array()
@@ -102,9 +102,11 @@ func _draw() -> void:
 
 	# Limb bones, under the torso.
 	for limb in creature.gait.limbs:
-		if _build(tissue.patch(limb.key), 0, TissueGrid.LIMB_BONE_COLS) > 0:
+		var limb_patch: TissueGrid.Patch = tissue.patch(limb.key)
+		if _build(limb_patch, 0, TissueGrid.LIMB_BONE_COLS) > 0:
 			_flush_flat(lift, COL_SHADOW_LIMB)
 			_flush()
+			_draw_tissue_grain(limb_patch, 0, TissueGrid.LIMB_BONE_COLS)
 
 	# Torso. Three restrained offset copies approximate the diffused editorial
 	# shadow from the reference without a sprite or a blur texture; they are the
@@ -114,18 +116,18 @@ func _draw() -> void:
 		_flush_flat(Vector2(0.0, 8.0 * creature.size_scale), COL_SHADOW_MID)
 		_flush_flat(lift, COL_SHADOW_NEAR)
 		_flush()
-	_draw_seams(torso)
+	_draw_tissue_grain(torso, 0, TissueGrid.BODY_COLS)
 	_draw_eyes(body, torso)
 
 	# Feet, over the torso — same reason the limb bones went under it.
 	for limb in creature.gait.limbs:
 		_draw_foot_shadow(limb)
 	for limb in creature.gait.limbs:
-		if _build(tissue.patch(limb.key), TissueGrid.LIMB_BONE_COLS, TissueGrid.LIMB_COLS) > 0:
+		var foot_patch: TissueGrid.Patch = tissue.patch(limb.key)
+		if _build(foot_patch, TissueGrid.LIMB_BONE_COLS, TissueGrid.LIMB_COLS) > 0:
 			_flush_flat(lift, COL_SHADOW_LIMB)
 			_flush()
-
-	_draw_jaw(body)
+			_draw_tissue_grain(foot_patch, TissueGrid.LIMB_BONE_COLS, TissueGrid.LIMB_COLS)
 
 	if debug:
 		_draw_debug()
@@ -286,87 +288,48 @@ func _cell_color(patch: TissueGrid.Patch, cell: int) -> Color:
 	var base: int = cell * TissueGrid.LAYERS
 	var skin: float = patch.hp[base + TissueGrid.SKIN]
 	if skin > 0.0:
-		return COL_BODY_HEAD.lerp(COL_MUSCLE, 1.0 - skin / TissueGrid.SKIN_HP)
+		# Skin holds together as a membrane until it actually tears. A slight warm
+		# shift communicates strain without dissolving it into muscle cell by cell.
+		return COL_BODY_HEAD.lerp(Color("2b211b"), (1.0 - skin / TissueGrid.SKIN_HP) * 0.24)
 	var muscle: float = patch.hp[base + TissueGrid.MUSCLE]
 	if muscle > 0.0:
 		return COL_MUSCLE.lerp(COL_MUSCLE_DEEP, 1.0 - muscle / TissueGrid.MUSCLE_HP)
 	return COL_BONE.lerp(COL_BONE_WORN, 1.0 - patch.hp[base + TissueGrid.BONE] / TissueGrid.BONE_HP)
 
 
-## The cell seams, as one batched multiline over the whole body.
-##
-## Stroking the lattice cell by cell would cost ~220 line primitives a frame per
-## creature to say something one multiline says just as well, so the interior
-## seams are emitted into one reused buffer and issued in one call.
-##
-## A seam is only interior if there is tissue on *both* sides of it. The
-## silhouette's own boundary is skipped for the usual reason — the fill already
-## draws that edge and stroking it again only fattens it — and the boundary of a
-## wound is skipped for exactly the same reason: once a cell is gone, the edge
-## beside it is silhouette, and a seam left hanging there would outline the hole
-## in a colour the hole cannot have.
-func _draw_seams(patch: TissueGrid.Patch) -> void:
+## Material detail deliberately ignores cell boundaries. Intact skin is read as
+## one continuous membrane through sparse longitudinal tension lines, while a
+## revealed muscle cell carries several close fibres along the anatomy's grain.
+func _draw_tissue_grain(patch: TissueGrid.Patch, from_col: int, to_col: int) -> void:
 	if patch == null or not patch.live:
 		return
-	var live: bool = patch.gone_count == 0
-	var needed: int = 2 * (patch.cols * (patch.rows - 1) + (patch.cols - 1) * patch.rows)
-	if _seams.size() < needed:
-		_seams.resize(needed)
-	var i: int = 0
-	for c in patch.cols:
-		if _column_thin(patch, c):
-			continue
-		for r in range(1, patch.rows):
-			if live or (patch.gone[c * patch.rows + r - 1] == 0 and patch.gone[c * patch.rows + r] == 0):
-				_seams[i] = patch.vert(c, r)
-				_seams[i + 1] = patch.vert(c + 1, r)
-				i += 2
-	for c in range(1, patch.cols):
-		if _column_thin(patch, c - 1) or _column_thin(patch, c):
-			continue
-		for r in patch.rows:
-			if live or (patch.gone[(c - 1) * patch.rows + r] == 0 and patch.gone[c * patch.rows + r] == 0):
-				_seams[i] = patch.vert(c, r)
-				_seams[i + 1] = patch.vert(c, r + 1)
-				i += 2
-	if i > 0:
-		_seams.resize(i)
-		draw_multiline(_seams, COL_SEAM, 1.0, true)
-
-
-## Whether a column is shorter along the body than a stroke is wide.
-##
-## A cap's outermost station is a single point, and the ones behind it crowd in
-## against it — the snout's eight columns share the first two pixels of it. Every
-## seam in that stretch lands on the last one, so the tip reads as a smudge of
-## hatching rather than as scale texture. Below a stroke's own width a seam
-## cannot say anything a neighbour has not already said.
-func _column_thin(patch: TissueGrid.Patch, col: int) -> bool:
-	var mid: int = patch.rows / 2
-	return patch.vert(col, mid).distance_squared_to(patch.vert(col + 1, mid)) < SEAM_MIN * SEAM_MIN
-
-
-# ------------------------------------------------------------------ bite ----
-
-## The gape, cut into the snout as a paper wedge.
-##
-## Direction is carried by the lunge itself — the head is genuinely thrown
-## forward — so this only has to state the timing: it opens through the wind-up,
-## holds through the throw, and vanishes on the frame the bite resolves.
-func _draw_jaw(body: BodyShape) -> void:
-	var open: float = creature.jaw_open()
-	if open <= 0.001:
-		return
-	var half: float = deg_to_rad(34.0) * open
-	var radius: float = body.head_radius * 1.3
-	var base: float = body.head.fwd.angle()
-	# Hinged behind the head's centre, so the wedge bites into the silhouette
-	# rather than sitting on the front of it.
-	var wedge := PackedVector2Array([body.head.pos - body.head.fwd * (body.head_radius * 0.3)])
-	for k in range(7):
-		wedge.append(body.head.pos
-			+ Vector2.RIGHT.rotated(base - half + 2.0 * half * (float(k) / 6.0)) * radius)
-	draw_colored_polygon(wedge, PAPER)
+	_skin_lines.resize(0)
+	_muscle_lines.resize(0)
+	for col in range(from_col, to_col):
+		for row in patch.rows:
+			var cell: int = col * patch.rows + row
+			if patch.gone[cell] != 0:
+				continue
+			var base: int = cell * TissueGrid.LAYERS
+			patch.corners_of(cell, _quad)
+			var skin: float = patch.hp[base + TissueGrid.SKIN]
+			if skin > 0.0:
+				# Only alternating rows carry a mark, so the surface reads as a few
+				# stretched bands rather than the grid underneath it.
+				if row % 2 == 1:
+					_skin_lines.append(_quad[0].lerp(_quad[1], 0.5))
+					_skin_lines.append(_quad[3].lerp(_quad[2], 0.5))
+				continue
+			if patch.hp[base + TissueGrid.MUSCLE] <= 0.0:
+				continue
+			for strand in range(1, 4):
+				var across: float = float(strand) * 0.25
+				_muscle_lines.append(_quad[0].lerp(_quad[1], across))
+				_muscle_lines.append(_quad[3].lerp(_quad[2], across))
+	if not _skin_lines.is_empty():
+		draw_multiline(_skin_lines, COL_SKIN_TENSION, 0.75, true)
+	if not _muscle_lines.is_empty():
+		draw_multiline(_muscle_lines, COL_MUSCLE_FIBRE, 0.9, true)
 
 
 # ----------------------------------------------------------------- debug ----

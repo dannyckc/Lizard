@@ -223,17 +223,6 @@ func is_lunging() -> bool:
 	return bite_time >= 0.0
 
 
-## How wide the jaws are gaping, 0..1. They open through the wind-up, hold
-## through the throw, and snap shut on the hit frame — so the animation states
-## exactly when the damage happened.
-func jaw_open() -> float:
-	if bite_time < 0.0 or _impact_done:
-		return 0.0
-	if bite_time < LUNGE_WINDUP:
-		return smoothstep(0.0, 1.0, bite_time / LUNGE_WINDUP)
-	return 1.0
-
-
 func _integrate_motion(delta: float) -> void:
 	var p: CreatureParams = params
 
