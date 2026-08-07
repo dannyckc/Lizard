@@ -65,13 +65,29 @@ Inside [`Spine.step()`](scripts/creature/Spine.gd) each tick:
 1. **Inertia.** Verlet integration gives body points momentum, so the body
    trails and whips instead of rigidly tracking the head.
 2. **Undulation.** A travelling lateral wave is added *before* the solver, as a
-   bounded offset (the difference from last tick's displacement, not a fresh
-   push each tick — pushing repeatedly feeds the integrator a force it carries
-   as momentum, and the chain resonates to several times the intended
-   amplitude).
+   bounded offset — the difference from last tick's displacement, not a fresh
+   push each tick.
 3. **Pin the head.** Point 0 is authoritative, placed directly from input.
 4. **Relaxation.** Distance then angle, per joint, strictly front-to-back,
    repeated `constraint_iterations` times.
+
+Step 2 shifts `prev` by the same delta as `points`, and that is the load-bearing
+detail. Verlet reads velocity as `points - prev`, so moving only `points` hands
+the integrator the wave's per-tick displacement as though it were real motion;
+it carries that forward at `spine_damping` and re-injects it next tick. The
+chain resonates, and because a free end has nothing but its own parent
+restraining it the energy pools in the tail, which whips at *tens* of times the
+intended amplitude even though the envelope holds the wave itself to zero there.
+On defaults that measured 116 px of sway from a `body_wave` of 6 — wider than a
+whole stride, which is precisely the coupling hazard described under Tuning
+below, triggered by the engine rather than by anyone's settings. Shifting both
+leaves the implied velocity untouched, so the wave is pure displacement and only
+the constraint solver ever feeds the integrator.
+
+Sway still runs somewhat above `body_wave` — up to about 3x — because each
+point inherits its parent's lateral offset as well as its own, and that
+accumulates down a head-pinned chain. That part is bounded and stable; it is the
+shape of the wave, not a feedback loop.
 
 Step 4's ordering matters twice over. Only the *child* is ever moved, so
 corrections flow away from the head and the head stays where input put it. And
@@ -88,9 +104,16 @@ point exactly onto its parent's circle, so segment lengths come out exact no
 matter how low stiffness is set.
 
 For limbs, [`Fabrik.solve()`](scripts/creature/Fabrik.gd) alternates the same
-circle projection from each end of the chain. The elbow/knee is seeded toward a
-pole before solving — FABRIK stays on whichever side of the root→target axis it
-starts on, so the seed is what stops joints popping between mirror solutions.
+circle projection from each end of the chain. FABRIK stays on whichever side of
+the root→target axis it starts on, so the seeded elbow/knee position is what
+stops joints popping between mirror solutions. For two bones that position is
+just where the circles around each end meet, so it is seeded there *exactly*
+rather than nudged toward an approximate pole. That matters because of where the
+reach limit below leaves the foot: hard against the limit, chain nearly straight
+— and near-straight is exactly where FABRIK crawls. From a partial seed, six
+passes get the joint about seven eighths of the way out and leave the foot
+overshooting its target, which reads as the leg locking out rigid precisely when
+the creature is working hardest.
 
 ### Gait
 
@@ -107,6 +130,55 @@ which is what keeps it fair: the gate only lets one pair through at a time, so
 with a fixed order the same pair wins every contest and the other pair gets
 dragged along the ground indefinitely.
 
+#### Every limb keeps its own clock
+
+Stride length, step duration and how far ahead a foot aims are all sized off how
+fast *that limb's socket* is travelling, not off the body's linear speed. The
+two are not interchangeable: in a turn the hips sweep a far wider arc than the
+shoulders, and in a pivot on the spot the body's linear speed is zero while the
+hips are moving as fast as they ever do. Sized off one shared speed the rear
+legs take short, slow steps while their sockets race away, so they sit
+permanently over threshold and get towed — which reads as the creature swinging
+about its planted front feet.
+
+Two things follow from using the socket's own velocity:
+
+- **A foot lands where its socket *will* be.** Aiming at the present ideal
+  guarantees the foot is already overdue on touchdown and spends its whole
+  stance being dragged. The landing spot leads by `socket_vel × flight time`,
+  plus a stride fraction as the margin it then has to be dragged back through.
+- **A fast socket gets a quick step.** Step duration is capped at
+  `stride / socket_speed` — the time the socket takes to run a full stride away.
+  A step slower than that can never catch up.
+
+#### Feet cannot leave the working envelope
+
+Feet are placed in world space and the body then walks out from under them, so
+nothing in the reactive rule above stops one ending up behind the far shoulder —
+and FABRIK will happily solve to it, drawing the leg through the torso. Every
+foot is therefore projected into the region its limb can actually reach, and a
+foot the body has outrun **skids along that boundary** rather than staying
+nailed down and dislocating the leg. Four limits, the angular three applied
+weakest-first so the hard anatomical ones always win:
+
+| Limit | Why |
+|---|---|
+| `limb_max_reach` from the socket | past it the chain is pulled straight and stops reading as a leg |
+| `limb_swing_deg` either side of the rest stance | taste: how wide a fan the leg sweeps |
+| 78° either side of straight-out | a foot may never come round to the body's midline |
+| the bearing at which the knee turns inboard | see below |
+
+The last one is easy to miss. Given the socket, the foot and two fixed bones
+there are only *two* possible knee positions, so once the foot is placed the
+knee cannot be moved out of the way — it has to be prevented by limiting the
+foot. The joint folds toward `bend_sign`, and as the foot swings that same way
+the two converge until the knee's outward offset passes through zero and the leg
+buckles into the body. Before this limit existed, knees sat up to 0.23
+limb-lengths *inside* the torso.
+
+All of it is computed in the socket's own (outward, forward) frame, so the
+limits mean the same thing on both flanks and at any heading.
+
 ## Tuning
 
 Press `F1` for live sliders (generated from `CreatureParams.SCHEMA` — add a
@@ -120,26 +192,35 @@ The parameters worth reaching for first:
 | Longer / snakier body | `segment_count`, `segment_length` |
 | Floppier, more organic | `spine_damping` up, `spine_stiffness` down |
 | Stop it bending too far | `max_bend_deg` down (hard limit; 15–25° reads best) |
-| More / less body sway | `body_wave` (peak sway in px), `wave_frequency`, `wave_speed` |
+| More / less body sway | `body_wave`, `wave_frequency`, `wave_speed` |
 | Silhouette | `head/chest/waist/hip/tail_tip_width`, `body_width` |
 | Longer stride, fewer steps | `stride_distance` up |
 | Snappier footfalls | `step_duration` down, `step_height` up |
 | Sprawling vs. tucked legs | `stance_width`, `stance_reach`, `arm/leg_length` |
 | Marching vs. loose legs | `diagonal_coupling` (1 = strict trot, 0 = independent) |
+| Wider / tighter leg sweep | `limb_swing_deg`, `limb_max_reach` |
 
-Three couplings are easy to trip over:
+Four couplings are easy to trip over:
 
 - **`body_wave` must stay well under `stride_distance`.** Sway wider than a
   stride makes the feet chase the wobble instead of the direction of travel; the
   legs on one diagonal end up permanently over threshold and starve the other
-  pair.
+  pair. Budget for peak sway landing a little under 3x `body_wave`, for the
+  accumulation reason described above.
 - **Turn radius is `move_speed / turn_rate`, and wants to exceed body length**
   (`segment_count * segment_length`). Otherwise the creature carves a circle
   tighter than itself and coils into a hook. `turn_speed_falloff` is what buys
   this back: full turn rate at a standstill for pivoting on the spot, reduced at
   speed for wide arcs.
 - **`stance_reach` should stay below ~0.85**, or the IK chain sits locked
-  straight and the legs stop looking like legs.
+  straight and the legs stop looking like legs. Keep it below `limb_max_reach`
+  too, or the rest pose is already against the envelope boundary.
+- **`turn_pivot` places the turn centre**, measured back from the head. At the
+  defaults it lands close to the shoulder station, so a spot pivot rotates the
+  creature roughly about its front feet and the hips sweep the wide arc. The
+  gait copes with that now, but moving the pivot back toward the midpoint of the
+  two limb girdles turns it about its centre instead, which is both what a real
+  quadruped does and much less work for the hind legs.
 
 `constraint_iterations` and `fabrik_iterations` are cost/quality dials; the
 defaults (6 and 6) are already past the point of visible improvement.
@@ -158,6 +239,15 @@ asserts that segment lengths hold, bends stay inside the limit, IK bones keep
 their length, the gait never lifts both diagonals at once, a resting creature's
 feet don't creep, and every schema row round-trips through `Object.set()`.
 
+It also checks the grounding invariants, which is where the interesting failures
+live. No part of a limb may end up inboard of its own socket (a leg drawn
+through the torso); no foot may exceed `limb_max_reach` (a leg pulled straight);
+no foot may fall more than 3.5 strides behind its ideal (a leg being towed
+rather than walked); and straight-line sway must stay within 5x `body_wave` (the
+spine resonating). Each one catches a distinct failure the others let through —
+the limb envelope holds even while the spine is resonating, so the sway check is
+the only thing that sees that cause.
+
 ## Known limitations
 
 Deliberate, in the interest of a stable and readable prototype:
@@ -166,6 +256,10 @@ Deliberate, in the interest of a stable and readable prototype:
   screen-space offset plus a shadow gap, since top-down has no vertical axis.
 - Feet are placed kinematically; they don't push the body. The body leads and
   the legs follow, not the other way round.
+- Because of that, a body moving faster than its legs can step is resolved by
+  letting the foot **skid** along the edge of its envelope. Nothing slows the
+  creature down to keep its feet under it, so at extreme turn rates the plant is
+  approximate — but the limb stays inside a plausible pose while it happens.
 - The body fill is drawn as a strip of quads between spine cross-sections, so a
   very sharp bend can overlap slightly on the inside of the curve. It is
   invisible at opaque fill and avoids depending on concave polygon

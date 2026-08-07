@@ -56,6 +56,15 @@ extends Resource
 @export_range(0.3, 0.98, 0.01) var stance_reach: float = 0.78
 ## How far out to the side the rest stance sits (relative to fore/aft bias).
 @export_range(0.2, 2.0, 0.01) var stance_width: float = 1.0
+## Furthest a foot may get from its socket, as a fraction of total limb length.
+## This is a hard limit on the working envelope, not a target: a foot the body
+## has outrun skids along it instead of pulling the leg straight. Keep it under
+## 1.0 or a dragged limb stops reading as a limb.
+@export_range(0.5, 1.0, 0.01) var limb_max_reach: float = 0.94
+## Half-angle of the fan a foot may swing through, measured from its rest
+## stance. Stops a limb the body has walked past from folding forward under the
+## chin or trailing back alongside the tail.
+@export_range(20.0, 110.0, 1.0) var limb_swing_deg: float = 62.0
 ## FABRIK relaxation passes per limb per tick.
 @export_range(1, 12, 1) var fabrik_iterations: int = 6
 
@@ -127,6 +136,8 @@ const SCHEMA: Array = [
 	{"prop": "leg_length", "label": "Leg length", "min": 8.0, "max": 120.0, "step": 1.0},
 	{"prop": "stance_reach", "label": "Stance reach", "min": 0.3, "max": 0.98, "step": 0.01},
 	{"prop": "stance_width", "label": "Stance width", "min": 0.2, "max": 2.0, "step": 0.01},
+	{"prop": "limb_max_reach", "label": "Max reach", "min": 0.5, "max": 1.0, "step": 0.01},
+	{"prop": "limb_swing_deg", "label": "Swing fan (deg)", "min": 20.0, "max": 110.0, "step": 1.0},
 	{"prop": "fabrik_iterations", "label": "FABRIK iters", "min": 1.0, "max": 12.0, "step": 1.0},
 
 	{"group": "Gait"},

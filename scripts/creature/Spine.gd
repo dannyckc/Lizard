@@ -71,20 +71,32 @@ func step(delta: float, head_pos: Vector2, p: CreatureParams, speed_norm: float,
 	# 2. Travelling lateral wave. Phase advances with speed so undulation is
 	#    locked to how fast the creature is actually going, and dies out at rest.
 	#
-	#    This is applied as a bounded *offset*, not a per-tick push: we remember
-	#    how far the wave has already displaced each point and only ever apply
-	#    the difference. Pushing every tick instead would feed the Verlet
-	#    integrator a force it then carries as momentum, and the chain resonates
-	#    — measured at four times the intended amplitude, enough to swing the
-	#    shoulders further than a whole stride and wreck the gait. As an offset,
-	#    `body_wave` means exactly what it says: peak sway in pixels.
+	#    The wave is *kinematic*: it displaces the body, it does not push it. We
+	#    remember how far it has already moved each point and apply only the
+	#    difference, so `body_wave` means exactly what it says — peak sway in
+	#    pixels — instead of accumulating.
+	#
+	#    Applying that difference to `prev` as well is the other half of the same
+	#    idea, and it is not optional. Verlet infers velocity from `points -
+	#    prev`, so shifting only `points` hands the integrator the wave's per-tick
+	#    displacement as though it were real motion; it then carries it forward at
+	#    `spine_damping` and re-injects it next tick. The chain resonates, and the
+	#    energy pools at the free end where nothing but the tip's own parent
+	#    restrains it — the tail whips at tens of times the intended amplitude
+	#    even though the envelope holds the wave itself to zero there. That whip
+	#    travels up into the hips, so the rear limb sockets tear around far faster
+	#    than the creature is actually moving and the hind feet can never plant.
+	#    Shifting both leaves the implied velocity untouched: the wave becomes
+	#    pure displacement, and only the constraint solver feeds the integrator.
 	wave_clock += delta * p.wave_speed * (0.35 + 0.65 * speed_norm)
 	for i in range(1, n):
 		var t: float = float(i) / float(n - 1)
 		var envelope: float = sin(t * PI)  # no sway at the neck or the very tip
 		var phase: float = sin(wave_clock * TAU - t * p.wave_frequency * TAU)
 		var target: Vector2 = perps[i] * (phase * p.body_wave * speed_norm * envelope)
-		points[i] += target - wave_offsets[i]
+		var shift: Vector2 = target - wave_offsets[i]
+		points[i] += shift
+		prev[i] += shift
 		wave_offsets[i] = target
 
 	# 3. The head is not simulated — it is placed. Everything else follows it.

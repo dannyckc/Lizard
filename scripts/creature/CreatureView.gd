@@ -198,12 +198,20 @@ func _draw_debug() -> void:
 
 	# Gait: ideal target, the stride threshold around it, and how far the
 	# planted foot has drifted. When the white line grows past the ring, the
-	# foot picks up.
-	var stride: float = p.stride_distance * creature.size_scale * (0.45 + 0.55 * creature.speed_norm)
+	# foot picks up. Stride is per-limb now — read it off the limb rather than
+	# recomputing, so the ring always shows the threshold actually being used.
 	for limb in creature.gait.limbs:
-		draw_arc(limb.ideal, stride, 0.0, TAU, 32, COL_DBG_STRIDE, 1.0, true)
+		draw_arc(limb.ideal, limb.stride, 0.0, TAU, 32, COL_DBG_STRIDE, 1.0, true)
 		draw_arc(limb.ideal, 4.0, 0.0, TAU, 12, COL_DBG_IDEAL, 1.5, true)
 		draw_line(limb.planted, limb.ideal, Color(1, 1, 1, 0.28), 1.0, true)
+
+		# The envelope the foot is confined to: the fan it may swing through and
+		# the reach limit it skids along when the body outruns it.
+		var a2: Spine.Frame = creature.body.anchors[limb.key]
+		var swing: float = deg_to_rad(p.limb_swing_deg)
+		var rest: float = limb.rest_dir.angle()
+		draw_arc(a2.pos, limb.total_length * p.limb_max_reach, rest - swing, rest + swing,
+			20, COL_DBG_RANGE, 1.0, true)
 
 		# The IK chain, including the ground target the solver was given.
 		draw_line(limb.joints[0], limb.joints[1], COL_DBG_LIMB, 1.0, true)
