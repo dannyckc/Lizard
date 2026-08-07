@@ -29,4 +29,4 @@ window/stretch/aspect="expand"
 [rendering]
 
 anti_aliasing/quality/msaa_2d=2
-environment/defaults/default_clear_color=Color(0.078, 0.094, 0.11, 1)
+environment/defaults/default_clear_color=Color(0.953, 0.945, 0.925, 1)

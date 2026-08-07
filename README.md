@@ -232,6 +232,7 @@ Two headless checks, both worth re-running after retuning:
 ```sh
 godot --headless --path . --script tests/SimTest.gd      # simulation invariants
 godot --headless --path . --script tests/RenderSmoke.gd  # every draw path
+godot --headless --path . --script tests/UIInteractionTest.gd # HUD interactions
 ```
 
 `SimTest` drives each preset through idle → walk → turn → pivot → idle and

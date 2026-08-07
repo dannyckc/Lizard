@@ -9,26 +9,24 @@ extends Node2D
 
 @export var debug: bool = false
 
-const COL_SHADOW := Color(0.043, 0.055, 0.066)          # opaque: flat ground
-const COL_BODY_HEAD := Color(0.322, 0.549, 0.361)
-const COL_BODY_TAIL := Color(0.216, 0.400, 0.286)
-const COL_OUTLINE := Color(0.086, 0.161, 0.118)
-const COL_STRIPE := Color(0.451, 0.678, 0.427, 0.55)
-const COL_LIMB := Color(0.259, 0.443, 0.298)
-const COL_LIMB_EDGE := Color(0.114, 0.208, 0.153)
-const COL_FOOT_PLANTED := Color(0.949, 0.749, 0.349)
-const COL_FOOT_STEPPING := Color(0.376, 0.851, 0.949)
-const COL_EYE := Color(0.94, 0.96, 0.92)
-const COL_PUPIL := Color(0.08, 0.10, 0.09)
+const INK := Color("14140f")
+const PAPER := Color("f3f1ec")
+const COL_SHADOW_NEAR := Color(INK, 0.055)
+const COL_SHADOW_MID := Color(INK, 0.035)
+const COL_SHADOW_FAR := Color(INK, 0.020)
+const COL_BODY_HEAD := INK
+const COL_BODY_TAIL := INK
+const COL_LIMB := INK
+const COL_EYE := PAPER
 
-const COL_DBG_SPINE := Color(1.0, 0.35, 0.55)
-const COL_DBG_RANGE := Color(1.0, 1.0, 1.0, 0.07)
-const COL_DBG_BEND := Color(1.0, 0.80, 0.25, 0.45)
-const COL_DBG_ANCHOR := Color(0.40, 0.70, 1.0)
-const COL_DBG_IDEAL := Color(0.45, 1.0, 0.60)
-const COL_DBG_STRIDE := Color(0.45, 1.0, 0.60, 0.16)
-const COL_DBG_OUTLINE := Color(1.0, 1.0, 1.0, 0.30)
-const COL_DBG_LIMB := Color(1.0, 0.55, 0.20)
+const COL_DBG_SPINE := Color(INK, 0.55)
+const COL_DBG_RANGE := Color(INK, 0.07)
+const COL_DBG_BEND := Color(INK, 0.28)
+const COL_DBG_ANCHOR := Color(INK, 0.62)
+const COL_DBG_IDEAL := Color(INK, 0.58)
+const COL_DBG_STRIDE := Color(INK, 0.12)
+const COL_DBG_OUTLINE := Color(PAPER, 0.72)
+const COL_DBG_LIMB := Color(INK, 0.72)
 
 var creature: Creature
 
@@ -49,18 +47,18 @@ func _draw() -> void:
 	if body.outline.size() < 3:
 		return
 
-	var shadow_offset := Vector2(0.0, 5.0 * creature.size_scale)
-
-	_draw_body_fill(body, COL_SHADOW, COL_SHADOW, shadow_offset)
+	# Three restrained offset silhouettes approximate the diffused editorial
+	# shadow from the reference without introducing a sprite or blur texture.
+	_draw_body_fill(body, COL_SHADOW_FAR, COL_SHADOW_FAR, Vector2(0.0, 12.0 * creature.size_scale))
+	_draw_body_fill(body, COL_SHADOW_MID, COL_SHADOW_MID, Vector2(0.0, 8.0 * creature.size_scale))
+	_draw_body_fill(body, COL_SHADOW_NEAR, COL_SHADOW_NEAR, Vector2(0.0, 5.0 * creature.size_scale))
 	for limb in creature.gait.limbs:
-		_draw_limb_shadow(limb, shadow_offset)
+		_draw_limb_shadow(limb, Vector2(0.0, 5.0 * creature.size_scale))
 
 	for limb in creature.gait.limbs:
 		_draw_limb(limb)
 
 	_draw_body_fill(body, COL_BODY_HEAD, COL_BODY_TAIL, Vector2.ZERO)
-	_draw_outline(body)
-	_draw_dorsal_stripe(body)
 	_draw_head(body)
 
 	for limb in creature.gait.limbs:
@@ -92,27 +90,10 @@ func _draw_body_fill(body: BodyShape, col_head: Color, col_tail: Color, offset: 
 	draw_circle(creature.spine.points[last] + offset, body.widths[last], col_tail)
 
 
-func _draw_outline(body: BodyShape) -> void:
-	# Corner-cut for the stroke only; the fill above uses the raw cross-sections.
-	var smooth: PackedVector2Array = BodyShape.smooth_closed(body.outline, 1)
-	smooth.append(smooth[0])
-	draw_polyline(smooth, COL_OUTLINE, 2.0 * creature.size_scale, true)
-
-
-func _draw_dorsal_stripe(body: BodyShape) -> void:
-	var pts: PackedVector2Array = PackedVector2Array()
-	for i in range(body.last_index + 1):
-		pts.append(creature.spine.points[i])
-	if pts.size() >= 2:
-		draw_polyline(pts, COL_STRIPE, 2.5 * creature.size_scale, true)
-
-
 func _draw_head(body: BodyShape) -> void:
-	draw_circle(body.eye_left, body.eye_radius, COL_EYE)
-	draw_circle(body.eye_right, body.eye_radius, COL_EYE)
-	var gaze: Vector2 = body.head.fwd * (body.eye_radius * 0.35)
-	draw_circle(body.eye_left + gaze, body.eye_radius * 0.5, COL_PUPIL)
-	draw_circle(body.eye_right + gaze, body.eye_radius * 0.5, COL_PUPIL)
+	# Two paper pinpricks give the otherwise abstract ink silhouette its life.
+	draw_circle(body.eye_left, body.eye_radius * 0.82, COL_EYE)
+	draw_circle(body.eye_right, body.eye_radius * 0.82, COL_EYE)
 
 
 # ------------------------------------------------------------------ limb ----
@@ -125,36 +106,28 @@ func _limb_widths(limb: Limb) -> Vector2:
 
 func _draw_limb_shadow(limb: Limb, offset: Vector2) -> void:
 	var w: Vector2 = _limb_widths(limb)
-	draw_line(limb.joints[0] + offset, limb.joints[1] + offset, COL_SHADOW, w.x + 1.5, true)
-	draw_line(limb.joints[1] + offset, limb.joints[2] + offset, COL_SHADOW, w.y + 1.5, true)
+	draw_line(limb.joints[0] + offset, limb.joints[1] + offset, Color(INK, 0.05), w.x + 1.5, true)
+	draw_line(limb.joints[1] + offset, limb.joints[2] + offset, Color(INK, 0.05), w.y + 1.5, true)
 
 
 func _draw_limb(limb: Limb) -> void:
 	var w: Vector2 = _limb_widths(limb)
-	# Cheap outline: a slightly fatter dark line under a lighter one.
-	draw_line(limb.joints[0], limb.joints[1], COL_LIMB_EDGE, w.x + 2.0, true)
-	draw_line(limb.joints[1], limb.joints[2], COL_LIMB_EDGE, w.y + 2.0, true)
 	draw_line(limb.joints[0], limb.joints[1], COL_LIMB, w.x, true)
 	draw_line(limb.joints[1], limb.joints[2], COL_LIMB, w.y, true)
 
 
-## Planted and stepping feet are deliberately easy to tell apart: a planted foot
-## is a filled amber disc sitting on its shadow, a stepping one is a hollow cyan
-## ring lifted away from a shrinking shadow.
+## Lift is communicated by the widening gap to a soft oval shadow, keeping the
+## character strictly monochrome in both planted and airborne poses.
 func _draw_foot(limb: Limb) -> void:
 	var s: float = creature.size_scale
-	var r: float = maxf(limb.total_length * 0.13, 3.0 * s)
+	var r: float = maxf(limb.total_length * 0.10, 3.0 * s)
 	var lifted: Vector2 = limb.joints[2]
 
 	var shadow_r: float = r * (1.0 - 0.35 * clampf(limb.lift / maxf(r * 3.0, 1.0), 0.0, 1.0))
-	draw_circle(limb.ground + Vector2(0.0, 5.0 * s), shadow_r, COL_SHADOW)
-
-	if limb.stepping:
-		draw_circle(lifted, r, COL_LIMB_EDGE)
-		draw_arc(lifted, r * 0.92, 0.0, TAU, 18, COL_FOOT_STEPPING, 2.0 * s, true)
-	else:
-		draw_circle(lifted, r, COL_FOOT_PLANTED)
-		draw_arc(lifted, r, 0.0, TAU, 18, COL_LIMB_EDGE, 1.5 * s, true)
+	draw_set_transform(limb.ground + Vector2(0.0, 5.0 * s), 0.0, Vector2(1.05, 0.70))
+	draw_circle(Vector2.ZERO, shadow_r, Color(INK, maxf(0.035, 0.13 - limb.lift * 0.004)))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	draw_circle(lifted, r, INK)
 
 
 # ----------------------------------------------------------------- debug ----
@@ -188,7 +161,7 @@ func _draw_debug() -> void:
 	for i in n:
 		draw_circle(spine.points[i], 2.6, COL_DBG_SPINE)
 		# Local basis used to build the body at this station.
-		draw_line(spine.points[i], spine.points[i] + spine.perps[i] * 8.0, Color(0.4, 0.7, 1.0, 0.35), 1.0, true)
+		draw_line(spine.points[i], spine.points[i] + spine.perps[i] * 8.0, Color(INK, 0.24), 1.0, true)
 
 	# Limb sockets and their frames.
 	for key in body.anchors:
@@ -203,7 +176,7 @@ func _draw_debug() -> void:
 	for limb in creature.gait.limbs:
 		draw_arc(limb.ideal, limb.stride, 0.0, TAU, 32, COL_DBG_STRIDE, 1.0, true)
 		draw_arc(limb.ideal, 4.0, 0.0, TAU, 12, COL_DBG_IDEAL, 1.5, true)
-		draw_line(limb.planted, limb.ideal, Color(1, 1, 1, 0.28), 1.0, true)
+		draw_line(limb.planted, limb.ideal, Color(INK, 0.28), 1.0, true)
 
 		# The envelope the foot is confined to: the fan it may swing through and
 		# the reach limit it skids along when the body outruns it.
@@ -218,10 +191,10 @@ func _draw_debug() -> void:
 		draw_line(limb.joints[1], limb.joints[2], COL_DBG_LIMB, 1.0, true)
 		draw_circle(limb.joints[1], 2.4, COL_DBG_LIMB)
 		if limb.stepping:
-			draw_line(limb.step_from, limb.step_to, COL_FOOT_STEPPING, 1.0, true)
-			draw_arc(limb.step_to, 3.0, 0.0, TAU, 12, COL_FOOT_STEPPING, 1.5, true)
+			draw_line(limb.step_from, limb.step_to, COL_DBG_LIMB, 1.0, true)
+			draw_arc(limb.step_to, 3.0, 0.0, TAU, 12, COL_DBG_LIMB, 1.5, true)
 			# Lift is fake height, drawn as the gap between foot and shadow.
-			draw_line(limb.ground, limb.joints[2], Color(1, 1, 1, 0.35), 1.0, true)
+			draw_line(limb.ground, limb.joints[2], Color(INK, 0.35), 1.0, true)
 
 	# Heading and velocity of the head.
-	draw_line(creature.head_pos, creature.head_pos + creature.move_dir * 34.0, Color(1, 0.9, 0.3, 0.7), 1.5, true)
+	draw_line(creature.head_pos, creature.head_pos + creature.move_dir * 34.0, Color(INK, 0.65), 1.5, true)

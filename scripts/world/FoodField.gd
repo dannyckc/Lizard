@@ -51,7 +51,8 @@ func _process(delta: float) -> void:
 func _draw() -> void:
 	for i in pellets.size():
 		var p: Vector2 = pellets[i]
-		# Gentle desynchronised pulse so the field reads as alive, not as dots.
-		var pulse: float = 0.85 + 0.15 * sin(_phase * 2.1 + float(i) * 1.7)
-		draw_circle(p, 6.5 * pulse, Color(0.85, 0.62, 0.30, 0.22))
-		draw_circle(p, 3.2 * pulse, Color(0.98, 0.80, 0.38))
+		# Food is an outlined specimen marker: a restrained breathing ring with an
+		# ink core, rather than a gamey glowing collectible.
+		var pulse: float = 1.0 + 0.12 * sin(_phase * 2.0 + float(i) * 1.7)
+		draw_arc(p, 8.5 * pulse, 0.0, TAU, 28, Color(0.078, 0.078, 0.059, 0.26), 1.0, true)
+		draw_circle(p, 2.6, Color("14140f"))
