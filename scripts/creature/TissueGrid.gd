@@ -17,6 +17,12 @@
 ## beneath it. A bite therefore spends its penetration budget strictly
 ## outside-in, and bone both absorbs at a reduced rate and stops the bite dead,
 ## because there is nothing behind it to reach.
+##
+## A cell with nothing left in any layer is *gone*, and gone means gone: it is
+## not drawn, not bitten and not collided with. Nothing paints the ground colour
+## over a hole to fake it, which is the only way a wound can read as an opening
+## rather than as a pale patch — paper over ink still stops a body walking
+## through, and still hides whatever is behind it.
 class_name TissueGrid
 extends RefCounted
 
@@ -46,10 +52,15 @@ const BONE_YIELD: float = 0.5
 # --- body patch layout ------------------------------------------------------
 const BODY_KEY: String = "body"
 ## Cap columns tessellating the round snout, and the same for the tail tip.
-## Their outer corners land exactly on the drawn cap circles.
-const HEAD_COLS: int = 4
+## Their outer corners land exactly on the circle the cap would be drawn as.
+##
+## The lattice *is* the silhouette now rather than an overlay on one, so these
+## counts set how round the two ends look: four columns over the snout's quarter
+## turn was fine when a `draw_circle` sat underneath covering the facets, and is
+## a visible octagon without it.
+const HEAD_COLS: int = 8
 const TORSO_COLS: int = 20
-const TAIL_COLS: int = 2
+const TAIL_COLS: int = 4
 const BODY_COLS: int = HEAD_COLS + TORSO_COLS + TAIL_COLS
 ## Odd, so one row straddles the spine and can carry the vertebral column.
 const BODY_ROWS: int = 7
@@ -58,7 +69,9 @@ const BODY_ROWS: int = 7
 ## Upper bone, lower bone, then a cap over the outer half of the foot circle,
 ## so the drawn foot is part of the lattice instead of floating unbitable on it.
 const LIMB_BONE_COLS: int = 6
-const LIMB_FOOT_COLS: int = 2
+## Four rather than two for the same reason the snout cap grew: the foot is the
+## lattice's own outline now, not a tessellation hidden under a drawn circle.
+const LIMB_FOOT_COLS: int = 4
 const LIMB_COLS: int = LIMB_BONE_COLS + LIMB_FOOT_COLS
 const LIMB_ROWS: int = 3
 const LIMB_KEYS: Array[String] = ["FL", "FR", "RL", "RR"]
@@ -67,10 +80,14 @@ const LIMB_KEYS: Array[String] = ["FL", "FR", "RL", "RR"]
 # The skeleton is a *frame*, not a plate: a skull, a vertebral column one cell
 # wide running neck to tail tip, a girdle under each pair of limb sockets, and
 # ribs on alternating columns between them. Everywhere else the body is flesh
-# over nothing, and a bite that gets through it opens a hole clean to the ground
-# — which is the whole point of laying the skeleton out sparsely. If bone sat
-# under most of the body there would be no such thing as eating through it, and
-# every wound would bottom out on the same pale surface.
+# over nothing, and a bite that gets through it opens a hole clean through the
+# creature — which is the whole point of laying the skeleton out sparsely. If
+# bone sat under most of the body there would be no such thing as eating through
+# it, and every wound would bottom out on the same pale surface.
+#
+# It also has to be one *connected* piece. Flesh is what a bite takes first, so
+# a skeleton whose parts meet only through muscle comes apart into floating
+# fragments at exactly the moment it is the whole of what is left to look at.
 #
 # Like the grid dimensions, the layout is fixed in body space rather than read
 # from the params: it has to name the same cells after the tuning panel has
@@ -87,12 +104,14 @@ const RIB_SPAN: float = 0.78
 const GIRDLE_SPAN: float = 0.95
 ## Torso columns carrying the pectoral and pelvic girdles. TORSO_COLS spans the
 ## whole clipped spine, so a column index reads directly as a fraction of body
-## length: 2/20 and 10/20 land within one cell of the default shoulder
-## (front_limb_t 0.16) and hip (rear_limb_t 0.46) sockets. Both are even, which
-## is what leaves a clear column of flesh between each girdle and the nearest
-## rib instead of the two fusing into one wide bar.
-const SHOULDER_COL: int = 2
-const PELVIS_COL: int = 10
+## length: column c covers c/20 to (c+1)/20, which puts the default shoulder
+## (front_limb_t 0.16) in column 3 and the default hip (rear_limb_t 0.46) in
+## column 9. The girdle has to be the column the socket is *in*, not the one
+## next to it — a limb bone rooted at a socket with no girdle under it is a limb
+## joined to the skeleton by flesh alone, and it comes adrift the moment that
+## flesh is eaten.
+const SHOULDER_COL: int = 3
+const PELVIS_COL: int = 9
 
 
 ## One chunk of tissue a bite knocked loose, in world space.
@@ -126,10 +145,27 @@ class Patch extends RefCounted:
 	## hole clean through the body once their muscle is gone.
 	var bone: PackedByteArray = PackedByteArray()
 
-	## Cells that have taken any damage, so drawing costs what the damage costs
-	## rather than what the lattice costs.
+	## Cells that have taken any damage. Kept so a query can walk the wounds
+	## rather than the whole lattice.
 	var touched: PackedByteArray = PackedByteArray()
 	var damaged: PackedInt32Array = PackedInt32Array()
+
+	## 1 where every layer is spent. A gone cell is a hole in the creature: the
+	## renderer skips it, so the world behind shows through, and the collision
+	## and hit-test queries below shrink away from it.
+	var gone: PackedByteArray = PackedByteArray()
+	var gone_count: int = 0
+
+	## How far tissue still reaches out from the midline in each column, as a
+	## fraction of that column's local half-width — `[col * 2]` on the -perp
+	## side, `[col * 2 + 1]` on the +perp side. This is what makes a hole
+	## genuinely empty to walk into rather than merely invisible: the capsules
+	## the body is collided and hit-tested with are narrowed to it, and a column
+	## eaten clean through reports 0 and stops colliding altogether.
+	##
+	## Maintained on destruction rather than per frame, so an undamaged creature
+	## pays nothing and a chewed one pays once per cell it loses.
+	var solid: PackedFloat32Array = PackedFloat32Array()
 
 	## False until the pose has been sampled — the renderer and the bite query
 	## both refuse to touch a patch whose corners are still stale.
@@ -155,11 +191,53 @@ class Patch extends RefCounted:
 		hp.resize(cells * layers)
 		bone.resize(cells)
 		touched.resize(cells)
+		gone.resize(cells)
+		solid.resize(cols * 2)
 
 	func clear_damage() -> void:
 		touched.fill(0)
 		damaged.clear()
+		gone.fill(0)
+		gone_count = 0
+		solid.fill(1.0)
 		remaining_hp = full_hp
+
+	## Marks a cell as having nothing left in it and re-derives its column's
+	## surviving reach. Called once per cell, on the tick it is destroyed.
+	func retire(cell: int) -> void:
+		if gone[cell] != 0:
+			return
+		gone[cell] = 1
+		gone_count += 1
+		var col: int = cell / rows
+		var minus: float = 0.0
+		var plus: float = 0.0
+		for r in rows:
+			if gone[col * rows + r] != 0:
+				continue
+			# The reach of a surviving row is its *outer* edge, so a hole bitten
+			# out of the middle of a flank does not pull the surface in past the
+			# tissue still standing outside it.
+			minus = maxf(minus, 1.0 - 2.0 * float(r) / float(rows))
+			plus = maxf(plus, -1.0 + 2.0 * float(r + 1) / float(rows))
+		solid[col * 2] = minus
+		solid[col * 2 + 1] = plus
+
+	## Surviving reach of one column on one side, 0..1 of the local half-width.
+	## `side` is the sign of the offset along the cross-section's perpendicular.
+	func side_solid(col: int, side: float) -> float:
+		if col < 0 or col >= cols:
+			return 0.0
+		return solid[col * 2 + (1 if side >= 0.0 else 0)]
+
+	## The widest reach anywhere in a column range, either side. Used where the
+	## drawn primitive is a circle or a capsule rather than a flank — a foot, a
+	## limb bone, the head cap — and so has only one radius to narrow.
+	func span_solid(from_col: int, to_col: int) -> float:
+		var widest: float = 0.0
+		for c in range(maxi(from_col, 0), mini(to_col, cols)):
+			widest = maxf(widest, maxf(solid[c * 2], solid[c * 2 + 1]))
+		return widest
 
 	## One shared cell corner, by the grid line it sits on.
 	func vert(col: int, row: int) -> Vector2:
@@ -441,7 +519,46 @@ func _erode(p: Patch, cell: int, budget: float, at: Vector2, shed: Array) -> flo
 	if p.touched[cell] == 0:
 		p.touched[cell] = 1
 		p.damaged.append(cell)
+	if p.hp[base + SKIN] <= 0.0 and p.hp[base + MUSCLE] <= 0.0 and p.hp[base + BONE] <= 0.0:
+		p.retire(cell)
 	return removed
+
+
+# ----------------------------------------------------------------- voids ----
+
+## How much of the body is still there at `t` along the clipped spine, on the
+## given side, as a fraction of the width the silhouette would have had.
+##
+## The collision and hit-test capsules are scaled by this, which is what makes a
+## hole something a creature can genuinely walk into instead of a light patch
+## painted on a solid body. 0 means that column has been eaten clean through and
+## nothing there collides at all.
+func body_solid(t: float, side: float) -> float:
+	var p: Patch = patches[BODY_KEY]
+	if not p.live or p.gone_count == 0:
+		return 1.0
+	return p.side_solid(HEAD_COLS + clampi(int(t * float(TORSO_COLS)), 0, TORSO_COLS - 1), side)
+
+
+## The same, for the snout cap the head is hit-tested as.
+func head_solid() -> float:
+	var p: Patch = patches[BODY_KEY]
+	if not p.live or p.gone_count == 0:
+		return 1.0
+	return p.span_solid(0, HEAD_COLS)
+
+
+## The same, for one drawn limb primitive: 0 = upper bone, 1 = lower, 2 = foot.
+func limb_solid(key: String, segment: int) -> float:
+	var p: Patch = patch(key)
+	if p == null or not p.live or p.gone_count == 0:
+		return 1.0
+	var half: int = LIMB_BONE_COLS / 2
+	if segment == 0:
+		return p.span_solid(0, half)
+	if segment == 1:
+		return p.span_solid(half, LIMB_BONE_COLS)
+	return p.span_solid(LIMB_BONE_COLS, LIMB_COLS)
 
 
 # -------------------------------------------------------------- skeletons ----
@@ -467,9 +584,11 @@ func _body_has_bone(col: int, v: float) -> bool:
 		return lateral <= GIRDLE_SPAN
 	# Ribs: alternating columns between the girdles, so a bite landing in a gap
 	# reaches the muscle the ribs do not cover. That alternation is what makes
-	# the cage read as structure instead of as one plate over the chest.
-	return torso > SHOULDER_COL and torso < PELVIS_COL \
-		and torso % 2 == 0 and lateral <= RIB_SPAN
+	# the cage read as structure instead of as one plate over the chest, and it
+	# is why a rib is never laid against a girdle — two adjacent crossbars are
+	# one wide bar, and there is no gap left to bite into.
+	return torso > SHOULDER_COL + 1 and torso < PELVIS_COL - 1 \
+		and torso % 2 == 1 and lateral <= RIB_SPAN
 
 
 ## Limbs are a bone core running their whole length, with flesh either side.

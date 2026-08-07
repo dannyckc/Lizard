@@ -302,11 +302,18 @@ func _resolve_contacts() -> void:
 		if bounds_center.distance_to(other.bounds_center) > bounds_radius + other.bounds_radius:
 			continue
 		for i in range(last + 1):
+			# Both halves of a contact have to know about both sets of holes.
+			# `push_out_of_body` narrows the body being walked into; this narrows
+			# the body doing the walking, so a creature eaten open at the waist
+			# can be closed over rather than held off at its old width.
+			var solid: float = _solid_at(i, last)
+			if solid <= 0.0:
+				continue
 			# Point 0 is the head, and the head is placed rather than simulated,
 			# so its contact has to move `head_pos` — the spine's copy of it is
 			# overwritten from there a few lines later.
 			var at: Vector2 = head_pos if i == 0 else spine.points[i]
-			var push: Vector2 = other.push_out_of_body(at, body.widths[i])
+			var push: Vector2 = other.push_out_of_body(at, body.widths[i] * solid)
 			if push == Vector2.ZERO:
 				continue
 			if push.length_squared() > deepest.length_squared():
@@ -317,6 +324,18 @@ func _resolve_contacts() -> void:
 			else:
 				spine.displace(i, push)
 	_brake_into(deepest)
+
+
+## How much tissue is still standing around one spine point, as a fraction of
+## the width the silhouette would have there. The probe is a circle about the
+## axis, so it takes the wider of the two flanks — a body eaten open on one side
+## is still as wide as the side that survived.
+func _solid_at(i: int, last: int) -> float:
+	var tissue: TissueGrid = anatomy.tissue
+	if i == 0:
+		return tissue.head_solid()
+	var t: float = float(i) / float(maxi(last, 1))
+	return maxf(tissue.body_solid(t, 1.0), tissue.body_solid(t, -1.0))
 
 
 ## Sheds the part of the forward speed that is driving into a contact.
@@ -347,10 +366,18 @@ func _brake_into(push: Vector2) -> void:
 ## creatures collide with exactly the silhouette that is drawn. Only the deepest
 ## overlap is returned: consecutive capsules share their end caps, so summing
 ## them would push out by several times the actual penetration.
+##
+## Each capsule is narrowed to the tissue that is actually still there, per
+## side, so a body eaten open is open: a flank chewed halfway in stops pushing
+## at the new surface, and a station eaten clean through stops colliding at all
+## and can be walked straight into. Without this the hole would be a hole you
+## could see through and not one you could reach through, which is the same
+## illusion as painting the ground colour over it.
 func push_out_of_body(at: Vector2, radius: float) -> Vector2:
 	if body == null or spine == null:
 		return Vector2.ZERO
 	var last: int = mini(body.last_index, spine.size() - 1)
+	var tissue: TissueGrid = anatomy.tissue
 	var deepest: float = 0.0
 	var out: Vector2 = Vector2.ZERO
 	for i in range(last):
@@ -360,7 +387,11 @@ func push_out_of_body(at: Vector2, radius: float) -> Vector2:
 		var axis: Vector2 = a.lerp(b, u)
 		var delta: Vector2 = at - axis
 		var distance: float = delta.length()
-		var overlap: float = radius + lerpf(body.widths[i], body.widths[i + 1], u) - distance
+		var side: float = delta.dot(spine.perps[i])
+		var solid: float = tissue.body_solid((float(i) + u) / float(maxi(last, 1)), side)
+		if solid <= 0.0:
+			continue
+		var overlap: float = radius + lerpf(body.widths[i], body.widths[i + 1], u) * solid - distance
 		if overlap <= deepest:
 			continue
 		deepest = overlap

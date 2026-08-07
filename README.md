@@ -225,13 +225,17 @@ limits mean the same thing on both flanks and at any heading.
 
 ### Tissue
 
-Damage lives in a lattice of body cells — 26 x 7 over the body, 8 x 3 per limb
+Damage lives in a lattice of body cells — 32 x 7 over the body, 10 x 3 per limb
 — and each cell is a stack of three tissues in *depth*, because top-down means
 you are looking down through them: skin over muscle over bone. A bite spends a
 penetration budget strictly outside-in, so nothing under a layer can be touched
 until that layer is gone, and the colour of a cell is simply whatever is now
 uppermost in it. Each layer also darkens toward the one beneath as it thins, so
 a bite that has not broken through still shows how far it got.
+
+The lattice is not an overlay on the creature — it *is* the creature. The body
+is drawn cell by cell rather than as a silhouette with the wounds painted over
+it, which is the whole reason a wound can be a hole (see below).
 
 Skin is a rind and muscle is where the fight is: at the default `bite_damage`
 one bite strips skin across nearly the full width of the jaws, three tear
@@ -245,34 +249,69 @@ Bone is not just thicker, and it does not lie under the whole body. It exists
 only where there is an actual skeleton, laid out in body space:
 
 ```
-......#.......#...........   ← only the girdles reach the flank
-####..#.#.#.#.#...........
-####..#.#.#.#.#...........
-##########################   ← vertebrae, one cell wide, snout to tail tip
-####..#.#.#.#.#...........
-####..#.#.#.#.#...........
-......#.......#...........
-^--^  ^-------^  ^-------^
-skull  ribcage   loin + tail
+...........#.....#..............   ← only the girdles reach the flank
+########...#.#.#.#..............
+########...#.#.#.#..............
+################################   ← vertebrae, one cell wide, snout to tail tip
+########...#.#.#.#..............
+########...#.#.#.#..............
+...........#.....#..............
+^------^   ^ ^-^ ^  ^-----------^
+  skull    girdles    loin + tail
+             ribs
 ```
 
 A skull filling the head cap but not the cheeks; a vertebral column one cell
 wide running the whole length; a full-width girdle under each pair of limb
-sockets; three ribs between them on alternating columns; a core down each limb.
-That is 36% of the body's cells, and the sparseness is the point. Bone yields at
+sockets; two ribs between them on alternating columns; a core down each limb.
+That is 38% of the body's cells, and the sparseness is the point. Bone yields at
 half the incoming depth and then *stops the bite*, since there is nothing behind
 it to reach — so wherever it runs, a wound bottoms out on a pale bar, and
 wherever it does not, flesh is all there is and eating through it **opens a hole
-clean to the ground**. Both states have to exist for either to read: if bone sat
-under most of the body every wound would end on the same surface and you could
-not tell a skeleton from a hole. The alternation is what makes the ribcage a
-cage rather than a shell — a bite landing between two ribs reaches the muscle
-they do not cover, and one landing on a rib does not.
+clean through the creature**. Both states have to exist for either to read: if
+bone sat under most of the body every wound would end on the same surface and
+you could not tell a skeleton from a hole. The alternation is what makes the
+ribcage a cage rather than a shell — a bite landing between two ribs reaches the
+muscle they do not cover and one landing on a rib does not; a rib is never laid
+against a girdle, because two adjacent crossbars are one wide bar with no gap
+left to bite into.
 
 The layout is fixed in body space for the same reason the grid dimensions are:
 it has to name the same cells after the tuning panel has restructured the spine
 underneath it. The girdle columns therefore mirror the *default* `front_limb_t`
 and `rear_limb_t` rather than tracking them live.
+
+**The frame has to be one connected piece**, and it is asserted as one — a flood
+fill from the snout has to reach every bone cell, and every limb socket has to
+sit in one. Flesh is what a bite takes first, so a skeleton whose parts meet
+only through muscle comes apart into floating fragments at exactly the moment
+the skeleton is the whole of what is left to look at. It is also why each girdle
+sits in the column its socket is *in* rather than the one beside it: a limb bone
+rooted over flesh is a limb attached to the creature by meat alone.
+
+#### A hole is a hole
+
+A cell with nothing left in any layer is not drawn, not collided with and not
+hit-tested. The obvious alternative — leave the silhouette solid and stamp
+destroyed cells in the ground colour — looks nearly right and is wrong in every
+way that matters. Ground-coloured ink is still ink: it hides whatever is behind
+the creature instead of showing it, it stops lining up the moment a wound sits
+over a second creature or a scrap, and, worst, nothing downstream knows the
+tissue has gone. A creature could be eaten hollow and still be a wall.
+
+So the void is carried all the way through. The capsules the body is collided
+and hit-tested with are narrowed, per side, to the tissue still standing at each
+station: chew halfway into a flank and contact stops at the new surface, chew a
+station clean through and it stops colliding at all and can be walked straight
+into. Jaws closing on an opening find nothing to bite. That surviving reach is
+recomputed when a cell is destroyed rather than per frame, so an undamaged
+creature pays nothing for any of it.
+
+Drawing the body from its cells has one cost worth naming: the lattice is the
+outline now, so the snout and tail caps need enough columns to read as round
+without a `draw_circle` under them, and the interior seams have to skip the
+columns crowded against a cap's tip — eight columns share the first two pixels
+of the snout, and every seam in that stretch lands on the last one.
 
 Two decisions carry the rest of it:
 
@@ -295,20 +334,27 @@ volume, and being bitten feeds you.
 
 #### Keeping it cheap
 
-Per tick the lattice only re-derives cross-sections — about sixty for a whole
-creature — and everything priced per *cell* is deferred to the rare ticks a bite
-lands on. Intact skin is already on screen as the body fill, so the lattice
-draws purely as an overlay of what has been lost: cost tracks the damage, not
-the ~180 cells, and an untouched creature costs one early return per patch.
+Per tick the lattice only re-derives cross-sections — about seventy for a whole
+creature — and everything priced per *cell* outside of drawing is deferred to
+the rare ticks a bite lands on: erosion, the shed chunks, and the per-column
+surviving reach the collision queries read.
 
-The cells that do draw, and the loose chunks, go out as single indexed triangle
-arrays rather than a polygon apiece. That one is worth stating with numbers,
-because it is not a micro-optimisation: Godot issues one canvas command per
-`draw_colored_polygon`, and a badly chewed pair of creatures with a saturated
-scrap field reaches a few hundred a frame. Measured in a 1280x760 window, that
-alone cost **5.5 ms/frame** and took the scene from 120 to 72 fps. Batched, the
-same worst case costs **0.29 ms** — under 2% of a 60 fps budget, a 19x
-reduction. The interior cell seams are one `draw_multiline` for the same reason.
+Drawing does have to walk the whole lattice, since the lattice is the body. What
+keeps that honest is that the walk happens **once per structure per frame, not
+once per pass**: the mesh built for the torso is reused by all three of its
+offset shadows, which Godot will fill from a single-entry colour array, so the
+shadows cost three draw calls and no geometry at all. A whole creature — torso,
+four limbs, every shadow — is **0.29 ms** of mesh building, and it gets cheaper
+as the creature is eaten because destroyed cells are skipped.
+
+The cells, and the loose chunks, go out as single indexed triangle arrays rather
+than a polygon apiece. That one is worth stating with numbers, because it is not
+a micro-optimisation: Godot issues one canvas command per `draw_colored_polygon`,
+and a chewed pair of creatures with a saturated scrap field reached a few hundred
+a frame. Measured in a 1280x760 window, that alone cost **5.5 ms/frame** and took
+the scene from 120 to 72 fps. Drawn as cells the whole creature is about twenty
+commands, shadows included. The interior seams are one `draw_multiline` for the
+same reason.
 
 ### The lunge
 
@@ -396,7 +442,17 @@ It also asserts the skeleton is still a *frame* — bone under less than half th
 body, at least three free-standing crossbars over the torso with flesh either
 side, nothing but vertebrae behind the hips — and that flesh with no bone under
 it is eaten clean through rather than bottoming out. Those are shape claims, not
-totals, so they catch a skeleton that has quietly spread into a plate.
+totals, so they catch a skeleton that has quietly spread into a plate. Two more
+say the frame is a single connected piece: a flood fill from the snout has to
+reach every bone cell, and every limb socket has to sit over a girdle rather
+than over flesh.
+
+Then it checks that a hole is genuinely a hole, which needs three things to
+agree. Cells stripped of every layer are retired; eating one flank narrows the
+body on that side and *only* that side; and a station eaten clean through stops
+colliding and stops answering the bite query, while the rest of the creature
+goes on doing both. Painting destroyed cells the colour of the ground passes
+none of the last four.
 
 And it covers contacts: a creature driven at another for four seconds at full
 throttle ends up stopped against it rather than through it and with its speed

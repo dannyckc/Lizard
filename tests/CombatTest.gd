@@ -61,6 +61,7 @@ func _run_checks() -> void:
 
 	_check_skeleton(target)
 	_check_tissue(target)
+	_check_voids(target)
 
 	# Mouse aim turns without secretly applying forward throttle.
 	var mouse_input := MovementInput.new()
@@ -163,6 +164,112 @@ func _check_skeleton(target: Creature) -> void:
 	for c in range(TissueGrid.HEAD_COLS + TissueGrid.TORSO_COLS, body.cols):
 		tail_clear = tail_clear and per_column[c] == 1
 	_check(tail_clear, "the tail carries more than a vertebral column")
+
+	# The frame has to be one piece, joined bone to bone. Flesh is what a bite
+	# takes first, so a skeleton whose parts only meet through muscle falls into
+	# floating fragments exactly when a creature has been chewed down to it —
+	# which is the one time the skeleton is the whole of what you are looking at.
+	var reached: Dictionary = {}
+	var stack: Array[int] = []
+	for r in body.rows:
+		if body.bone[r] == 1:  # seed from the snout column, at the far end of it
+			reached[r] = true
+			stack.append(r)
+	while not stack.is_empty():
+		var cell: int = stack.pop_back()
+		var c: int = cell / body.rows
+		var r2: int = cell % body.rows
+		for step: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var nc: int = c + step.x
+			var nr: int = r2 + step.y
+			if nc < 0 or nc >= body.cols or nr < 0 or nr >= body.rows:
+				continue
+			var n: int = nc * body.rows + nr
+			if body.bone[n] == 1 and not reached.has(n):
+				reached[n] = true
+				stack.append(n)
+	_check(reached.size() == boned,
+		"%d bone cells are not joined to the skull — the skeleton is in pieces"
+			% (boned - reached.size()))
+
+	# ...and the limbs hang off it. A socket over flesh means a limb bone tied to
+	# the axial skeleton by nothing but the meat around it.
+	for limb in target.gait.limbs:
+		_check(body.bone[_nearest_cell(body, limb.joints[0])] == 1,
+			"the %s socket sits over flesh, not over a girdle" % limb.key)
+
+
+## Tissue eaten through every layer has to be genuinely gone, not painted the
+## colour of the ground. Ground-coloured cells look right only against an empty
+## background: they still hide whatever is behind the creature, and — the part
+## that actually matters — the body still collides and hit-tests as though the
+## tissue were there, so a creature can be eaten hollow and still be a wall.
+##
+## So three things have to agree that a hole is a hole: the lattice retires the
+## cell, the body stops colliding where it used to be, and the bite query stops
+## finding anything to bite there.
+func _check_voids(target: Creature) -> void:
+	target.anatomy.reset()
+	target._physics_process(TICK)
+	var tissue: TissueGrid = target.anatomy.tissue
+	var body: TissueGrid.Patch = tissue.patch(TissueGrid.BODY_KEY)
+	var last: int = target.body.last_index
+	_check(body.gone_count == 0, "an untouched creature already had holes in it")
+
+	# Well behind the ribcage, so this is flesh over a single vertebra rather
+	# than over a crossbar, and a bite can reach every layer of it.
+	var station: int = clampi(int(round(float(last) * 0.75)), 2, last - 2)
+	var t: float = float(station) / float(last)
+	var perp: Vector2 = target.spine.perps[station]
+	var axis: Vector2 = target.spine.points[station]
+	var flank: Vector2 = axis + perp * (target.body.widths[station] * 0.7)
+
+	_check(is_equal_approx(tissue.body_solid(t, 1.0), 1.0),
+		"an intact flank did not report its full width")
+	_check(target.push_out_of_body(flank, 1.0) != Vector2.ZERO,
+		"the intact flank collided with nothing — the probe proves nothing")
+	_check(target.query_bite(flank, 1.0) != null, "the intact flank was not hit-testable")
+
+	# One flank first: eating into a body from one side must not thin the other.
+	var shed: Array = []
+	for _i in 10:
+		tissue.bite(flank, 7.0, 3.0, shed)
+	_check(body.gone_count > 0, "cells stripped of every layer were never retired")
+	_check(body.gone[_nearest_cell(body, flank)] == 1,
+		"the cell under a bite that ate skin, muscle and all was still reported as tissue")
+	_check(tissue.body_solid(t, 1.0) < 1.0,
+		"eating a flank open did not narrow the body there")
+	_check(is_equal_approx(tissue.body_solid(t, -1.0), 1.0),
+		"eating one flank thinned the other one too")
+
+	# Now the whole cross-section, three stations wide so the neighbouring
+	# capsules cannot reach the probe and answer for the piece that is gone.
+	for s in range(station - 1, station + 2):
+		for _i in 16:
+			tissue.bite(target.spine.points[s], 13.0, 3.0, shed)
+	_check(is_equal_approx(tissue.body_solid(t, 1.0), 0.0)
+			and is_equal_approx(tissue.body_solid(t, -1.0), 0.0),
+		"a station eaten clean through still reported tissue standing on it")
+	_check(target.push_out_of_body(axis, 1.0) == Vector2.ZERO,
+		"a hole eaten clean through the body is still solid to walk into")
+	_check(target.query_bite(axis, 1.0) == null,
+		"jaws closing on a hole still found tissue to bite")
+
+	# Both halves of a contact have to know about the hole, not just the body
+	# being walked into: a creature eaten open must also stop shoving others
+	# away at the width it no longer has.
+	_check(is_equal_approx(target._solid_at(station, last), 0.0),
+		"an eaten-through station still probed other bodies at its old width")
+	_check(target._solid_at(1, last) > 0.0,
+		"an intact station stopped probing other bodies at all")
+
+	# The rest of the creature is untouched by any of that — the void is local,
+	# not a body that has quietly stopped colliding altogether.
+	var intact: Vector2 = target.spine.points[1]
+	_check(target.push_out_of_body(intact, 1.0) != Vector2.ZERO,
+		"opening a hole in the tail stopped the whole body colliding")
+	_check(target.query_bite(intact, 1.0) != null,
+		"opening a hole in the tail made the whole body un-biteable")
 
 
 ## The layered lattice: bites eat strictly outside-in, land only where they

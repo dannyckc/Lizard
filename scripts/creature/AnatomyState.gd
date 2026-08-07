@@ -65,17 +65,22 @@ func hit_test(creature: Node, bite_center: Vector2, bite_radius: float) -> Hit:
 	var body: BodyShape = creature.body
 	var spine: Spine = creature.spine
 
+	# Every primitive below is narrowed to the tissue still standing on it, so
+	# jaws closing on a place a previous bite already emptied find nothing there
+	# and the strike reads as a miss. A structure eaten clean through drops out
+	# of the query entirely rather than answering as a target with no substance.
 	# --- head: the same circle CreatureView draws --------------------------
+	var head_radius: float = body.head_radius * tissue.head_solid()
 	var head_delta: Vector2 = bite_center - body.head.pos
 	var head_distance: float = head_delta.length()
-	var head_score: float = head_distance - body.head_radius
-	if head_score <= bite_radius:
+	var head_score: float = head_distance - head_radius
+	if head_radius > 0.0 and head_score <= bite_radius:
 		var head_dir: Vector2 = head_delta / head_distance if head_distance > 0.0001 else body.head.fwd
 		var head_hit := Hit.new()
 		head_hit.region_id = "head"
 		head_hit.kind = HEAD
 		head_hit.score = head_score
-		head_hit.world_point = body.head.pos + head_dir * body.head_radius
+		head_hit.world_point = body.head.pos + head_dir * head_radius
 		head_hit.local_forward = head_dir.dot(body.head.fwd)
 		head_hit.lateral = head_dir.dot(body.head.perp)
 		best = head_hit
@@ -88,8 +93,12 @@ func hit_test(creature: Node, bite_center: Vector2, bite_radius: float) -> Hit:
 		var b: Vector2 = spine.points[i + 1]
 		var u: float = segment_u(bite_center, a, b)
 		var axis: Vector2 = a.lerp(b, u)
-		var tissue_radius: float = lerpf(body.widths[i], body.widths[i + 1], u)
 		var radial: Vector2 = bite_center - axis
+		var solid: float = tissue.body_solid(
+			(float(i) + u) / float(maxi(last, 1)), radial.dot(spine.perps[i]))
+		if solid <= 0.0:
+			continue
+		var tissue_radius: float = lerpf(body.widths[i], body.widths[i + 1], u) * solid
 		var radial_distance: float = radial.length()
 		var score: float = radial_distance - tissue_radius
 		if score > bite_radius or (best != null and score >= best.score):
@@ -110,11 +119,14 @@ func hit_test(creature: Node, bite_center: Vector2, bite_radius: float) -> Hit:
 	for limb in creature.gait.limbs:
 		var widths: Vector2 = _limb_widths(limb, creature.size_scale)
 		for segment in 2:
+			var limb_solid: float = tissue.limb_solid(limb.key, segment)
+			if limb_solid <= 0.0:
+				continue
 			var la: Vector2 = limb.joints[segment]
 			var lb: Vector2 = limb.joints[segment + 1]
 			var limb_u: float = segment_u(bite_center, la, lb)
 			var limb_axis: Vector2 = la.lerp(lb, limb_u)
-			var limb_radius: float = (widths.x if segment == 0 else widths.y) * 0.5
+			var limb_radius: float = (widths.x if segment == 0 else widths.y) * 0.5 * limb_solid
 			var limb_score: float = bite_center.distance_to(limb_axis) - limb_radius
 			if limb_score > bite_radius or (best != null and limb_score >= best.score):
 				continue
@@ -128,9 +140,10 @@ func hit_test(creature: Node, bite_center: Vector2, bite_radius: float) -> Hit:
 			limb_hit.limb_u = limb_u
 			best = limb_hit
 
-		var foot_radius: float = maxf(limb.total_length * 0.10, 3.0 * creature.size_scale)
+		var foot_radius: float = maxf(limb.total_length * 0.10, 3.0 * creature.size_scale) \
+			* tissue.limb_solid(limb.key, 2)
 		var foot_score: float = bite_center.distance_to(limb.joints[2]) - foot_radius
-		if foot_score <= bite_radius and (best == null or foot_score < best.score):
+		if foot_radius > 0.0 and foot_score <= bite_radius and (best == null or foot_score < best.score):
 			var foot_hit := Hit.new()
 			foot_hit.region_id = "limb:%s:foot" % limb.key
 			foot_hit.kind = LIMB

@@ -126,7 +126,7 @@ func _process(delta: float) -> void:
 ## Drawn as rotated squares: the same cell the chunk was torn out of, now loose.
 ##
 ## Emitted as one indexed triangle array, for the reason spelled out in
-## CreatureView._draw_cells — a full field is 160 chunks, and 160 separate
+## CreatureView._build — a full field is 160 chunks, and 160 separate
 ## polygon commands a frame is a measurable slice of the budget on its own.
 func _draw() -> void:
 	var count: int = scraps.size()

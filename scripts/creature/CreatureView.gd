@@ -2,8 +2,20 @@
 ## writes to it, so the simulation can be run headless or drawn differently
 ## without touching a line of the systems above.
 ##
-## Draw order: ground shadows -> limbs -> body -> feet -> debug overlay, so the
-## legs read as being underneath the torso the way they do from above.
+## Draw order: limbs -> body -> feet -> debug overlay, so the legs read as being
+## underneath the torso the way they do from above. Each structure's shadows go
+## down immediately before it rather than in one pass up front, because both are
+## the same mesh — see _build.
+##
+## The creature is drawn *as* its tissue lattice, not as a silhouette with the
+## damage painted over it. That is the whole reason a wound can read as a hole:
+## a cell with nothing left in it is simply not emitted, so the world behind it
+## shows through by omission. The alternative — filling the silhouette and then
+## stamping destroyed cells in the ground colour — cannot be made to work
+## however carefully the colour is matched, because it is still ink on the
+## canvas: it hides whatever is behind the creature, it never lines up over a
+## second creature or a scrap, and nothing about the body's collision or hit
+## testing knows the tissue is missing.
 class_name CreatureView
 extends Node2D
 
@@ -16,7 +28,6 @@ const COL_SHADOW_MID := Color(INK, 0.035)
 const COL_SHADOW_FAR := Color(INK, 0.020)
 const COL_BODY_HEAD := INK
 const COL_BODY_TAIL := INK
-const COL_LIMB := INK
 const COL_EYE := PAPER
 # Tissue revealed by damage, in the order a bite uncovers it. Intact skin is
 # just the body fill, so it needs no colour of its own.
@@ -28,12 +39,14 @@ const COL_MUSCLE_DEEP := Color("5f2114")
 ## not tell a skeleton from a hole in one.
 const COL_BONE := Color("c9bda0")
 const COL_BONE_WORN := Color("a08d68")
-## A cell with nothing left in it is a hole, so it is drawn as the paper the
-## world is drawn on. Where the skeleton runs there is bone to stop the bite;
-## everywhere else flesh is all there is, and eating it opens the body.
-const COL_GROUND := PAPER
 ## Cell seams, faint enough to read as scale texture rather than as a grid.
 const COL_SEAM := Color(PAPER, 0.085)
+## Shortest seam worth stroking, in world pixels — below about a line's own
+## width a seam is a dot, not a seam. See _seam.
+const SEAM_MIN: float = 1.5
+## Limbs sit close to the ground, so they get one tight shadow rather than the
+## torso's three.
+const COL_SHADOW_LIMB := Color(INK, 0.05)
 
 const COL_DBG_SPINE := Color(INK, 0.55)
 const COL_DBG_RANGE := Color(INK, 0.07)
@@ -53,6 +66,11 @@ var _seams := PackedVector2Array()
 var _mesh_points := PackedVector2Array()
 var _mesh_colors := PackedColorArray()
 var _mesh_indices := PackedInt32Array()
+## Single-entry colour array. Godot broadcasts a one-colour array across a whole
+## triangle array, which is what lets a shadow reuse the mesh already built for
+## the tissue instead of refilling several hundred vertex colours to say one
+## thing.
+var _flat := PackedColorArray([Color.TRANSPARENT])
 
 
 func _ready() -> void:
@@ -70,31 +88,42 @@ func _draw() -> void:
 	var body: BodyShape = creature.body
 	if body.outline.size() < 3:
 		return
-
-	# Three restrained offset silhouettes approximate the diffused editorial
-	# shadow from the reference without introducing a sprite or blur texture.
-	_draw_body_fill(body, COL_SHADOW_FAR, COL_SHADOW_FAR, Vector2(0.0, 12.0 * creature.size_scale))
-	_draw_body_fill(body, COL_SHADOW_MID, COL_SHADOW_MID, Vector2(0.0, 8.0 * creature.size_scale))
-	_draw_body_fill(body, COL_SHADOW_NEAR, COL_SHADOW_NEAR, Vector2(0.0, 5.0 * creature.size_scale))
-	for limb in creature.gait.limbs:
-		_draw_limb_shadow(limb, Vector2(0.0, 5.0 * creature.size_scale))
-
 	var tissue: TissueGrid = creature.anatomy.tissue
+	var torso: TissueGrid.Patch = tissue.patch(TissueGrid.BODY_KEY)
+	if torso == null or not torso.live:
+		# Nothing has posed the lattice yet, so there is no body to draw from.
+		# The silhouette is the same shape the cells tessellate, so falling back
+		# to it costs a frame of un-chewable creature rather than an invisible
+		# one — and only ever on the frame a creature is built.
+		_draw_body_fill(body, COL_BODY_HEAD, COL_BODY_TAIL, Vector2.ZERO)
+		return
 
+	var lift := Vector2(0.0, 5.0 * creature.size_scale)
+
+	# Limb bones, under the torso.
 	for limb in creature.gait.limbs:
-		_draw_limb(limb)
-	# Bone damage belongs under the torso, foot damage over it — same reason the
-	# limbs themselves are split around the body fill.
-	_draw_limb_cells(tissue, 0, TissueGrid.LIMB_BONE_COLS)
+		if _build(tissue.patch(limb.key), 0, TissueGrid.LIMB_BONE_COLS) > 0:
+			_flush_flat(lift, COL_SHADOW_LIMB)
+			_flush()
 
-	_draw_body_fill(body, COL_BODY_HEAD, COL_BODY_TAIL, Vector2.ZERO)
-	_draw_head(body)
-	_draw_cells(tissue.patch(TissueGrid.BODY_KEY), 0, TissueGrid.BODY_COLS)
-	_draw_seams(tissue.patch(TissueGrid.BODY_KEY))
+	# Torso. Three restrained offset copies approximate the diffused editorial
+	# shadow from the reference without a sprite or a blur texture; they are the
+	# body's own mesh, so a hole in the creature is a hole in its shadow too.
+	if _build(torso, 0, TissueGrid.BODY_COLS) > 0:
+		_flush_flat(Vector2(0.0, 12.0 * creature.size_scale), COL_SHADOW_FAR)
+		_flush_flat(Vector2(0.0, 8.0 * creature.size_scale), COL_SHADOW_MID)
+		_flush_flat(lift, COL_SHADOW_NEAR)
+		_flush()
+	_draw_seams(torso)
+	_draw_eyes(body, torso)
 
+	# Feet, over the torso — same reason the limb bones went under it.
 	for limb in creature.gait.limbs:
-		_draw_foot(limb)
-	_draw_limb_cells(tissue, TissueGrid.LIMB_BONE_COLS, TissueGrid.LIMB_COLS)
+		_draw_foot_shadow(limb)
+	for limb in creature.gait.limbs:
+		if _build(tissue.patch(limb.key), TissueGrid.LIMB_BONE_COLS, TissueGrid.LIMB_COLS) > 0:
+			_flush_flat(lift, COL_SHADOW_LIMB)
+			_flush()
 
 	_draw_jaw(body)
 
@@ -107,6 +136,10 @@ func _draw() -> void:
 ## Fills the torso as a strip of quads between consecutive cross-sections.
 ## Quads are always convex, so this needs no polygon triangulation and cannot
 ## break however sharply the spine bends.
+##
+## Only the fallback for a creature whose lattice has not been posed yet. It
+## cannot express a wound — it is the whole silhouette or none of it — which is
+## exactly why the body is drawn from the cells instead.
 func _draw_body_fill(body: BodyShape, col_head: Color, col_tail: Color, offset: Vector2) -> void:
 	var last: int = body.last_index
 	if last < 1:
@@ -124,71 +157,67 @@ func _draw_body_fill(body: BodyShape, col_head: Color, col_tail: Color, offset: 
 	draw_circle(creature.spine.points[last] + offset, body.widths[last], col_tail)
 
 
-func _draw_head(body: BodyShape) -> void:
-	# Two paper pinpricks give the otherwise abstract ink silhouette its life.
-	draw_circle(body.eye_left, body.eye_radius * 0.82, COL_EYE)
-	draw_circle(body.eye_right, body.eye_radius * 0.82, COL_EYE)
+## Two paper pinpricks give the otherwise abstract ink silhouette its life —
+## but only while there is still a head under them to belong to. An eye over an
+## eaten-out skull would be the one thing left painting paper onto nothing.
+func _draw_eyes(body: BodyShape, torso: TissueGrid.Patch) -> void:
+	if _cell_survives(torso, body.eye_left, 0, TissueGrid.HEAD_COLS):
+		draw_circle(body.eye_left, body.eye_radius * 0.82, COL_EYE)
+	if _cell_survives(torso, body.eye_right, 0, TissueGrid.HEAD_COLS):
+		draw_circle(body.eye_right, body.eye_radius * 0.82, COL_EYE)
+
+
+## Whether the cell nearest `at`, within a column range, still has tissue in it.
+func _cell_survives(patch: TissueGrid.Patch, at: Vector2, from_col: int, to_col: int) -> bool:
+	if patch.gone_count == 0:
+		return true
+	var best: int = -1
+	var best_d: float = INF
+	for cell in range(from_col * patch.rows, to_col * patch.rows):
+		var d: float = at.distance_squared_to(patch.centre_of(cell))
+		if d < best_d:
+			best_d = d
+			best = cell
+	return best < 0 or patch.gone[best] == 0
 
 
 # ------------------------------------------------------------------ limb ----
 
-func _limb_widths(limb: Limb) -> Vector2:
-	var s: float = creature.size_scale
-	var upper: float = maxf(limb.total_length * 0.16, 2.5 * s)
-	return Vector2(upper, upper * 0.72)
-
-
-func _draw_limb_shadow(limb: Limb, offset: Vector2) -> void:
-	var w: Vector2 = _limb_widths(limb)
-	draw_line(limb.joints[0] + offset, limb.joints[1] + offset, Color(INK, 0.05), w.x + 1.5, true)
-	draw_line(limb.joints[1] + offset, limb.joints[2] + offset, Color(INK, 0.05), w.y + 1.5, true)
-
-
-func _draw_limb(limb: Limb) -> void:
-	var w: Vector2 = _limb_widths(limb)
-	draw_line(limb.joints[0], limb.joints[1], COL_LIMB, w.x, true)
-	draw_line(limb.joints[1], limb.joints[2], COL_LIMB, w.y, true)
-
-
 ## Lift is communicated by the widening gap to a soft oval shadow, keeping the
-## character strictly monochrome in both planted and airborne poses.
-func _draw_foot(limb: Limb) -> void:
+## character strictly monochrome in both planted and airborne poses. The foot
+## itself is lattice like everything else, and is drawn with the rest of it.
+func _draw_foot_shadow(limb: Limb) -> void:
 	var s: float = creature.size_scale
 	var r: float = maxf(limb.total_length * 0.10, 3.0 * s)
-	var lifted: Vector2 = limb.joints[2]
-
 	var shadow_r: float = r * (1.0 - 0.35 * clampf(limb.lift / maxf(r * 3.0, 1.0), 0.0, 1.0))
 	draw_set_transform(limb.ground + Vector2(0.0, 5.0 * s), 0.0, Vector2(1.05, 0.70))
 	draw_circle(Vector2.ZERO, shadow_r, Color(INK, maxf(0.035, 0.13 - limb.lift * 0.004)))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	draw_circle(lifted, r, INK)
 
 
 # ----------------------------------------------------------------- cells ----
 
-## Draws the damaged cells of one patch, restricted to a column range.
+## Builds the surviving cells of one patch, over a column range, into the shared
+## mesh buffers. Returns how many cells were emitted, or 0 if there is nothing
+## left to draw there.
 ##
-## Two things keep this cheap, and both are load-bearing.
+## The whole lattice is walked rather than just the wounds, because the lattice
+## is the body now — but the mesh built here is reused by every pass over that
+## structure, so the walk happens once per structure per frame and not once per
+## pass. That is what keeps the shadows free: three more copies of the torso
+## cost three draw calls and no geometry.
 ##
-## Intact skin is already on screen as the body fill, so the lattice is drawn
-## purely as an overlay of what has been *lost* — cost tracks the damage, not
-## the ~180-cell lattice, and an untouched creature costs one early return.
-##
-## The cells that do draw go out as a single indexed triangle array rather than
-## a polygon apiece. Godot issues one canvas command per `draw_colored_polygon`,
-## and a badly chewed pair of creatures reaches a few hundred of them a frame;
-## measured, that alone cost ~5.5 ms/frame and took a 1280x760 window from 120
-## to 72 fps. Batched, the same cells are four commands for the whole world.
-func _draw_cells(patch: TissueGrid.Patch, from_col: int, to_col: int) -> void:
-	if patch == null or not patch.live or patch.damaged.is_empty():
-		return
-	var count: int = 0
-	for cell in patch.damaged:
-		var col: int = cell / patch.rows
-		if col >= from_col and col < to_col:
-			count += 1
-	if count == 0:
-		return
+## The cells go out as a single indexed triangle array rather than a polygon
+## apiece. Godot issues one canvas command per `draw_colored_polygon`, and a
+## chewed pair of creatures reached a few hundred of them a frame; measured,
+## that alone cost ~5.5 ms/frame and took a 1280x760 window from 120 to 72 fps.
+## Batched, a whole creature is a handful of commands.
+func _build(patch: TissueGrid.Patch, from_col: int, to_col: int) -> int:
+	if patch == null or not patch.live:
+		return 0
+	var count: int = (to_col - from_col) * patch.rows - _gone_in(patch, from_col, to_col)
+	if count <= 0:
+		return 0
 
 	if _mesh_points.size() != count * 4:
 		_mesh_points.resize(count * 4)
@@ -196,30 +225,51 @@ func _draw_cells(patch: TissueGrid.Patch, from_col: int, to_col: int) -> void:
 		_mesh_indices.resize(count * 6)
 	var v: int = 0
 	var t: int = 0
-	for cell in patch.damaged:
-		var col: int = cell / patch.rows
-		if col < from_col or col >= to_col:
-			continue
-		patch.corners_of(cell, _quad)
-		var color: Color = _cell_color(patch, cell)
-		for k in 4:
-			_mesh_points[v + k] = _quad[k]
-			_mesh_colors[v + k] = color
-		_mesh_indices[t] = v
-		_mesh_indices[t + 1] = v + 1
-		_mesh_indices[t + 2] = v + 2
-		_mesh_indices[t + 3] = v
-		_mesh_indices[t + 4] = v + 2
-		_mesh_indices[t + 5] = v + 3
-		v += 4
-		t += 6
+	for col in range(from_col, to_col):
+		for row in patch.rows:
+			var cell: int = col * patch.rows + row
+			if patch.gone[cell] != 0:
+				continue
+			patch.corners_of(cell, _quad)
+			var color: Color = _cell_color(patch, cell)
+			for k in 4:
+				_mesh_points[v + k] = _quad[k]
+				_mesh_colors[v + k] = color
+			_mesh_indices[t] = v
+			_mesh_indices[t + 1] = v + 1
+			_mesh_indices[t + 2] = v + 2
+			_mesh_indices[t + 3] = v
+			_mesh_indices[t + 4] = v + 2
+			_mesh_indices[t + 5] = v + 3
+			v += 4
+			t += 6
+	return count
+
+
+## Destroyed cells inside a column range. Skipped outright while the patch is
+## whole, so an unbitten creature never walks its own lattice to be told so.
+func _gone_in(patch: TissueGrid.Patch, from_col: int, to_col: int) -> int:
+	if patch.gone_count == 0:
+		return 0
+	var n: int = 0
+	for cell in range(from_col * patch.rows, to_col * patch.rows):
+		n += patch.gone[cell]
+	return n
+
+
+## Issues the built mesh in its own colours.
+func _flush() -> void:
 	RenderingServer.canvas_item_add_triangle_array(
 		get_canvas_item(), _mesh_indices, _mesh_points, _mesh_colors)
 
 
-func _draw_limb_cells(tissue: TissueGrid, from_col: int, to_col: int) -> void:
-	for limb in creature.gait.limbs:
-		_draw_cells(tissue.patch(limb.key), from_col, to_col)
+## Issues the built mesh again, offset and in one flat colour — a shadow.
+func _flush_flat(offset: Vector2, color: Color) -> void:
+	_flat[0] = color
+	draw_set_transform(offset, 0.0, Vector2.ONE)
+	RenderingServer.canvas_item_add_triangle_array(
+		get_canvas_item(), _mesh_indices, _mesh_points, _flat)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 ## The colour of whatever layer is now uppermost in a cell.
@@ -228,10 +278,10 @@ func _draw_limb_cells(tissue: TissueGrid, from_col: int, to_col: int) -> void:
 ## has not yet broken through still shows how deep it got — penetration reads as
 ## a gradient, and breaching a layer as a step change.
 ##
-## The last case is the one that carries the skeleton: a cell with no bone under
-## it has nothing left once its muscle is gone, so it falls straight through to
-## the ground. Bone is the only thing that stops that, which is what makes the
-## frame legible — the ribs stay as pale bars across an open body cavity.
+## There is no case for an empty cell: those are never built, so what shows
+## through a wound is whatever is actually behind the creature. Bone is the only
+## thing that stops a bite reaching that state, which is what makes the frame
+## legible — the ribs stay as pale bars spanning an open body cavity.
 func _cell_color(patch: TissueGrid.Patch, cell: int) -> Color:
 	var base: int = cell * TissueGrid.LAYERS
 	var skin: float = patch.hp[base + TissueGrid.SKIN]
@@ -240,37 +290,60 @@ func _cell_color(patch: TissueGrid.Patch, cell: int) -> Color:
 	var muscle: float = patch.hp[base + TissueGrid.MUSCLE]
 	if muscle > 0.0:
 		return COL_MUSCLE.lerp(COL_MUSCLE_DEEP, 1.0 - muscle / TissueGrid.MUSCLE_HP)
-	var bone: float = patch.hp[base + TissueGrid.BONE]
-	if bone > 0.0:
-		return COL_BONE.lerp(COL_BONE_WORN, 1.0 - bone / TissueGrid.BONE_HP)
-	return COL_GROUND
+	return COL_BONE.lerp(COL_BONE_WORN, 1.0 - patch.hp[base + TissueGrid.BONE] / TissueGrid.BONE_HP)
 
 
 ## The cell seams, as one batched multiline over the whole body.
 ##
-## Drawing the lattice cell by cell would cost ~180 polygons a frame per
-## creature to say something a single line primitive says just as well, so the
-## interior seams are emitted into one reused buffer and issued in one call. The
-## silhouette's own boundary rows and columns are skipped — the fill already
-## draws that edge, and stroking it again only fattens it.
+## Stroking the lattice cell by cell would cost ~220 line primitives a frame per
+## creature to say something one multiline says just as well, so the interior
+## seams are emitted into one reused buffer and issued in one call.
+##
+## A seam is only interior if there is tissue on *both* sides of it. The
+## silhouette's own boundary is skipped for the usual reason — the fill already
+## draws that edge and stroking it again only fattens it — and the boundary of a
+## wound is skipped for exactly the same reason: once a cell is gone, the edge
+## beside it is silhouette, and a seam left hanging there would outline the hole
+## in a colour the hole cannot have.
 func _draw_seams(patch: TissueGrid.Patch) -> void:
 	if patch == null or not patch.live:
 		return
+	var live: bool = patch.gone_count == 0
 	var needed: int = 2 * (patch.cols * (patch.rows - 1) + (patch.cols - 1) * patch.rows)
-	if _seams.size() != needed:
+	if _seams.size() < needed:
 		_seams.resize(needed)
 	var i: int = 0
 	for c in patch.cols:
+		if _column_thin(patch, c):
+			continue
 		for r in range(1, patch.rows):
-			_seams[i] = patch.vert(c, r)
-			_seams[i + 1] = patch.vert(c + 1, r)
-			i += 2
+			if live or (patch.gone[c * patch.rows + r - 1] == 0 and patch.gone[c * patch.rows + r] == 0):
+				_seams[i] = patch.vert(c, r)
+				_seams[i + 1] = patch.vert(c + 1, r)
+				i += 2
 	for c in range(1, patch.cols):
+		if _column_thin(patch, c - 1) or _column_thin(patch, c):
+			continue
 		for r in patch.rows:
-			_seams[i] = patch.vert(c, r)
-			_seams[i + 1] = patch.vert(c, r + 1)
-			i += 2
-	draw_multiline(_seams, COL_SEAM, 1.0, true)
+			if live or (patch.gone[(c - 1) * patch.rows + r] == 0 and patch.gone[c * patch.rows + r] == 0):
+				_seams[i] = patch.vert(c, r)
+				_seams[i + 1] = patch.vert(c, r + 1)
+				i += 2
+	if i > 0:
+		_seams.resize(i)
+		draw_multiline(_seams, COL_SEAM, 1.0, true)
+
+
+## Whether a column is shorter along the body than a stroke is wide.
+##
+## A cap's outermost station is a single point, and the ones behind it crowd in
+## against it — the snout's eight columns share the first two pixels of it. Every
+## seam in that stretch lands on the last one, so the tip reads as a smudge of
+## hatching rather than as scale texture. Below a stroke's own width a seam
+## cannot say anything a neighbour has not already said.
+func _column_thin(patch: TissueGrid.Patch, col: int) -> bool:
+	var mid: int = patch.rows / 2
+	return patch.vert(col, mid).distance_squared_to(patch.vert(col + 1, mid)) < SEAM_MIN * SEAM_MIN
 
 
 # ------------------------------------------------------------------ bite ----
