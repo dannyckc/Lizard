@@ -83,6 +83,7 @@ func settle(body: BodyShape, limbs: Array[Limb], p: CreatureParams, scale: float
 
 		_prev[limb.key] = PackedVector2Array([limb.joints[1], limb.joints[2]])
 		limb.initialised = true
+		limb.carried = true
 		_publish(limb)
 
 
@@ -103,11 +104,20 @@ func adopt(limbs: Array[Limb]) -> void:
 	for limb in limbs:
 		_prev[limb.key] = PackedVector2Array([limb.joints[1], limb.joints[2]])
 		limb.initialised = true
+		limb.carried = true
 		_publish(limb)
 
 
-## One tick of four limp limbs. Runs where `Gait.update` runs in the live tick,
-## for the same reason and against the same rebuilt body.
+## One tick of every limb nothing is holding out. Runs where `Gait.update` runs in
+## the live tick, for the same reason and against the same rebuilt body.
+##
+## Usually that is all four limbs of a carcass, and the constants above are named
+## for that case. But nothing here is about being dead: it is about a two-bone
+## chain with no stance to be posed into, and a living animal whose leg has been
+## broken through has exactly one of those hanging off it. So that leg is stepped
+## here alongside the gait rather than by some second, softer walk — it hangs from
+## its socket, keeps its bone lengths and its fold, and is dragged wherever the
+## body takes it.
 func step(delta: float, body: BodyShape, limbs: Array[Limb], p: CreatureParams,
 		scale: float, collision_query: Callable = Callable()) -> void:
 	if body.anchors.is_empty():
@@ -115,8 +125,9 @@ func step(delta: float, body: BodyShape, limbs: Array[Limb], p: CreatureParams,
 	var fold: float = deg_to_rad(FOLD_MAX_DEG)
 	var sprawl: float = deg_to_rad(SPRAWL_DEG)
 	for limb in limbs:
-		# A limb that came off before the animal did is not limp, it is absent.
-		if limb.severed:
+		# A limb that came off before the animal did is not limp, it is absent —
+		# and one the gait is still walking is not this solver's to move.
+		if limb.severed or not limb.carried:
 			continue
 		var a: Spine.Frame = body.anchors[limb.key]
 		limb.set_lengths((p.arm_length if limb.pair == Limb.FRONT else p.leg_length) * scale)
@@ -139,12 +150,21 @@ func step(delta: float, body: BodyShape, limbs: Array[Limb], p: CreatureParams,
 		limb.joints[1] = elbow
 		limb.joints[2] = foot
 
+		# Bones last, and that ordering is the whole of what keeps them bones. The
+		# fold limit and the envelope are both projections that move the foot, so
+		# whichever runs last is the one that actually holds. A settled carcass hid
+		# that: a limb already inside both limits is left untouched by them, so the
+		# projection at the top of the pass was the last thing to touch it either
+		# way. A limb hanging off a socket that is walking away from it is outside
+		# them every single tick, and was being left a couple of pixels long every
+		# time one of them pulled the foot off the end of its own shin. The fold and
+		# the sprawl are taste; the length of a bone is not.
 		for _iteration in LIMB_ITERATIONS:
-			_hold_bones(limb)
 			limb.joints[2] = Constraints.solve_angle(
 				limb.joints[0], limb.joints[1], limb.joints[2], fold)
 			limb.joints[2] = limb.clamp_to_envelope(
 				a, limb.joints[2], p.limb_max_reach, sprawl)
+			_hold_bones(limb)
 
 		if collision_query.is_valid():
 			_push_clear(limb, collision_query, scale)

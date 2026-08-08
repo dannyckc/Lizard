@@ -675,11 +675,48 @@ real collapse the ragdoll had been waiting for.
 
 #### Coming apart
 
-A limb eaten through at its socket is emptied into the world as meat, and its
-patch is left with nothing in it. That is all severance needs to be, because
-*empty* is a state everything already understands completely: an empty patch is
-not drawn, does not collide, cannot be bitten and reports no reach. A
-three-legged creature needed no special case anywhere.
+A part comes off when every tissue between it and the body is gone, and that is
+one flood fill rather than five rules. A cell with anything left in any layer
+conducts; a cell with nothing left does not. So bone, muscle, fat and skin all
+hold a piece on, and it stays on for as long as *some* run of tissue still
+reaches it — grind a leg's bone through and it hangs by its meat, take the meat
+and it hangs by its skin, take that and it is off.
+
+The largest surviving piece is the animal and the rest has come away from it.
+That is deliberately not a rule about where a body's centre is: with no
+privileged cell to be the creature, nothing can make a body disown itself by
+eating one lucky place in it.
+
+Nothing in the walk knows what it is looking at, which is the whole return on
+doing it this way. **A leg, a shin, a tail and a head all come off through the
+same line**, because none of them was ever named — the cut decides how much
+leaves, and it takes tissue the bite never touched along with it. What comes away
+is emptied into the world as meat, and *empty* is a state everything already
+understands completely: an empty cell is not drawn, does not collide, cannot be
+bitten and reports no reach.
+
+#### Attached and held up are different questions
+
+A limb whose bone has been ground through is still **on** the animal — the flesh
+around the break is holding it there — and nothing is holding it **out**. So the
+two are read separately and composed: attachment says the leg is still there, and
+skeletal continuity says it can no longer stand on itself.
+
+What falls out is a limb that bears nothing, is never asked for a step, and
+*dangles*. The gait stops placing it, because a stride and a plant are both
+answers about where to put a limb and there is nothing left to put this one
+anywhere — and `Ragdoll`, which already existed to move a chain nobody is posing,
+takes it instead. A living animal with a broken leg and a carcass with four of
+them run the identical code on the identical limbs. There is no dangle mode, no
+second softer walk, and no new solver.
+
+That case is also what turned up a real bug in the ragdoll: its fold and envelope
+limits were being applied *after* the bone-length projection, so whichever ran
+last was the one that held. A settled carcass never showed it, because a limb
+already inside both limits is left alone by them. A limb hanging off a socket that
+is walking away from it is outside them every tick, and was being left a couple of
+pixels long every time. Bones are now the last thing applied — the fold and the
+sprawl are taste, the length of a bone is not.
 
 #### A healthy creature pays nothing
 
@@ -1345,10 +1382,16 @@ Deliberate, in the interest of a stable and readable prototype:
   how much speed a contact sheds, so a heavy creature can shoulder a light one
   aside — but nothing is transferred: a creature that stops pushing stops moving
   whatever it was carrying, and there is no impact, recoil or knockback.
-- A severed limb becomes scrap rather than a body of its own: it lands, settles
-  and can be eaten, but it is not separately simulated as an articulated piece.
-  That is the granularity the world has — scraps are its independent physical
-  objects — and not a claim that a detached leg should be one.
+- A severed part — a leg, a tail, a head — becomes scrap rather than a body of its
+  own: it lands, settles and can be eaten, but it is not separately simulated as
+  an articulated piece. That is the granularity the world has — scraps are its
+  independent physical objects — and not a claim that a detached leg should be one.
+- A part still hanging by soft tissue dangles from its socket rather than from the
+  break itself, because the rig underneath it is a two-bone chain from the socket
+  and has no joint where the bone actually parted. A limb broken at the shin
+  therefore flops from the shoulder with a loose shin on the end of it, which reads
+  correctly, rather than pivoting about the break. Splitting the chain at an
+  arbitrary station is a rig change, not an anatomy one.
 - Nothing in the habitat is alive. A body placed there is simulated as a carcass
   rather than parked as a living creature, which is honest about the missing AI
   but is still the absence of one: it never gets up, never reacts, and the only

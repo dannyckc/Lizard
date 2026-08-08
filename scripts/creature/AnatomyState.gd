@@ -80,15 +80,20 @@ func set_fat_reserve(value: float) -> void:
 	state.reset()
 
 
-## Re-derives the lattice's world geometry from the pose solved this tick, and
-## then what the body made of it can do. Must run after the body and limbs are
-## rebuilt and before anything bites.
+## Re-derives the lattice's world geometry from the pose solved this tick, what is
+## still joined to what, and then what the body made of it can do. Must run after
+## the body and limbs are rebuilt and before anything bites.
 ##
-## Geometry first and function second, and never the other way round: the
-## functional state is read off tissue, and tissue whose corners are a tick stale
-## is a body that was somewhere else.
+## The three are in that order and never any other. The functional state is read
+## off tissue, and tissue whose corners are a tick stale is a body that was
+## somewhere else. Connectivity sits between them because it is the one reading
+## that is about the lattice as a whole rather than about any place on it, and
+## because everything the functional layer says about a severed part is downstream
+## of it — a limb cannot be told what it can still do before the body has worked
+## out whether it is still there.
 func update(creature: Node, delta: float = 0.0) -> void:
 	tissue.update(creature)
+	tissue.resolve_attachment()
 	state.update(tissue, delta)
 
 

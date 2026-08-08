@@ -469,11 +469,12 @@ func _physics_process(delta: float) -> void:
 		or (absf(speed) <= 0.01 and command.throttle < 0.0) else move_dir
 	gait.update(delta, body, gait_dir, speed_norm, params, size_scale,
 		Callable(self, "_limb_contact_push"), anatomy.state)
+	_carry_limp_limbs(delta)
 	for contact in gait.landed:
 		var footfall: float = (0.07 + minf(0.11, absf(speed) / 1600.0)) * size_scale
 		foot_landed.emit(contact, footfall)
 	anatomy.update(self, delta)
-	_shed_severed()
+	_shed_detached()
 	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
 	_update_bounds()
 	# Last of the derived state, because it is a consequence of all of it: a body
@@ -537,30 +538,57 @@ func collapse() -> void:
 	ragdoll.adopt(gait.limbs)
 
 
-## Lets go of any limb that has been eaten through at the socket.
+## Lets go of whatever is no longer joined to this animal.
 ##
 ## Everything else about severance is already done by the time this runs — the
-## anatomy noticed the socket cells were gone, the functional state took that
-## limb's strength, control and load to nothing, and the gait stopped solving it.
-## What is left is the physical half: the part that came off is no longer part of
-## this creature, so its tissue is handed to the world as meat and its patch is
-## emptied. An empty patch is invisible, unbiteable and uncollidable through the
-## machinery that was already there, which is why nothing downstream needed a
-## special case for a three-legged animal.
+## lattice worked out which cells still have a run of tissue back to the body, and
+## the functional state took the strength, control and load of anything that does
+## not to nothing. What is left is the physical half: the piece that came away is
+## no longer part of this creature, so its tissue is handed to the world as meat
+## and the cells it stood in are emptied. Empty is invisible, unbiteable and
+## uncollidable through the machinery that was already there, which is why nothing
+## downstream needs a special case for a three-legged animal — or a tailless one.
+##
+## Which piece it was is not asked and cannot be: this is the same line whether a
+## leg, a foot, a tail or a head came off, because the lattice was never told
+## which of those a cell belonged to when it decided the cell had come away.
 ##
 ## The detached piece becomes scrap rather than a body of its own. That is the
 ## honest granularity for a world whose independent physical objects are scraps:
 ## it lands, it settles, it can be eaten, and it is no longer attached to anything.
-func _shed_severed() -> void:
-	if not anatomy.state.impaired:
+func _shed_detached() -> void:
+	if anatomy.tissue.detached_count <= 0:
 		return
 	var chunks: Array = []
-	for key in BodyPlan.LIMB_KEYS:
-		var region: BodyState.Region = anatomy.state.limb(key)
-		if region != null and region.severed:
-			anatomy.tissue.strip(key, chunks)
+	anatomy.tissue.shed_detached(chunks)
 	if not chunks.is_empty():
 		tissue_shed.emit(chunks, bounds_center)
+
+
+## Moves any limb the animal is no longer holding out.
+##
+## The gait has already left these alone, because `BodyState` said their skeletons
+## no longer reach the body — so something has to move a limb nobody is placing,
+## and the solver for a chain with nothing posing it already exists. A living
+## animal with a broken leg and a carcass with four of them run the identical code
+## on the identical limbs; the only difference is how many of them are in it.
+##
+## The ragdoll is made on demand rather than carried by every creature, so an
+## animal with its bones intact allocates nothing and steps nothing.
+func _carry_limp_limbs(delta: float) -> void:
+	if not anatomy.state.impaired or gait == null or body == null:
+		return
+	var any: bool = false
+	for limb in gait.limbs:
+		if limb.carried and not limb.severed:
+			any = true
+			break
+	if not any:
+		return
+	if ragdoll == null:
+		ragdoll = Ragdoll.new()
+	ragdoll.step(delta, body, gait.limbs, params, size_scale,
+		Callable(self, "_limb_contact_push"))
 
 
 ## Per-joint tone for the spine solve, or an empty array while the body is whole.
@@ -632,7 +660,7 @@ func _dead_process(delta: float) -> void:
 	ragdoll.step(delta, body, gait.limbs, params, size_scale,
 		Callable(self, "_limb_contact_push"))
 	anatomy.update(self, delta)
-	_shed_severed()
+	_shed_detached()
 	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
 	_update_bounds()
 
@@ -1596,8 +1624,12 @@ func _drag_grip(held: Grip, offset: Vector2) -> void:
 	if not held.holds_limb() or ragdoll == null or gait == null:
 		_drag_at(held.anchor(), offset)
 		return
+	# Only a limb that is being carried has particles to articulate. One the gait
+	# is still walking is placed from scratch every tick, so a pull applied to its
+	# joints would be overwritten before it was ever drawn — the tether has to act
+	# on the body it is really pulling.
 	var limb: Limb = _limb_by_key(held.limb_key)
-	if limb == null:
+	if limb == null or not limb.carried:
 		_drag_at(held.anchor(), offset)
 		return
 

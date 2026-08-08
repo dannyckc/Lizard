@@ -453,3 +453,34 @@ func region_columns(region: int) -> Vector2i:
 ## what has to still be there for the limb to be attached to anything.
 func socket_region(key: String) -> int:
 	return THORAX if key.begins_with("F") else PELVIS
+
+
+## Which flank a limb hangs off: +1 on the +perpendicular side of the body, -1 on
+## the other. Read off the key's own letter, which is what makes it the same
+## answer the gait gives when it sets a limb's side.
+static func limb_side(key: String) -> float:
+	return 1.0 if key.ends_with("L") else -1.0
+
+
+## The body cells a limb's proximal end is joined to.
+##
+## The limb hangs off the girdle bar under its socket, and that bar is bolted to
+## the vertebral column — so what stands between the leg and the animal is the run
+## of cells from the midline out to its own flank. Eat every one of them and the
+## limb is joined to nothing; leave any one and it is still on, by whatever is
+## left in it.
+##
+## This is the only join in the animal that is not two cells side by side in the
+## same lattice, which is why it is declared here with the rest of the layout
+## rather than discovered by whatever walks it.
+func limb_socket_cells(key: String) -> PackedInt32Array:
+	var cells := PackedInt32Array()
+	var col: int = int(limb_socket_col.get(key, -1))
+	if col < 0:
+		return cells
+	var outboard: bool = limb_side(key) > 0.0
+	var from_row: int = SPINE_ROW if outboard else 0
+	var to_row: int = BODY_ROWS if outboard else SPINE_ROW + 1
+	for row in range(from_row, to_row):
+		cells.append(col * BODY_ROWS + row)
+	return cells

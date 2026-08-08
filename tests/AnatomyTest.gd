@@ -61,6 +61,10 @@ func _run_checks() -> void:
 	_check_brain_collapses_the_body(subject)
 	_check_heart_stops_it_slowly(subject)
 	_check_severed_limb_leaves(subject)
+	_check_severance_needs_every_tissue(subject)
+	_check_broken_limb_dangles(subject)
+	_check_tail_comes_off(subject)
+	_check_a_cut_sheds_only_what_is_past_it(subject)
 	_finish()
 
 
@@ -520,7 +524,7 @@ func _check_severed_limb_leaves(c: Creature) -> void:
 	c._physics_process(TICK)
 	c._physics_process(TICK)
 
-	_check(tissue.limb_attachment("RR") <= 0.0, "the socket cells survived being eaten")
+	_check(tissue.region_attachment(BodyPlan.RR) <= 0.0, "the socket cells survived being eaten")
 	_check(c.anatomy.state.limb("RR").severed, "a limb eaten off at the socket was not severed")
 	_check(_limb(c, "RR").severed, "the gait was not told the limb had come off")
 	_check(patch.gone_count == patch.cells,
@@ -536,6 +540,218 @@ func _check_severed_limb_leaves(c: Creature) -> void:
 	_check(not c.anatomy.state.limb("RL").severed, "the wrong limbs came off")
 	_walk(c, 120)
 	_check(c.alive, "losing one leg killed the creature")
+	_restore(c)
+
+
+## Severance is *every* tissue between the part and the body being gone, and not
+## any one of them in particular.
+##
+## The socket is eaten down to the bone first: skin, fat and muscle all destroyed
+## across the whole proximal cross-section, and a leg still firmly on the animal
+## because a bone is still bridging the gap. Only when that last bone goes does
+## the limb come off — and nothing anywhere named bone as the thing that was
+## holding it, which is why the same check would pass if the survivor had been the
+## skin instead.
+func _check_severance_needs_every_tissue(c: Creature) -> void:
+	_restore(c)
+	var tissue: TissueGrid = c.anatomy.tissue
+	var state: BodyState = c.anatomy.state
+	var patch: TissueGrid.Patch = tissue.patch("FR")
+	var core: int = BodyPlan.LIMB_CORE_ROW
+
+	for row in BodyPlan.LIMB_ROWS:
+		_bite_limb_to_bone(c, "FR", row)
+	c._physics_process(TICK)
+
+	var base: int = core * TissueGrid.LAYERS
+	_check(patch.hp[base + TissueGrid.BONE] > 0.0,
+		"the socket's bone was destroyed by a bite that was meant to stop at it")
+	_check(patch.hp[base + TissueGrid.MUSCLE] <= 0.0
+			and patch.hp[base + TissueGrid.SKIN] <= 0.0,
+		"the soft tissue over the socket survived being eaten off")
+	_check(not state.limb("FR").severed,
+		"a limb still joined by an unbroken bone was treated as severed")
+	_check(state.limb("FR").attached > 0.0,
+		"a limb joined by one surviving tissue reported nothing holding it on")
+	_check(patch.gone[core] == 0, "the one cell still bridging the socket was emptied")
+
+	# And now the last of it.
+	_bite_cell(c, "FR", core, 5.0, 14)
+	c._physics_process(TICK)
+	c._physics_process(TICK)
+	_check(patch.gone[core] != 0, "grinding the socket's last bone through left tissue in it")
+	_check(state.limb("FR").severed,
+		"a limb with every connecting tissue destroyed was still attached (%.2f)"
+			% state.limb("FR").attached)
+	_check(_limb(c, "FR").severed, "the gait was not told the limb had come off")
+	_restore(c)
+
+
+## A part still held on by flesh after its bone has broken: on the animal,
+## carrying nothing, doing nothing, and hanging rather than being posed.
+##
+## This is the case the two readings are kept apart for. Attachment says the leg
+## is still there — its cells are standing, it is drawn, it can be bitten, it has
+## not entered the world as meat. Skeletal continuity says nothing is holding it
+## out. Everything below is what those two answers together produce, and none of
+## it is a mode: the gait stops placing a limb it cannot place, and the solver for
+## a chain nobody is posing takes it instead.
+func _check_broken_limb_dangles(c: Creature) -> void:
+	_restore(c)
+	var state: BodyState = c.anatomy.state
+	var patch: TissueGrid.Patch = c.anatomy.tissue.patch("RR")
+	var shed: Array = []
+	var handle: Callable = func(chunks: Array, _at: Vector2) -> void: shed.append_array(chunks)
+	c.tissue_shed.connect(handle)
+
+	_break_limb_bone(c, "RR")
+	_walk(c, 2)
+
+	var region: BodyState.Region = state.limb("RR")
+	_check(region.hanging, "a limb with its bone ground through was not left hanging")
+	_check(not region.severed,
+		"a limb still held on by its own flesh was treated as having come off")
+	_check(region.attached > 0.3,
+		"a limb hanging by flesh reported only %.2f of it still joined on" % region.attached)
+	_check(patch.gone_count < patch.cells,
+		"a limb that was only broken was emptied as though it had been severed")
+	_check(shed.is_empty(),
+		"a broken limb shed %d pieces into the world without coming off" % shed.size())
+
+	# It bears nothing and is asked for nothing.
+	_check(region.load <= 0.05,
+		"a limb with no skeleton left still bore %.2f of its load" % region.load)
+	_check(not state.limb_usable("RR"), "a limb hanging by flesh was still reported usable")
+	_check(state.support < BodyPlan.LIMB_REGIONS.size(),
+		"a creature was still standing on a leg that had been broken through")
+
+	# And it is carried rather than placed: no stride, no plant, no lift, and bones
+	# that still measure what they always did.
+	var hurt: Limb = _limb(c, "RR")
+	var sound: Limb = _limb(c, "RL")
+	_check(hurt.carried, "a limb nothing was holding out was still being walked")
+	_check(c.ragdoll != null, "nothing took over the limb the gait had let go of")
+	_check(c.alive, "breaking one leg killed the creature")
+
+	var steps: int = 0
+	var lift: float = 0.0
+	var stretched: float = 0.0
+	var sound_steps: int = 0
+	for _i in 240:
+		_walk(c, 1)
+		steps += 1 if hurt.stepping else 0
+		sound_steps += 1 if sound.stepping else 0
+		lift = maxf(lift, hurt.lift)
+		stretched = maxf(stretched, absf(
+			hurt.joints[0].distance_to(hurt.joints[1]) - hurt.lengths[0]))
+		stretched = maxf(stretched, absf(
+			hurt.joints[1].distance_to(hurt.joints[2]) - hurt.lengths[1]))
+	_check(steps == 0, "a limb hanging by flesh took %d ticks of steps" % steps)
+	_check(sound_steps > 0, "the sound legs stopped walking too")
+	_check(is_zero_approx(lift),
+		"a dangling limb picked itself %.2f px off the ground" % lift)
+	# Naturally: it hangs off the socket on its own bones. A limp chain that
+	# stretches is a rope, and a limb drawn past its own length is the one thing
+	# that would make this read as a bug rather than as an injury.
+	_check(stretched < 0.5,
+		"the dangling limb's bones stretched by %.2f px" % stretched)
+	_check(hurt.joints[0].distance_to(hurt.joints[2]) <= hurt.total_length + 0.01,
+		"the dangling limb was pulled out past its own bones")
+
+	c.tissue_shed.disconnect(handle)
+	_restore(c)
+
+
+## The same mechanism on a part that is not a limb, which is the whole claim: a
+## tail bitten through comes off for exactly the reason a leg does, and nothing
+## anywhere had to be taught what a tail is.
+func _check_tail_comes_off(c: Creature) -> void:
+	_restore(c)
+	var tissue: TissueGrid = c.anatomy.tissue
+	var patch: TissueGrid.Patch = tissue.patch(TissueGrid.BODY_KEY)
+	var shed: Array = []
+	var handle: Callable = func(chunks: Array, _at: Vector2) -> void: shed.append_array(chunks)
+	c.tissue_shed.connect(handle)
+
+	# Straight through the animal at the root of the tail: every row of one column,
+	# vertebra included.
+	var col: int = BodyPlan.HEAD_COLS + BodyPlan.LOIN_COL
+	var beyond: int = (col + 3) * BodyPlan.BODY_ROWS + BodyPlan.SPINE_ROW
+	_check(patch.gone[beyond] == 0, "the tail was already missing before it was cut")
+	for row in BodyPlan.BODY_ROWS:
+		_bite_cell(c, TissueGrid.BODY_KEY, col * BodyPlan.BODY_ROWS + row, 6.0, 20)
+	c._physics_process(TICK)
+	c._physics_process(TICK)
+
+	var state: BodyState = c.anatomy.state
+	_check(state.regions[BodyPlan.TAIL].severed,
+		"a tail cut clean through at its root was still on the animal (%.2f)"
+			% state.regions[BodyPlan.TAIL].attached)
+	_check(patch.gone[beyond] != 0,
+		"the tail was severed but the tissue behind the cut stayed on the body")
+	_check(not shed.is_empty(), "a tail came off without anything entering the world")
+	# Gone means gone, through the same machinery a limb uses.
+	_check(tissue.body_solid(0.95, 1.0) <= 0.0 and tissue.body_solid(0.95, -1.0) <= 0.0,
+		"a severed tail still occupies space")
+	# The animal in front of the cut is unharmed and keeps going.
+	_check(not state.regions[BodyPlan.THORAX].severed
+			and not state.limb("FL").severed and not state.limb("RL").severed,
+		"cutting the tail off took the rest of the animal with it")
+	_walk(c, 120)
+	_check(c.alive, "losing its tail killed the creature")
+
+	c.tissue_shed.disconnect(handle)
+	_restore(c)
+
+
+## Where the cut is decides how much leaves, and nothing else does.
+##
+## A limb bitten clean through part of the way down keeps everything between the
+## cut and the body, and loses everything past it — including tissue the bite
+## never touched, which is the entire difference between severing a leg and eating
+## one. Nobody nominated the shin as a place a limb can come apart at; it came
+## apart there because that is where the last cell joining the two halves was.
+func _check_a_cut_sheds_only_what_is_past_it(c: Creature) -> void:
+	_restore(c)
+	var tissue: TissueGrid = c.anatomy.tissue
+	var state: BodyState = c.anatomy.state
+	var patch: TissueGrid.Patch = tissue.patch("FL")
+	var shed: Array = []
+	var handle: Callable = func(chunks: Array, _at: Vector2) -> void: shed.append_array(chunks)
+	c.tissue_shed.connect(handle)
+
+	# Straight through the shin, well short of the foot.
+	var cut: int = 4
+	for row in BodyPlan.LIMB_ROWS:
+		_bite_cell(c, "FL", cut * BodyPlan.LIMB_ROWS + row, 6.0, 14)
+	c._physics_process(TICK)
+	c._physics_process(TICK)
+
+	var above: int = 0
+	for col in range(0, cut - 1):
+		for row in BodyPlan.LIMB_ROWS:
+			above += 1 if patch.gone[col * BodyPlan.LIMB_ROWS + row] == 0 else 0
+	var past: int = 0
+	for col in range(BodyPlan.LIMB_BONE_COLS, BodyPlan.LIMB_COLS):
+		for row in BodyPlan.LIMB_ROWS:
+			past += 1 if patch.gone[col * BodyPlan.LIMB_ROWS + row] == 0 else 0
+
+	_check(above > 0, "cutting through a shin took the thigh above it as well")
+	_check(past == 0,
+		"%d cells of foot survived a limb cut through above them" % past)
+	_check(not shed.is_empty(), "a limb came apart without anything entering the world")
+	_check(tissue.limb_solid("FL", 2) <= 0.0, "a detached foot still occupies space")
+	_check(tissue.limb_solid("FL", 0) > 0.0, "the whole limb left when only its shin was cut")
+	# What is left is a stump, wholly joined on — and hanging, because the bone it
+	# would have stood on is exactly what was cut. The two readings compose without
+	# either knowing about the other.
+	var region: BodyState.Region = state.limb("FL")
+	_check(not region.severed, "a limb cut at the shin came off at the shoulder")
+	_check(region.hanging, "a limb cut through its own bone was still held out by it")
+	_walk(c, 90)
+	_check(c.alive, "cutting through one shin killed the creature")
+
+	c.tissue_shed.disconnect(handle)
 	_restore(c)
 
 

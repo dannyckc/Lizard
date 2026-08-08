@@ -111,6 +111,14 @@ var reach: float = 1.0
 ## Off the animal entirely. A severed limb is not solved, not drawn and not
 ## stepped — there is nothing there.
 var severed: bool = false
+## Nothing is holding this limb out, so it is integrated rather than placed: the
+## gait leaves it alone and `Ragdoll` carries it from the socket instead.
+##
+## Broader than any one injury, and deliberately so. It is true of every limb on a
+## carcass and of a living animal's limb whose bone has been broken through, and
+## those are the same fact about the rig — a chain with nothing posing it — arrived
+## at from two different directions.
+var carried: bool = false
 ## Bumped once per step. Seeds the placement scatter of a poorly controlled limb,
 ## so the error is fixed for the duration of a step rather than shivering every
 ## frame, and is reproducible run to run.

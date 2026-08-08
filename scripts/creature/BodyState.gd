@@ -71,8 +71,12 @@ const LOAD_CONTROL_FLOOR: float = 0.30
 ## Load-bearing at which a limb can still be stood on. Under it the limb folds
 ## and the gait stops asking it to carry anything.
 const SUPPORT_MIN: float = 0.30
-## Attachment under which a limb is off — not weak, gone.
+## Attachment under which a part is off — not weak, gone.
 const ATTACHED_MIN: float = 0.02
+## Skeletal continuity under which a part is no longer standing on its own bones.
+## Below it the part is held on by soft tissue alone: it dangles from wherever the
+## flesh still reaches, bears nothing, and cannot be used.
+const SKELETAL_MIN: float = 0.02
 ## How sharply losing limbs costs travel. Above one, so a creature down to three
 ## working legs is worse off than three quarters.
 const DRIVE_EXPONENT: float = 1.4
@@ -108,9 +112,16 @@ class Region extends RefCounted:
 	## What it can sustain rather than what it can produce once.
 	var stamina: float = 1.0
 
-	## Limbs only: whether the thing is still joined to the animal.
+	## How much of this part is still joined to the animal by surviving tissue —
+	## any tissue, since bone, muscle, fat and skin all hold a piece on.
 	var attached: float = 1.0
+	## Nothing of it is joined on any more. It is not weak, it is gone.
 	var severed: bool = false
+	## Still joined, and no longer joined by anything that could hold it up: the
+	## bone is broken through and what is left is the flesh around the break. The
+	## part is on the animal, carries nothing, and is not usable — and it is not
+	## driven, which is the whole of why it dangles rather than being posed.
+	var hanging: bool = false
 
 
 var plan: BodyPlan = null
@@ -212,6 +223,7 @@ func reset() -> void:
 		region.stamina = 1.0
 		region.attached = 1.0
 		region.severed = false
+		region.hanging = false
 	actuators.fill(1.0)
 	_fibre.fill(1.0)
 	_revision = -1
@@ -225,13 +237,14 @@ func limb(key: String) -> Region:
 	return region(int(plan.limb_region.get(key, -1))) if plan != null else null
 
 
-## Whether a limb can still be asked to do anything: on the animal, able to carry
-## itself, and with a nerve still reaching it.
+## Whether a limb can still be asked to do anything: on the animal, on its own
+## skeleton, able to carry itself, and with a nerve still reaching it.
 func limb_usable(key: String) -> bool:
 	var region: Region = limb(key)
 	if region == null:
 		return false
-	return not region.severed and region.load >= SUPPORT_MIN and region.control > 0.05
+	return not region.severed and not region.hanging \
+		and region.load >= SUPPORT_MIN and region.control > 0.05
 
 
 ## The actuator across one joint of one region. JOINT_ROOT swings a limb from its
@@ -291,21 +304,25 @@ func _read_structure(tissue: TissueGrid) -> void:
 			group.patch_key, group.from_col, group.to_col, TissueGrid.MUSCLE)
 	for region in regions:
 		region.muscle = tissue.region_layer(region.index, TissueGrid.MUSCLE)
-		var span: Vector2i = plan.region_columns(region.index)
 		if plan.is_limb_region(region.index):
-			var key: String = plan.limb_key_of(region.index)
 			# A limb stands on two skeletons: its own bones, and the girdle it is
 			# slung from. Either one broken and the leg is no longer transmitting
 			# anything to the ground, which is why the socket is read here rather
 			# than being left as a separate special case in the gait.
-			region.stability = minf(tissue.bone_span(key, span.x, span.y),
-				tissue.girdle_of(key))
-			region.attached = tissue.limb_attachment(key)
-			region.severed = region.attached <= ATTACHED_MIN
+			region.stability = tissue.limb_skeleton(plan.limb_key_of(region.index))
 		else:
+			var span: Vector2i = plan.region_columns(region.index)
 			region.stability = tissue.bone_span(BodyPlan.BODY_KEY, span.x, span.y)
-			region.attached = 1.0
-			region.severed = false
+		# Asked of every region and not only of the limbs. A tail bitten through and
+		# a leg bitten through are the same event happening to different cells, and
+		# the only reason the old body could not lose a tail was that nothing ever
+		# asked the trunk this question.
+		region.attached = tissue.region_attachment(region.index)
+		region.severed = region.attached <= ATTACHED_MIN
+		# Held on by flesh with the bone gone. Two readings that are already taken,
+		# and the case they describe together is exactly the one worth naming: still
+		# part of the animal, no longer part of its frame.
+		region.hanging = not region.severed and region.stability <= SKELETAL_MIN
 
 
 # ------------------------------------------------------------------- blood ----

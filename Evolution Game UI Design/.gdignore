@@ -1,2 +1,0 @@
-# Reference-only source mockup and media. Keep Godot from importing design assets
-# into the runtime project whenever headless tests scan the workspace.

@@ -102,7 +102,7 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 	# --- 1. retarget: recompute each foot's ideal position ------------------
 	for limb in limbs:
 		_read_function(limb, state, impaired)
-		if limb.severed:
+		if _skip(limb):
 			continue
 		var a: Spine.Frame = body.anchors[limb.key]
 		limb.set_lengths((p.arm_length if limb.pair == Limb.FRONT else p.leg_length) * scale)
@@ -154,7 +154,7 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 
 	# --- 2. advance any step already in flight ------------------------------
 	for limb in limbs:
-		if limb.severed:
+		if _skip(limb):
 			continue
 		if not limb.stepping:
 			limb.ground = limb.planted
@@ -195,7 +195,7 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 	var busy: Array[bool] = [false, false]
 	var candidates: Array[Limb] = []
 	for limb in limbs:
-		if limb.severed:
+		if _skip(limb):
 			continue
 		if limb.stepping:
 			busy[limb.group] = true
@@ -247,9 +247,20 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 
 	# --- 4. solve the limbs -------------------------------------------------
 	for limb in limbs:
-		if limb.severed:
+		if _skip(limb):
 			continue
 		_solve_limb(limb, body, p, swing, scale, collision_query)
+
+
+## Limbs this solver has no business touching: the ones that are not there, and
+## the ones nothing is holding out.
+##
+## The second is not a weaker version of walking, which is why it is a skip rather
+## than another number to multiply a stride by. A leg whose bone has been ground
+## through has no stance to be placed in and no step to take badly; it hangs from
+## the socket and goes where the body drags it, and that is `Ragdoll`'s business.
+func _skip(limb: Limb) -> bool:
+	return limb.severed or limb.carried
 
 
 ## Caches what the anatomy says about one limb, so everything downstream reads a
@@ -266,11 +277,17 @@ func _read_function(limb: Limb, state: BodyState, impaired: bool) -> void:
 		limb.carry = 1.0
 		limb.reach = 1.0
 		limb.severed = false
+		limb.carried = false
 		return
 	var region: BodyState.Region = state.limb(limb.key)
 	if region == null:
 		return
 	limb.severed = region.severed
+	# A limb still on the animal but no longer on its skeleton stops being walked
+	# and starts being carried. Nothing below is wrong for it — it is simply that
+	# a stride, a plant and a swing are all answers about where to *put* a limb,
+	# and there is nothing left to put this one anywhere.
+	limb.carried = region.hanging
 	limb.command = region.control
 	limb.carry = region.load
 	# Force across the socket is what pushes the body along, so that is what the
