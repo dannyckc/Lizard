@@ -25,6 +25,9 @@ const SETTLE_SPEED: float = 5.0
 
 const BLOB_VERTS: int = 10
 const COL_SKIN := Color("211c17")
+## Torn fat. Pale and grainless, the same tone it has in the body it came out of,
+## so a piece of a well-padded animal is recognisable as such where it lands.
+const COL_FAT := Color("e0cfa8")
 const COL_MUSCLE := Color("9c3b26")
 const COL_MUSCLE_DEEP := Color("5f2114")
 const COL_SHADOW := Color("14140f", 0.075)
@@ -160,7 +163,7 @@ func _draw() -> void:
 		var major: float = sqrt(scrap.aspect)
 		var minor: float = 1.0 / major
 		var radius: float = scrap.size * 0.5
-		var color: Color = COL_SKIN if scrap.layer == TissueGrid.SKIN else COL_MUSCLE
+		var color: Color = _scrap_color(scrap.layer)
 		_points[v] = scrap.pos
 		_colors[v] = color
 		for k in BLOB_VERTS:
@@ -201,3 +204,13 @@ func _draw() -> void:
 			_strand_points.append(scrap.pos + axis * half_length + offset)
 	if not _strand_points.is_empty():
 		draw_multiline(_strand_points, COL_MUSCLE_DEEP, 0.8, true)
+
+
+## Meat looks like what it was cut from. Only the layers that actually come away
+## in pieces reach here — bone is ground down in place and an organ is pulped
+## where it lies — so the three that do get their own tone.
+static func _scrap_color(layer: int) -> Color:
+	match layer:
+		TissueGrid.SKIN: return COL_SKIN
+		TissueGrid.FAT: return COL_FAT
+		_: return COL_MUSCLE

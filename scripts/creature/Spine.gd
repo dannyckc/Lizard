@@ -36,6 +36,15 @@ const MIN_NECK: float = 0.4
 ## velocity — see step()'s rest pass. 0.005 px at 60 Hz is 0.3 px/s, far under
 ## perception; a body actually travelling moves hundreds of times this per tick.
 const REST_EPSILON: float = 0.005
+## What a joint with nothing left holding it corrects at during the soft passes.
+## Well under any tuneable stiffness, so a broken station reads as the body going
+## slack there rather than as a slightly looser body everywhere.
+const SLACK_STIFFNESS: float = 0.10
+## How far past the anatomical bend limit a joint whose vertebra has been ground
+## through will fold. Over one, because that limit is the vertebra: with the bone
+## gone what is left is soft tissue, and soft tissue folds much further. Short of
+## doubling, so a broken back still reads as a back and not as a rope.
+const BROKEN_BEND: float = 1.85
 
 ## Position/orientation sampled at a fractional point along the chain.
 class Frame extends RefCounted:
@@ -110,7 +119,15 @@ func size() -> int:
 
 
 ## Advances the spine one tick. `head_pos` is where the head is being dragged to.
-func step(delta: float, head_pos: Vector2, p: CreatureParams, speed_norm: float, seg_len: float) -> void:
+##
+## `tone` is the anatomy speaking, one entry per point, 1.0 sound and 0.0 broken.
+## It is the whole of how a damaged skeleton reaches the rig: a joint whose
+## vertebra has been ground through stops being held to the bend limit and stops
+## being stiffened toward it, so the body folds *there*. Left empty — which is the
+## case for any creature nobody has bitten — every line below reads exactly the
+## parameters it always did.
+func step(delta: float, head_pos: Vector2, p: CreatureParams, speed_norm: float,
+		seg_len: float, tone: PackedFloat32Array = PackedFloat32Array()) -> void:
 	var n: int = points.size()
 	if n < 3:
 		return
@@ -174,12 +191,22 @@ func step(delta: float, head_pos: Vector2, p: CreatureParams, speed_norm: float,
 	#    lengths are exact no matter how low stiffness is set.
 	var max_bend: float = deg_to_rad(p.max_bend_deg)
 	var passes: int = maxi(p.constraint_iterations, 1)
+	var damaged: bool = tone.size() == n
 	for it in range(passes):
 		var stiffness: float = 1.0 if it == passes - 1 else p.spine_stiffness
 		for i in range(1, n):
-			points[i] = Constraints.solve_distance(points[i - 1], points[i], seg_len, stiffness)
+			# The last pass stays full strength whatever the anatomy says. That is
+			# not tone, it is the invariant that makes segment lengths exact — a
+			# broken back is a slack back, never a stretched one.
+			var hold: float = stiffness
+			var bend: float = max_bend
+			if damaged:
+				if it < passes - 1:
+					hold = lerpf(SLACK_STIFFNESS, stiffness, tone[i])
+				bend = max_bend * lerpf(BROKEN_BEND, 1.0, tone[i])
+			points[i] = Constraints.solve_distance(points[i - 1], points[i], seg_len, hold)
 			if i >= 2:
-				points[i] = Constraints.solve_angle(points[i - 2], points[i - 1], points[i], max_bend)
+				points[i] = Constraints.solve_angle(points[i - 2], points[i - 1], points[i], bend)
 
 	# 5. Rest. Step 1 turns every correction the solver just made into next
 	#    tick's velocity — that feedback is the "soft" feel — but it also means

@@ -1,6 +1,6 @@
-## Persistent tissue state layered over the creature's procedural pose.
+## The creature's anatomy, and what it is currently capable of.
 ##
-## Two jobs, kept apart because they answer different questions:
+## Three jobs, kept apart because they answer different questions:
 ##
 ##   * `hit_test()` asks *what did those jaws close on* — which creature, and
 ##     which anatomical structure of it — by querying the same procedural
@@ -8,6 +8,14 @@
 ##     several bodies overlap one bite volume.
 ##   * `tissue` is the voxel-like lattice that then actually loses material, in
 ##     body-space cells that survive the pose being rebuilt each tick.
+##   * `state` is what that surviving material adds up to: how strong each part of
+##     the animal is, how well it is controlled, what it can carry. It is the only
+##     thing the animation ever reads.
+##
+## The order is the architecture. Damage lands in cells; the cells are read as
+## structures; the structures are read as capability; the animator reads
+## capability. Nothing skips a step, and in particular nothing between a bite and
+## a stride ever mentions the other.
 ##
 ## Damage is applied through the lattice by *position*, not through the region
 ## the hit test named: a hit region identifies a target, while a bite covers an
@@ -40,17 +48,48 @@ class Hit extends RefCounted:
 	var limb_u: float = 0.0
 
 
-var tissue: TissueGrid = TissueGrid.new()
+## What kind of animal this is. Shared by the lattice that stores its tissue and
+## the functional state that reads it, so the two can never describe different
+## creatures.
+var plan: BodyPlan = BodyPlan.new()
+var tissue: TissueGrid = null
+var state: BodyState = BodyState.new()
+
+
+func _init() -> void:
+	tissue = TissueGrid.new(plan)
+	state.configure(plan)
 
 
 func reset() -> void:
 	tissue.reset()
+	state.reset()
 
 
-## Re-derives the lattice's world geometry from the pose solved this tick. Must
-## run after the body and limbs are rebuilt and before anything bites.
-func update(creature: Node) -> void:
+## Re-lays this species' fat, and the functional state that was read off the old
+## body with it.
+##
+## The pairing is the point. Re-laying fat restores the lattice, and a restored
+## lattice with a stale functional state on top of it is a whole creature that is
+## still bleeding out of wounds it no longer has. The two halves are one body and
+## are put back together as one.
+func set_fat_reserve(value: float) -> void:
+	if is_equal_approx(tissue.fat_reserve, value):
+		return
+	tissue.set_fat_reserve(value)
+	state.reset()
+
+
+## Re-derives the lattice's world geometry from the pose solved this tick, and
+## then what the body made of it can do. Must run after the body and limbs are
+## rebuilt and before anything bites.
+##
+## Geometry first and function second, and never the other way round: the
+## functional state is read off tissue, and tissue whose corners are a tick stale
+## is a body that was somewhere else.
+func update(creature: Node, delta: float = 0.0) -> void:
 	tissue.update(creature)
+	state.update(tissue, delta)
 
 
 ## Finds the anatomical region overlapped most deeply by a circular bite.

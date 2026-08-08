@@ -86,6 +86,36 @@ var visual: Vector2 = Vector2.ZERO
 
 var initialised: bool = false
 
+# --- what the anatomy says this limb can do -----------------------------------
+# Read off BodyState once per tick and cached here so the gait, the IK and the
+# debug overlay cannot disagree about it. All four are 1.0 on a sound limb, which
+# is why a healthy creature moves identically to one with no anatomy at all.
+#
+# Nothing here is an injury. They are capabilities, and the limb has no idea what
+# happened to it — which is the entire point of the split.
+
+## Force available across the socket — what swings the limb, and so what pushes
+## the body along.
+var drive: float = 1.0
+## Force available across the elbow or knee — what picks the foot up. Separate
+## from `drive` because they fail separately: a leg chewed at the shank still
+## swings from the shoulder and scuffs its foot along the ground.
+var flex: float = 1.0
+## How much of the limb the animal still commands. Zero is a limb that is
+## physically present, possibly undamaged, and does not answer.
+var command: float = 1.0
+## What it can bear. Below Gait.SUPPORT_MIN the leg folds instead of carrying.
+var carry: float = 1.0
+## How far it can still be extended, as a multiple of its working envelope.
+var reach: float = 1.0
+## Off the animal entirely. A severed limb is not solved, not drawn and not
+## stepped — there is nothing there.
+var severed: bool = false
+## Bumped once per step. Seeds the placement scatter of a poorly controlled limb,
+## so the error is fixed for the duration of a step rather than shivering every
+## frame, and is reproducible run to run.
+var step_index: int = 0
+
 
 func setup(p_key: String, p_pair: int, p_side: float) -> void:
 	key = p_key

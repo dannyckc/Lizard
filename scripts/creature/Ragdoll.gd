@@ -86,6 +86,26 @@ func settle(body: BodyShape, limbs: Array[Limb], p: CreatureParams, scale: float
 		_publish(limb)
 
 
+## Takes over four limbs exactly where the gait left them.
+##
+## The counterpart to `settle`, and the difference between the two is the
+## difference between a body found dead and a body that has just died. `settle`
+## invents a resting pose, which is right for a carcass placed in the habitat and
+## wrong for one that was walking a moment ago: that animal has legs somewhere
+## specific, and snapping them into a sprawl at the instant of death is the one
+## thing that would make a collapse read as a swap.
+##
+## So nothing is placed. The joints stand, and only the Verlet history is
+## seeded — with no velocity, so the limbs go limp rather than being kicked. What
+## moves them from here is the body falling out from under them.
+func adopt(limbs: Array[Limb]) -> void:
+	_prev.clear()
+	for limb in limbs:
+		_prev[limb.key] = PackedVector2Array([limb.joints[1], limb.joints[2]])
+		limb.initialised = true
+		_publish(limb)
+
+
 ## One tick of four limp limbs. Runs where `Gait.update` runs in the live tick,
 ## for the same reason and against the same rebuilt body.
 func step(delta: float, body: BodyShape, limbs: Array[Limb], p: CreatureParams,
@@ -95,6 +115,9 @@ func step(delta: float, body: BodyShape, limbs: Array[Limb], p: CreatureParams,
 	var fold: float = deg_to_rad(FOLD_MAX_DEG)
 	var sprawl: float = deg_to_rad(SPRAWL_DEG)
 	for limb in limbs:
+		# A limb that came off before the animal did is not limp, it is absent.
+		if limb.severed:
+			continue
 		var a: Spine.Frame = body.anchors[limb.key]
 		limb.set_lengths((p.arm_length if limb.pair == Limb.FRONT else p.leg_length) * scale)
 		limb.set_rest_dir(a, p)

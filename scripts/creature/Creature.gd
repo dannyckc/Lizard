@@ -215,7 +215,8 @@ const TEAR_RELAX: float = 0.45
 ## ribcage only bared. The margin over the flesh stack is what makes the cell it
 ## was bound to genuinely empty afterwards rather than left with a sliver, which
 ## the hold would otherwise go on pulling against at almost no strength at all.
-const TEAR_DEPTH: float = (TissueGrid.SKIN_HP + TissueGrid.MUSCLE_HP) * 1.15
+const TEAR_DEPTH: float = (TissueGrid.SKIN_HP + TissueGrid.FAT_HP
+	+ TissueGrid.MUSCLE_HP) * 1.15
 ## How much of the gape a torn-away mouthful measures. What parts is the meat
 ## the jaws enclosed, so unlike a bite it is one piece the width of the whole
 ## mouth rather than the pattern of the teeth in it.
@@ -281,6 +282,10 @@ var _impact_done: bool = false
 ## Set by whoever is driving this creature, before the physics tick.
 var command: MovementInput.Command = MovementInput.Command.new()
 
+## Reused buffer for the spine's per-joint tone, so a damaged creature allocates
+## nothing per tick and a healthy one never fills it at all.
+var _tone: PackedFloat32Array = PackedFloat32Array()
+
 
 func _ready() -> void:
 	if params == null:
@@ -312,6 +317,9 @@ func rebuild() -> void:
 	gait = Gait.new()
 	gait.setup()
 	body.build(spine, params, size_scale)
+	# How much fat this species carries is part of what it is built out of, so it
+	# is laid down here with the rest of the structure rather than per tick.
+	anatomy.set_fat_reserve(params.fat_reserve)
 	if alive:
 		ragdoll = null
 		gait.update(0.0, body, move_dir, 0.0, params, size_scale)
@@ -321,7 +329,7 @@ func rebuild() -> void:
 	# Existing damage is kept — it lives in body space precisely so a structural
 	# rebuild cannot wash it off — but its world geometry is now stale.
 	anatomy.update(self)
-	physique.update(body, spine, anatomy.tissue, params)
+	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
 	_update_bounds()
 
 
@@ -393,6 +401,11 @@ func _physics_process(delta: float) -> void:
 	# function of have actually changed, and immediately when they have.
 	if dentition == null or dentition.signature != Dentition.signature_of(params):
 		dentition = Dentition.grow(params)
+	# Fat is laid down, not adjusted: re-laying it re-lays the tissue it is part
+	# of, exactly as changing the segment count rebuilds the spine. It belongs to
+	# the same class of structural parameter and is checked on the same terms — and
+	# like that one, the call is free when nothing has changed.
+	anatomy.set_fat_reserve(params.fat_reserve)
 	if not alive:
 		_dead_process(delta)
 		return
@@ -432,7 +445,7 @@ func _physics_process(delta: float) -> void:
 	# position: the strike must not accumulate into the motion integrator or a
 	# bite would teleport the creature forward by its own reach.
 	var seg_len: float = params.segment_length * size_scale
-	spine.step(delta, head_pos, params, speed_norm, seg_len)
+	spine.step(delta, head_pos, params, speed_norm, seg_len, _axial_tone())
 	_update_head_look(delta)
 	# Mouse look and the lunge are posed after the body solve, in the one layer
 	# that can move point 0 without touching point 1 or anything downstream of it.
@@ -455,13 +468,20 @@ func _physics_process(delta: float) -> void:
 	var gait_dir: Vector2 = -move_dir if speed < -0.01 \
 		or (absf(speed) <= 0.01 and command.throttle < 0.0) else move_dir
 	gait.update(delta, body, gait_dir, speed_norm, params, size_scale,
-		Callable(self, "_limb_contact_push"))
+		Callable(self, "_limb_contact_push"), anatomy.state)
 	for contact in gait.landed:
 		var footfall: float = (0.07 + minf(0.11, absf(speed) / 1600.0)) * size_scale
 		foot_landed.emit(contact, footfall)
-	anatomy.update(self)
-	physique.update(body, spine, anatomy.tissue, params)
+	anatomy.update(self, delta)
+	_shed_severed()
+	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
 	_update_bounds()
+	# Last of the derived state, because it is a consequence of all of it: a body
+	# whose brain has gone out or whose circulation has stopped is no longer
+	# driving itself, and the next tick belongs to the ragdoll.
+	if anatomy.state.collapsed:
+		collapse()
+		return
 
 	# Resolve at full extension, once the pose above is the lunged one, so the
 	# bite is tested against where the jaws have genuinely arrived. The clock is
@@ -479,6 +499,99 @@ func _physics_process(delta: float) -> void:
 	# been solved: what the jaws are now pulling against, whether they can still
 	# hold it, and whether they have come round to close again.
 	_advance_grip(delta)
+
+
+## The moment a creature stops driving itself.
+##
+## Not a rebuild, and that distinction is the whole of what makes it a collapse
+## rather than a body swapped for a corpse. `rebuild` lays a carcass out in the
+## slumped pose it would have *come to rest in*, which is right for one placed in
+## the habitat and exactly wrong here: this animal is standing somewhere specific,
+## in a pose it walked into, with a spine full of momentum and four legs out where
+## the gait last put them. All of that is kept. What changes is only that nothing
+## is holding it up any more — the head stops being placed, the limbs stop being
+## solved to a stride, and the free solver and its friction take the body from
+## exactly where the living one left off.
+##
+## So a creature killed on its feet folds up from its own last pose, at its own
+## speed, and comes to rest wherever that carries it. This is the "real collapse"
+## the ragdoll has been waiting for.
+func collapse() -> void:
+	if not alive:
+		return
+	alive = false
+	_release_grip()
+	bite_held = false
+	bite_latched = false
+	bite_time = -1.0
+	lunge_offset = 0.0
+	_bite_requested = false
+	_chew_requested = false
+	_regrasp_remaining = 0.0
+	command = MovementInput.Command.new()
+	speed = 0.0
+	ang_vel = 0.0
+	# The limbs keep the joints the gait left them in, and the ragdoll adopts them
+	# as its Verlet history rather than settling them somewhere new.
+	ragdoll = Ragdoll.new()
+	ragdoll.adopt(gait.limbs)
+
+
+## Lets go of any limb that has been eaten through at the socket.
+##
+## Everything else about severance is already done by the time this runs — the
+## anatomy noticed the socket cells were gone, the functional state took that
+## limb's strength, control and load to nothing, and the gait stopped solving it.
+## What is left is the physical half: the part that came off is no longer part of
+## this creature, so its tissue is handed to the world as meat and its patch is
+## emptied. An empty patch is invisible, unbiteable and uncollidable through the
+## machinery that was already there, which is why nothing downstream needed a
+## special case for a three-legged animal.
+##
+## The detached piece becomes scrap rather than a body of its own. That is the
+## honest granularity for a world whose independent physical objects are scraps:
+## it lands, it settles, it can be eaten, and it is no longer attached to anything.
+func _shed_severed() -> void:
+	if not anatomy.state.impaired:
+		return
+	var chunks: Array = []
+	for key in BodyPlan.LIMB_KEYS:
+		var region: BodyState.Region = anatomy.state.limb(key)
+		if region != null and region.severed:
+			anatomy.tissue.strip(key, chunks)
+	if not chunks.is_empty():
+		tissue_shed.emit(chunks, bounds_center)
+
+
+## Per-joint tone for the spine solve, or an empty array while the body is whole.
+##
+## This is where the anatomical skeleton and the animation rig stop being two
+## things. Each joint of the chain is held up by the vertebra at that station and
+## worked by the muscle around it, so what the solver is given at that joint is
+## read from exactly those cells: a sound back solves as it always has, and a back
+## broken at one station goes slack *there* and nowhere else.
+##
+## Empty while nothing is wrong, so an undamaged creature's spine runs the
+## identical code path it did before there was an anatomy at all.
+func _axial_tone() -> PackedFloat32Array:
+	if spine == null or not anatomy.state.impaired:
+		_tone.resize(0)
+		return _tone
+	var n: int = spine.size()
+	if _tone.size() != n:
+		_tone.resize(n)
+	var span: float = float(maxi(n - 1, 1))
+	for i in n:
+		var region: BodyState.Region = anatomy.state.axial_at(float(i) / span)
+		if region == null:
+			_tone[i] = 1.0
+			continue
+		# Bone decides how much the joint can still be *held*; muscle and nerve
+		# decide how much is holding it. A vertebra ground through is a hinge with
+		# nothing left to limit it, which is what the solver reads this as.
+		_tone[i] = clampf(minf(region.stability, region.muscle * region.control),
+			0.0, 1.0)
+	return _tone
 
 
 ## One tick of a body nobody is driving.
@@ -518,8 +631,9 @@ func _dead_process(delta: float) -> void:
 	body.build(spine, params, size_scale)
 	ragdoll.step(delta, body, gait.limbs, params, size_scale,
 		Callable(self, "_limb_contact_push"))
-	anatomy.update(self)
-	physique.update(body, spine, anatomy.tissue, params)
+	anatomy.update(self, delta)
+	_shed_severed()
+	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
 	_update_bounds()
 
 
@@ -645,11 +759,20 @@ func _integrate_motion(delta: float) -> void:
 	# heading: however overmatched a creature is, thrashing has to remain
 	# available — and thrashing is exactly what loads a set of jaws.
 	var haul: float = _haul_factor()
+	# What the body can still produce, and how well it can still be aimed. Both
+	# are read rather than decided: `locomotion` is what the four legs and the back
+	# between them add up to, and `coordination` is how much of the nervous system
+	# still reaches them. A creature with a dead leg is slower because the leg is
+	# dead, not because anything checked for a limp.
+	var state: BodyState = anatomy.state
+	var drive: float = state.locomotion if state.impaired else 1.0
+	var steering: float = state.coordination if state.impaired else 1.0
 
 	# Turn rate falls off with speed so the arc stays wider than the body. At a
 	# standstill the full rate is available, which is what lets the creature
 	# pivot on the spot (together with the swing block below).
-	var turn_rate: float = deg_to_rad(p.turn_speed_deg) * (1.0 - p.turn_speed_falloff * speed_norm)
+	var turn_rate: float = deg_to_rad(p.turn_speed_deg) \
+		* (1.0 - p.turn_speed_falloff * speed_norm) * steering
 	# Steering backwards is compromised by exactly what makes backing up slow:
 	# legs built to push a body forward are pushing it the other way, and they
 	# are steering it from the wrong end while they do. So a reversing creature
@@ -699,11 +822,11 @@ func _integrate_motion(delta: float) -> void:
 	# sprint does not apply to it.
 	var sprint: float = p.sprint_multiplier \
 		if command.sprint and command.throttle > 0.0 else 1.0
-	var top_speed: float = p.move_speed * size_scale * sprint * haul
+	var top_speed: float = p.move_speed * size_scale * sprint * haul * drive
 	if command.throttle < 0.0:
 		top_speed *= p.reverse_speed_factor
 	var desired_speed: float = command.throttle * top_speed
-	var rate: float = p.acceleration * size_scale * haul
+	var rate: float = p.acceleration * size_scale * haul * drive
 	var reversing: bool = not is_zero_approx(speed) and not is_zero_approx(desired_speed) \
 		and signf(speed) != signf(desired_speed)
 	if reversing:

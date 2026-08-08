@@ -1,5 +1,5 @@
 ## Voxel-like tissue: a lattice of body cells, each a depth stack of skin over
-## muscle over bone.
+## fat over muscle over bone over whatever organ lies beneath.
 ##
 ## The pose is rebuilt from the spine every physics tick, so nothing can be
 ## stored in world space. The lattice is therefore defined in *body* space — a
@@ -12,11 +12,16 @@
 ## `segment_count`: the cell a bite destroyed has to still be the same cell
 ## after the tuning panel restructures the spine underneath it.
 ##
-## Top-down means the three tissues stack in *depth*, not sideways — you look
-## down at skin, and only what a bite has already cleared away is visible
-## beneath it. A bite therefore spends its penetration budget strictly
-## outside-in, and bone both absorbs at a reduced rate and stops the bite dead,
-## because there is nothing behind it to reach.
+## Top-down means the tissues stack in *depth*, not sideways — you look down at
+## skin, and only what a bite has already cleared away is visible beneath it. A
+## bite therefore spends its penetration budget strictly outside-in, and bone
+## absorbs at a reduced rate and then stops the bite dead.
+##
+## That last rule is what protects the organs, and it is the whole of what
+## protects them: the brain and the heart are cells like any others, laid *under*
+## bone in the same stack, so jaws reach them only by grinding through the skull
+## or the ribs first. Nothing anywhere says an organ is hard to hit. It is hard to
+## hit because it is behind something.
 ##
 ## A cell with nothing left in any layer is *gone*, and gone means gone: it is
 ## not drawn, not bitten and not collided with. Nothing paints the ground colour
@@ -28,91 +33,67 @@ extends RefCounted
 
 # --- layers, outermost first ------------------------------------------------
 const SKIN: int = 0
-const MUSCLE: int = 1
-const BONE: int = 2
-const LAYERS: int = 3
+const FAT: int = 1
+const MUSCLE: int = 2
+const BONE: int = 3
+const ORGAN: int = 4
+const LAYERS: int = 5
 
 ## Skin is a rind, not armour: any bite worth the name strips it, and at the
 ## default depth one strips it across nearly the whole width of the jaws. It
 ## exists to be broken through, so what a bite reads as is *opening* the body
 ## rather than scratching it.
 const SKIN_HP: float = 0.4
+## Fat at a reserve of 1.0, on the fullest part of the trunk. Thin, because the
+## default animal is a lean one — BodyPlan thins it further toward the head, the
+## tail and the limbs, and `fat_reserve` scales the lot.
+const FAT_HP: float = 0.5
+## What fat is actually for. Every hit point of it spends FAT_ABSORB of a bite's
+## penetration, so a padded animal is not merely carrying more tissue to chew
+## through — the same jaws arrive at its muscle shallower. That is the difference
+## between fat and simply thicker skin, and it is why the layer is worth having:
+## a heavy creature is protected by its build rather than by a toughness number.
+const FAT_ABSORB: float = 1.5
 ## Muscle is where a fight actually happens. Deep enough that the default bite
-## takes three passes over the same spot to tear through — so a kill is either
-## several bites or a stronger one, never a graze. It is also the only layer
-## whose *state* is worth reading, skin being a rind and bone a wall, so it has
-## to survive long enough to be seen thinning.
+## takes several passes over the same spot to tear through — so a kill is either
+## several bites or a stronger one, never a graze. It is also the layer whose
+## *state* is worth reading, skin being a rind and bone a wall, so it has to
+## survive long enough to be seen thinning.
 const MUSCLE_HP: float = 5.5
 ## Bone is not merely thicker — it also yields at BONE_YIELD of the incoming
 ## depth and then consumes the rest of the bite, so a skeleton takes roughly an
 ## order of magnitude more work to breach than the flesh laid over it.
 const BONE_HP: float = 6.0
 const BONE_YIELD: float = 0.5
+## Organs are soft. They are not protected by being tough — they are protected by
+## the skull or the ribcage over them — so once a bite is actually reaching one,
+## very little of it survives. That asymmetry is the point: the fight is over the
+## bone, and what is behind it is decided the moment the bone gives.
+const ORGAN_HP: float = 2.0
+## Share of the tissue around a nerve or vessel that has to survive for the run
+## through it to be intact. Above this the conduit is untouched; below it, it
+## fails quickly. See `_conduit_at`.
+const CONDUIT_FLOOR: float = 0.35
 
-# --- body patch layout ------------------------------------------------------
-const BODY_KEY: String = "body"
-## Cap columns tessellating the round snout, and the same for the tail tip.
-## Their outer corners land exactly on the circle the cap would be drawn as.
-##
-## The lattice *is* the silhouette now rather than an overlay on one, so these
-## counts set how round the two ends look: four columns over the snout's quarter
-## turn was fine when a `draw_circle` sat underneath covering the facets, and is
-## a visible octagon without it.
-const HEAD_COLS: int = 8
-const TORSO_COLS: int = 20
-const TAIL_COLS: int = 4
-const BODY_COLS: int = HEAD_COLS + TORSO_COLS + TAIL_COLS
-## Odd, so one row straddles the spine and can carry the vertebral column.
-const BODY_ROWS: int = 7
-
-# --- limb patch layout ------------------------------------------------------
-## Upper bone, lower bone, then a cap over the outer half of the foot circle,
-## so the drawn foot is part of the lattice instead of floating unbitable on it.
-const LIMB_BONE_COLS: int = 6
-## Four rather than two for the same reason the snout cap grew: the foot is the
-## lattice's own outline now, not a tessellation hidden under a drawn circle.
-const LIMB_FOOT_COLS: int = 4
-const LIMB_COLS: int = LIMB_BONE_COLS + LIMB_FOOT_COLS
-const LIMB_ROWS: int = 3
-const LIMB_KEYS: Array[String] = ["FL", "FR", "RL", "RR"]
-
-# --- skeleton layout --------------------------------------------------------
-# The skeleton is a *frame*, not a plate: a skull, a vertebral column one cell
-# wide running neck to tail tip, a girdle under each pair of limb sockets, and
-# ribs on alternating columns between them. Everywhere else the body is flesh
-# over nothing, and a bite that gets through it opens a hole clean through the
-# creature — which is the whole point of laying the skeleton out sparsely. If
-# bone sat under most of the body there would be no such thing as eating through
-# it, and every wound would bottom out on the same pale surface.
-#
-# It also has to be one *connected* piece. Flesh is what a bite takes first, so
-# a skeleton whose parts meet only through muscle comes apart into floating
-# fragments at exactly the moment it is the whole of what is left to look at.
-#
-# Like the grid dimensions, the layout is fixed in body space rather than read
-# from the params: it has to name the same cells after the tuning panel has
-# restructured the spine underneath it. The girdle columns therefore mirror the
-# *default* front_limb_t / rear_limb_t instead of tracking them live.
-
-## The skull fills the head cap out to here, as a fraction of half-width, so the
-## cheeks stay flesh and the head is not one solid disc of bone.
-const SKULL_SPAN: float = 0.72
-## Ribs reach this far out from the midline, over the chest.
-const RIB_SPAN: float = 0.78
-## Girdles run the full width — they are what the limb bones hang off, so they
-## have to reach the flank the sockets sit on.
-const GIRDLE_SPAN: float = 0.95
-## Torso columns carrying the pectoral and pelvic girdles. TORSO_COLS spans the
-## whole clipped spine, so a column index reads directly as a fraction of body
-## length: column c covers c/20 to (c+1)/20, which puts the default shoulder
-## (front_limb_t 0.16) in column 3 and the default hip (rear_limb_t 0.46) in
-## column 9. The girdle has to be the column the socket is *in*, not the one
-## next to it — a limb bone rooted at a socket with no girdle under it is a limb
-## joined to the skeleton by flesh alone, and it comes adrift the moment that
-## flesh is eaten.
-const SHOULDER_COL: int = 3
-const PELVIS_COL: int = 9
-
+# --- lattice layout ---------------------------------------------------------
+# Aliased from BodyPlan, which owns them, so the storage code below reads in its
+# own terms while there is still exactly one description of the animal.
+const BODY_KEY: String = BodyPlan.BODY_KEY
+const HEAD_COLS: int = BodyPlan.HEAD_COLS
+const TORSO_COLS: int = BodyPlan.TORSO_COLS
+const TAIL_COLS: int = BodyPlan.TAIL_COLS
+const BODY_COLS: int = BodyPlan.BODY_COLS
+const BODY_ROWS: int = BodyPlan.BODY_ROWS
+const LIMB_BONE_COLS: int = BodyPlan.LIMB_BONE_COLS
+const LIMB_FOOT_COLS: int = BodyPlan.LIMB_FOOT_COLS
+const LIMB_COLS: int = BodyPlan.LIMB_COLS
+const LIMB_ROWS: int = BodyPlan.LIMB_ROWS
+const LIMB_KEYS: Array[String] = BodyPlan.LIMB_KEYS
+const SKULL_SPAN: float = BodyPlan.SKULL_SPAN
+const RIB_SPAN: float = BodyPlan.RIB_SPAN
+const GIRDLE_SPAN: float = BodyPlan.GIRDLE_SPAN
+const SHOULDER_COL: int = BodyPlan.SHOULDER_COL
+const PELVIS_COL: int = BodyPlan.PELVIS_COL
 
 ## One chunk of tissue a bite knocked loose, in world space.
 class Shed extends RefCounted:
@@ -156,6 +137,11 @@ class Patch extends RefCounted:
 	## 1 where the skeleton runs under the cell. Cells without it open into a
 	## hole clean through the body once their muscle is gone.
 	var bone: PackedByteArray = PackedByteArray()
+	## Which of the plan's regions each cell belongs to, and which organ — if any —
+	## lies at the bottom of its stack. Both are fixed at build time: a cell cannot
+	## change what part of the animal it is, only how much of it is left.
+	var region: PackedByteArray = PackedByteArray()
+	var organ: PackedByteArray = PackedByteArray()
 
 	## Cells that have taken any damage. Kept so a query can walk the wounds
 	## rather than the whole lattice.
@@ -202,6 +188,8 @@ class Patch extends RefCounted:
 		verts.resize((cols + 1) * _stride)
 		hp.resize(cells * layers)
 		bone.resize(cells)
+		region.resize(cells)
+		organ.resize(cells)
 		touched.resize(cells)
 		gone.resize(cells)
 		solid.resize(cols * 2)
@@ -304,12 +292,41 @@ class Patch extends RefCounted:
 
 
 var patches: Dictionary = {}
+## What this animal is. Everything below reads its layout rather than deciding
+## one, which is what lets a different creature be a different plan and nothing
+## else.
+var plan: BodyPlan = null
+## How much fat this species lays down, as a multiple of the plan's profile.
+var fat_reserve: float = 1.0
+
+## Tissue standing per region and layer, indexed `region * LAYERS + layer`, and
+## the same totals when whole. Maintained as damage lands rather than measured, so
+## the functional layer can ask what a region is made of every tick without ever
+## walking a cell.
+var region_hp: PackedFloat32Array = PackedFloat32Array()
+var region_full: PackedFloat32Array = PackedFloat32Array()
+## Fat a `fat_reserve` of exactly 1.0 would lay on this plan. The padding a body
+## actually carries is quoted against it, so 1.0 means "an ordinary animal" and
+## every other build is a ratio — which is what lets fat move mass without any
+## creature's default weight changing.
+var fat_reference: float = 0.0
+## The same for the two organs, which are single structures rather than regions.
+var organ_hp: PackedFloat32Array = PackedFloat32Array()
+var organ_full: PackedFloat32Array = PackedFloat32Array()
+
+## Bumped whenever any cell loses anything. The functional layer recomputes off
+## this rather than per tick: an animal nobody has bitten is a body whose
+## connectivity cannot have changed, and there is no reason to flood two networks
+## to be told so.
+var revision: int = 0
 
 ## Reused corner buffer, so a bite allocates nothing per cell it tests.
 var _quad := PackedVector2Array([Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO])
 
 
-func _init() -> void:
+func _init(p_plan: BodyPlan = null, p_fat_reserve: float = 1.0) -> void:
+	plan = p_plan if p_plan != null else BodyPlan.new()
+	fat_reserve = maxf(p_fat_reserve, 0.0)
 	var body := Patch.new()
 	body.configure(BODY_KEY, BODY_COLS, BODY_ROWS, LAYERS)
 	patches[BODY_KEY] = body
@@ -317,13 +334,32 @@ func _init() -> void:
 		var limb := Patch.new()
 		limb.configure(key, LIMB_COLS, LIMB_ROWS, LAYERS)
 		patches[key] = limb
+	region_hp.resize(BodyPlan.REGIONS * LAYERS)
+	region_full.resize(BodyPlan.REGIONS * LAYERS)
+	organ_hp.resize(BodyPlan.ORGAN_NAMES.size())
+	organ_full.resize(BodyPlan.ORGAN_NAMES.size())
+	reset()
+
+
+## Re-lays the fat without disturbing anything else. Reserve is a species trait
+## read live off the params, exactly as the widths are, so moving the slider has
+## to re-fill rather than wait for a structural rebuild.
+func set_fat_reserve(value: float) -> void:
+	if is_equal_approx(value, fat_reserve):
+		return
+	fat_reserve = maxf(value, 0.0)
 	reset()
 
 
 func reset() -> void:
-	_fill(patches[BODY_KEY], _body_has_bone)
-	for key in LIMB_KEYS:
-		_fill(patches[key], _limb_has_bone)
+	region_full.fill(0.0)
+	organ_full.fill(0.0)
+	fat_reference = 0.0
+	for key in patches:
+		_fill(patches[key])
+	region_hp = region_full.duplicate()
+	organ_hp = organ_full.duplicate()
+	revision += 1
 
 
 func patch(key: String) -> Patch:
@@ -348,20 +384,40 @@ func patch_integrity(key: String) -> float:
 	return p.remaining_hp / p.full_hp
 
 
-## Restores every cell to intact tissue. `has_bone(col, lateral) -> bool`
-## decides which of them sit over the skeleton.
-func _fill(p: Patch, has_bone: Callable) -> void:
+## Restores every cell of a patch to intact tissue, laid out by the plan.
+##
+## This is the only place the plan's profiles are turned into hit points, and it
+## is where the whole depth stack of an animal comes from: skin over as much fat
+## as the species carries there, over muscle, over bone where there is a skeleton,
+## over whichever organ the plan puts underneath.
+func _fill(p: Patch) -> void:
+	var region_map: PackedByteArray = plan.cell_region[p.key]
 	p.full_hp = 0.0
 	for c in p.cols:
 		for r in p.rows:
 			var cell: int = c * p.rows + r
-			var solid: bool = has_bone.call(c, p.row_centre(r))
+			var lateral: float = p.row_centre(r)
+			var solid: bool = plan.has_bone(p.key, c, lateral)
+			var organ: int = plan.organ_at(p.key, c, r)
 			p.bone[cell] = 1 if solid else 0
+			p.region[cell] = region_map[cell]
+			p.organ[cell] = organ
+			var profile: float = plan.fat_at(p.key, c, lateral)
+			var fat: float = FAT_HP * fat_reserve * profile
+			fat_reference += FAT_HP * profile
 			var base: int = cell * LAYERS
 			p.hp[base + SKIN] = SKIN_HP
+			p.hp[base + FAT] = fat
 			p.hp[base + MUSCLE] = MUSCLE_HP
 			p.hp[base + BONE] = BONE_HP if solid else 0.0
-			p.full_hp += SKIN_HP + MUSCLE_HP + (BONE_HP if solid else 0.0)
+			p.hp[base + ORGAN] = ORGAN_HP if organ != BodyPlan.NO_ORGAN else 0.0
+			var region_base: int = int(region_map[cell]) * LAYERS
+			for layer in LAYERS:
+				var have: float = p.hp[base + layer]
+				p.full_hp += have
+				region_full[region_base + layer] += have
+			if organ != BodyPlan.NO_ORGAN:
+				organ_full[organ] += ORGAN_HP
 	p.clear_damage()
 
 
@@ -529,6 +585,8 @@ func bite(mark: BiteMark, shed: Array) -> float:
 
 func _erode(p: Patch, cell: int, budget: float, at: Vector2, shed: Array) -> float:
 	var base: int = cell * LAYERS
+	var region_base: int = int(p.region[cell]) * LAYERS
+	var organ: int = int(p.organ[cell])
 	var removed: float = 0.0
 	for layer in LAYERS:
 		if budget <= 0.0:
@@ -538,15 +596,27 @@ func _erode(p: Patch, cell: int, budget: float, at: Vector2, shed: Array) -> flo
 		if have <= 0.0:
 			continue
 		var take: float = minf(budget, have)
-		if layer == BONE:
+		if layer == FAT:
+			# Fat is a cushion, so it costs the bite more than it loses: every hit
+			# point of it spends FAT_ABSORB of the penetration. That is the whole of
+			# how padding protects — the layer under it is reached shallower, or not
+			# reached at all — and it needs no rule anywhere about being hard to bite.
+			take = minf(budget / FAT_ABSORB, have)
+			budget -= take * FAT_ABSORB
+		elif layer == BONE:
 			take = minf(budget * BONE_YIELD, have)
-			budget = 0.0  # nothing behind bone, so it stops the bite outright
+			budget = 0.0  # nothing gets past bone until the bone itself is gone
 		else:
 			budget -= take
 		p.hp[idx] = have - take
 		removed += take
-		# Skin and muscle come away in pieces; bone is ground down in place.
-		if p.hp[idx] <= 0.0 and layer != BONE:
+		region_hp[region_base + layer] = maxf(region_hp[region_base + layer] - take, 0.0)
+		if layer == ORGAN and organ != BodyPlan.NO_ORGAN:
+			organ_hp[organ] = maxf(organ_hp[organ] - take, 0.0)
+		# Soft tissue comes away in pieces; bone is ground down in place, and an
+		# organ is pulped where it lies rather than thrown clear of a body whose
+		# skull or ribcage a bite has only just got through.
+		if p.hp[idx] <= 0.0 and layer != BONE and layer != ORGAN:
 			var chunk := Shed.new()
 			chunk.pos = at
 			chunk.layer = layer
@@ -560,12 +630,84 @@ func _erode(p: Patch, cell: int, budget: float, at: Vector2, shed: Array) -> flo
 
 	if removed <= 0.0:
 		return 0.0
+	revision += 1
 	p.remaining_hp = maxf(p.remaining_hp - removed, 0.0)
 	if p.touched[cell] == 0:
 		p.touched[cell] = 1
 		p.damaged.append(cell)
-	if p.hp[base + SKIN] <= 0.0 and p.hp[base + MUSCLE] <= 0.0 and p.hp[base + BONE] <= 0.0:
+	if _cell_is_empty(p, base):
 		p.retire(cell)
+	return removed
+
+
+## Whether a cell has nothing left in any layer. Written as a loop over the stack
+## rather than a list of the layers that happened to exist when it was authored:
+## adding a tissue and forgetting this test is how a body ends up with holes that
+## still have something in them.
+func _cell_is_empty(p: Patch, base: int) -> bool:
+	for layer in LAYERS:
+		if p.hp[base + layer] > 0.0:
+			return false
+	return true
+
+
+## Takes a whole structure off the animal, and hands back what came away.
+##
+## Called when a limb has been eaten through at its socket. Everything still
+## standing on it becomes loose tissue in the world, and the patch is left empty —
+## which is all that severance needs to be, because *empty* is a state the rest of
+## the system already understands completely. A patch with nothing in it is not
+## drawn, does not collide, cannot be bitten and reports no reach, so the limb
+## stops existing everywhere at once without a single `if severed` anywhere in the
+## bite query, the contact pass or the renderer.
+##
+## Bone and organ come away with the rest here rather than being ground down,
+## because nothing is grinding: the piece is not being destroyed, it is leaving.
+func strip(patch_key: String, shed: Array) -> float:
+	var p: Patch = patch(patch_key)
+	if p == null or p.gone_count >= p.cells:
+		return 0.0
+	var loose: Array = []
+	var removed: float = 0.0
+	for cell in p.cells:
+		if p.gone[cell] != 0:
+			continue
+		var base: int = cell * LAYERS
+		var region_base: int = int(p.region[cell]) * LAYERS
+		var organ: int = int(p.organ[cell])
+		for layer in LAYERS:
+			var have: float = p.hp[base + layer]
+			if have <= 0.0:
+				continue
+			p.hp[base + layer] = 0.0
+			removed += have
+			region_hp[region_base + layer] = maxf(region_hp[region_base + layer] - have, 0.0)
+			if layer == ORGAN and organ != BodyPlan.NO_ORGAN:
+				organ_hp[organ] = maxf(organ_hp[organ] - have, 0.0)
+			# One piece per surviving soft layer, exactly as a bite produces, so
+			# the pieces coalesce by layer downstream and a limb comes off as skin
+			# and meat rather than as one undifferentiated lump.
+			if layer == BONE or layer == ORGAN or not p.live:
+				continue
+			var chunk := Shed.new()
+			chunk.pos = p.centre_of(cell)
+			chunk.layer = layer
+			chunk.size = maxf(p.extent_of(cell) * 0.9, 1.5)
+			chunk.mass = chunk.size * chunk.size
+			chunk.angle = p.angle_of(cell)
+			chunk.patch_key = p.key
+			chunk.col = cell / p.rows
+			chunk.row = cell % p.rows
+			loose.append(chunk)
+		if p.touched[cell] == 0:
+			p.touched[cell] = 1
+			p.damaged.append(cell)
+		p.retire(cell)
+	if removed <= 0.0:
+		return 0.0
+	revision += 1
+	p.remaining_hp = maxf(p.remaining_hp - removed, 0.0)
+	_coalesce_shed(loose, shed)
 	return removed
 
 
@@ -682,8 +824,16 @@ func head_hp(lateral: float) -> float:
 
 func _cell_hp(p: Patch, col: int, lateral: float) -> float:
 	var row: int = clampi(int((lateral + 1.0) * 0.5 * float(p.rows)), 0, p.rows - 1)
-	var base: int = (clampi(col, 0, p.cols - 1) * p.rows + row) * LAYERS
-	return p.hp[base + SKIN] + p.hp[base + MUSCLE] + p.hp[base + BONE]
+	return _stack_hp(p, (clampi(col, 0, p.cols - 1) * p.rows + row) * LAYERS)
+
+
+## Everything still standing in one cell. Fat counts: it is tissue, and jaws
+## closed on a well-padded flank have hold of more than jaws closed on a lean one.
+func _stack_hp(p: Patch, base: int) -> float:
+	var total: float = 0.0
+	for layer in LAYERS:
+		total += p.hp[base + layer]
+	return total
 
 
 ## Average hit points per cell over everything inside a circle — how much tissue
@@ -718,41 +868,179 @@ func flesh_within(center: Vector2, radius: float) -> float:
 			count += 1
 			if p.gone[cell] != 0:
 				continue
-			var base: int = cell * LAYERS
-			total += p.hp[base + SKIN] + p.hp[base + MUSCLE] + p.hp[base + BONE]
+			total += _stack_hp(p, cell * LAYERS)
 	return total / float(count) if count > 0 else 0.0
 
 
-# -------------------------------------------------------------- skeletons ----
+# ------------------------------------------------------------- structures ----
+# What the functional layer reads. Everything above answers questions about
+# *tissue* — how far the body reaches, how much a set of jaws has hold of. These
+# answer questions about *anatomy*: how much of a muscle is left, whether a nerve
+# still runs, whether a bone is still continuous.
+#
+# None of them stores anything. A severed nerve is not a flag set by a bite; it
+# is what the cells along that nerve's run add up to when something asks. That is
+# the whole reason damage never has to be classified as it lands: a bite erodes
+# cells, and what those cells were is read afterwards, by whoever cares.
 
-## Skull, vertebral column, two limb girdles and a ribcage between them — see
-## the skeleton layout constants above for why it is this sparse.
-func _body_has_bone(col: int, v: float) -> bool:
-	var lateral: float = absf(v)
-	# Skull: the head cap, with a margin of flesh left at the cheeks.
-	if col < HEAD_COLS:
-		return lateral <= SKULL_SPAN
-	# Vertebrae run the midline the whole way, neck to tail tip. Only the row
-	# straddling the spine has its centre at zero, which is why BODY_ROWS is odd.
-	if lateral <= 1.0 / float(BODY_ROWS):
-		return true
-	var torso: int = col - HEAD_COLS
-	# Past the torso is tail: vertebrae and nothing else.
-	if torso >= TORSO_COLS:
-		return false
-	# Girdles: full-width bars under the limb sockets, so the limb bones read as
-	# attached to the axial skeleton rather than floating alongside it.
-	if torso == SHOULDER_COL or torso == PELVIS_COL:
-		return lateral <= GIRDLE_SPAN
-	# Ribs: alternating columns between the girdles, so a bite landing in a gap
-	# reaches the muscle the ribs do not cover. That alternation is what makes
-	# the cage read as structure instead of as one plate over the chest, and it
-	# is why a rib is never laid against a girdle — two adjacent crossbars are
-	# one wide bar, and there is no gap left to bite into.
-	return torso > SHOULDER_COL + 1 and torso < PELVIS_COL - 1 \
-		and torso % 2 == 1 and lateral <= RIB_SPAN
+## Fraction of one layer still standing across a whole region — its surviving
+## muscle, its remaining fat, whatever it is asked for. O(1): the totals are
+## carried as damage lands rather than measured here.
+func region_layer(region: int, layer: int) -> float:
+	var i: int = region * LAYERS + layer
+	if i < 0 or i >= region_full.size() or region_full[i] <= 0.0:
+		return 1.0
+	return clampf(region_hp[i] / region_full[i], 0.0, 1.0)
 
 
-## Limbs are a bone core running their whole length, with flesh either side.
-func _limb_has_bone(_col: int, v: float) -> bool:
-	return absf(v) <= 1.0 / float(LIMB_ROWS)
+## Fraction of one layer still standing over a span of columns — how much fibre a
+## single muscle group has left, as opposed to how much its whole region has.
+##
+## Walked rather than accumulated, because a group is a slice of a region and
+## there are only a handful of them. Called on the ticks the lattice changed.
+func layer_span(patch_key: String, from_col: int, to_col: int, layer: int) -> float:
+	var p: Patch = patch(patch_key)
+	if p == null:
+		return 1.0
+	var left: float = 0.0
+	var full: float = 0.0
+	var reference: float = _layer_reference(layer)
+	for col in range(maxi(from_col, 0), mini(to_col, p.cols)):
+		for row in p.rows:
+			var cell: int = col * p.rows + row
+			full += reference
+			if p.gone[cell] == 0:
+				left += p.hp[cell * LAYERS + layer]
+	return clampf(left / full, 0.0, 1.0) if full > 0.0 else 1.0
+
+
+func _layer_reference(layer: int) -> float:
+	match layer:
+		SKIN: return SKIN_HP
+		FAT: return FAT_HP * fat_reserve
+		MUSCLE: return MUSCLE_HP
+		BONE: return BONE_HP
+		_: return ORGAN_HP
+
+
+## How much padding the body is actually carrying, against an ordinary animal of
+## the same plan. 1.0 is that animal, above is a well-fed one, and it falls as fat
+## is bitten away — so a creature that has been opened up gets lighter for the
+## same reason it gets weaker.
+func fat_carried() -> float:
+	if fat_reference <= 0.0:
+		return 1.0
+	var left: float = 0.0
+	for region in BodyPlan.REGIONS:
+		left += region_hp[region * LAYERS + FAT]
+	return left / fat_reference
+
+
+## How much of an organ is left, 1.0 whole to 0.0 destroyed.
+func organ(which: int) -> float:
+	if which <= 0 or which >= organ_full.size() or organ_full[which] <= 0.0:
+		return 1.0
+	return clampf(organ_hp[which] / organ_full[which], 0.0, 1.0)
+
+
+## Whether a nerve or vessel still runs, 1.0 intact to 0.0 severed.
+##
+## A run is only as good as its worst point — a cord cut anywhere is cut — so
+## this is the minimum along it and never an average. An average would let a long
+## healthy nerve carry a signal through the place it had been severed.
+##
+## A shielded conduit is read off the bone enclosing it and an unshielded one off
+## the muscle it lies in, which is the one structural difference between the two
+## networks: the spinal cord survives inside its vertebrae until the vertebra
+## itself is broken, while the great vessel lying against it is opened as soon as
+## the flesh over it is taken.
+func conduit(run: BodyPlan.Conduit) -> float:
+	var p: Patch = patch(run.patch_key)
+	if p == null or run.cells.is_empty():
+		return 1.0
+	var worst: float = 1.0
+	for cell in run.cells:
+		worst = minf(worst, _conduit_at(p, cell, run.shielded))
+		if worst <= 0.0:
+			return 0.0
+	return worst
+
+
+func _conduit_at(p: Patch, cell: int, shielded: bool) -> float:
+	if p.gone[cell] != 0:
+		return 0.0
+	var base: int = cell * LAYERS
+	var around: float = p.hp[base + BONE] / BONE_HP if shielded and p.bone[cell] != 0 \
+		else p.hp[base + MUSCLE] / MUSCLE_HP
+	# A nerve is a thread through a cell, not a share of it. Scratching the
+	# vertebra does not fray the cord inside it — what matters is whether the
+	# thing enclosing it has substantially given, so the response is flat until
+	# the tissue is most of the way gone and then falls off quickly. Read
+	# proportionally instead, a body would go numb in exact step with how much of
+	# it had been eaten, which is a second hit-point bar wearing a nerve's name.
+	return clampf(around / CONDUIT_FLOOR, 0.0, 1.0)
+
+
+## Whether the skeleton is still continuous across a span of columns, and how
+## well — 1.0 sound, 0.0 broken clean through.
+##
+## Continuity, not quantity. Each column contributes the best bone still standing
+## anywhere across it, and the span is the *worst* of those columns, because a
+## frame is broken wherever it is broken and the sound bone either side of a break
+## does not splint it. That is what makes bone damage structural rather than
+## merely another pool: grinding one vertebra through costs the whole run.
+func bone_span(patch_key: String, from_col: int, to_col: int) -> float:
+	var p: Patch = patch(patch_key)
+	if p == null:
+		return 1.0
+	var weakest: float = 1.0
+	var found: bool = false
+	for col in range(maxi(from_col, 0), mini(to_col, p.cols)):
+		var best: float = 0.0
+		var any: bool = false
+		for row in p.rows:
+			var cell: int = col * p.rows + row
+			if p.bone[cell] == 0:
+				continue
+			any = true
+			best = maxf(best, clampf(p.hp[cell * LAYERS + BONE] / BONE_HP, 0.0, 1.0))
+		if not any:
+			continue
+		found = true
+		weakest = minf(weakest, best)
+	return weakest if found else 1.0
+
+
+## The vertebra at a fraction along the clipped spine — what holds one joint of
+## the animation rig up. This is the bridge between the rig's coordinates and the
+## lattice's, and it is deliberately the only one: everything else the rig asks
+## about the skeleton goes through a region or a limb key.
+func vertebra_at(t: float) -> float:
+	var col: int = plan.torso_column(clampf(t, 0.0, 1.0))
+	return bone_span(BODY_KEY, col, col + 1)
+
+
+## The girdle a limb is slung from. A socket whose girdle has been chewed away is
+## a limb attached to the animal by meat alone.
+func girdle_of(limb_key: String) -> float:
+	var col: int = int(plan.limb_socket_col.get(limb_key, -1))
+	if col < 0:
+		return 1.0
+	return bone_span(BODY_KEY, col, col + 1)
+
+
+## Whether a limb is still joined to the body at all.
+##
+## Attachment is the proximal end of the limb itself — the cells at the socket —
+## rather than anything about the rest of it. A leg eaten through at the shoulder
+## is off, however sound the foot on the end of it still is; a leg eaten through
+## at the ankle is a leg with no foot, still firmly attached.
+func limb_attachment(limb_key: String) -> float:
+	var p: Patch = patch(limb_key)
+	if p == null:
+		return 0.0
+	var standing: int = 0
+	for row in p.rows:
+		if p.gone[row] == 0:
+			standing += 1
+	return float(standing) / float(maxi(p.rows, 1))

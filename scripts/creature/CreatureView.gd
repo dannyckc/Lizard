@@ -35,8 +35,19 @@ const COL_BODY_TAIL := INK
 const COL_EYE := PAPER
 # Tissue revealed by damage, in the order a bite uncovers it. Intact skin is
 # just the body fill, so it needs no colour of its own.
+## Fat, under the skin and over the muscle: pale and bloodless, so opening an
+## animal reads as getting through the padding first and reaching the meat second.
+## It is the one warm light tone on the creature, which is what keeps a fat body
+## legibly different from a lean one the moment either is opened.
+const COL_FAT := Color("e0cfa8")
+const COL_FAT_DEEP := Color("c4ab7c")
 const COL_MUSCLE := Color("9c3b26")
 const COL_MUSCLE_DEEP := Color("5f2114")
+## An organ, once the bone over it has given. Darker and wetter than muscle, and
+## deliberately the only thing on the body this colour: seeing it at all means
+## something has been opened that should not have been.
+const COL_ORGAN := Color("6d1230")
+const COL_ORGAN_SPENT := Color("35091a")
 ## Bone has to be a tone, not a highlight, and it has to darken as it is ground
 ## down rather than pale out: a cell eaten clean through shows the ground, and
 ## at anything close to paper the two states are indistinguishable — you could
@@ -67,6 +78,10 @@ const COL_DBG_IDEAL := Color(INK, 0.58)
 const COL_DBG_STRIDE := Color(INK, 0.12)
 const COL_DBG_OUTLINE := Color(PAPER, 0.72)
 const COL_DBG_LIMB := Color(INK, 0.72)
+## The two supply networks. Cool for nerves, arterial for vessels — they run
+## through the same body and have to be told apart at a glance.
+const COL_DBG_NERVE := Color("2f6f8f")
+const COL_DBG_VESSEL := Color("a8202a")
 
 var creature: Creature
 
@@ -75,6 +90,9 @@ var creature: Creature
 var _quad := PackedVector2Array([Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO])
 var _skin_lines := PackedVector2Array()
 var _muscle_lines := PackedVector2Array()
+## Debug-only, but reused on the same terms as the rest: the anatomy overlay is
+## wanted exactly when the creature it is drawn over is already expensive.
+var _conduit_lines := PackedVector2Array()
 var _mesh_points := PackedVector2Array()
 var _mesh_colors := PackedColorArray()
 var _mesh_indices := PackedInt32Array()
@@ -140,7 +158,12 @@ func _draw() -> void:
 	_draw_eyes(body, torso)
 
 	# Feet, over the torso — same reason the limb bones went under it.
+	# A shadow is the one thing a stripped patch cannot suppress by being empty:
+	# it is drawn from the limb's pose rather than from its cells, so a leg that
+	# has come off would go on casting one.
 	for limb in creature.gait.limbs:
+		if limb.severed:
+			continue
 		_draw_foot_shadow(limb)
 	for limb in creature.gait.limbs:
 		var foot_patch: TissueGrid.Patch = tissue.patch(limb.key)
@@ -391,17 +414,40 @@ func _flush_flat(offset: Vector2, color: Color) -> void:
 ## through a wound is whatever is actually behind the creature. Bone is the only
 ## thing that stops a bite reaching that state, which is what makes the frame
 ## legible — the ribs stay as pale bars spanning an open body cavity.
+##
+## Five layers now, and the order they are tested in is the order a bite goes
+## through them, which is the whole reason no case here has to know anything about
+## damage. A cell is drawn as whatever is currently on top of it.
 func _cell_color(patch: TissueGrid.Patch, cell: int) -> Color:
 	var base: int = cell * TissueGrid.LAYERS
 	var skin: float = patch.hp[base + TissueGrid.SKIN]
 	if skin > 0.0:
 		# Skin holds together as a membrane until it actually tears. A slight warm
-		# shift communicates strain without dissolving it into muscle cell by cell.
+		# shift communicates strain without dissolving it into fat cell by cell.
 		return COL_BODY_HEAD.lerp(Color("2b211b"), (1.0 - skin / TissueGrid.SKIN_HP) * 0.24)
+	var fat: float = patch.hp[base + TissueGrid.FAT]
+	if fat > 0.0:
+		# Measured against this cell's own fat rather than the global maximum: the
+		# plan lays down more over the trunk than over a foot, and a full flank and
+		# a full ankle should both read as full.
+		return COL_FAT.lerp(COL_FAT_DEEP, 1.0 - fat / maxf(_fat_capacity(patch, cell), 0.0001))
 	var muscle: float = patch.hp[base + TissueGrid.MUSCLE]
 	if muscle > 0.0:
 		return COL_MUSCLE.lerp(COL_MUSCLE_DEEP, 1.0 - muscle / TissueGrid.MUSCLE_HP)
-	return COL_BONE.lerp(COL_BONE_WORN, 1.0 - patch.hp[base + TissueGrid.BONE] / TissueGrid.BONE_HP)
+	var bone: float = patch.hp[base + TissueGrid.BONE]
+	if bone > 0.0:
+		return COL_BONE.lerp(COL_BONE_WORN, 1.0 - bone / TissueGrid.BONE_HP)
+	return COL_ORGAN.lerp(COL_ORGAN_SPENT,
+		1.0 - patch.hp[base + TissueGrid.ORGAN] / TissueGrid.ORGAN_HP)
+
+
+## How much fat this particular cell was built with — the plan's profile at that
+## place, times the species' reserve.
+func _fat_capacity(patch: TissueGrid.Patch, cell: int) -> float:
+	var tissue: TissueGrid = creature.anatomy.tissue
+	var row: int = cell % patch.rows
+	return TissueGrid.FAT_HP * tissue.fat_reserve \
+		* tissue.plan.fat_at(patch.key, cell / patch.rows, patch.row_centre(row))
 
 
 ## Material detail deliberately ignores cell boundaries. Intact skin is read as
@@ -427,7 +473,11 @@ func _draw_tissue_grain(patch: TissueGrid.Patch, from_col: int, to_col: int) -> 
 					_skin_lines.append(_quad[0].lerp(_quad[1], 0.5))
 					_skin_lines.append(_quad[3].lerp(_quad[2], 0.5))
 				continue
-			if patch.hp[base + TissueGrid.MUSCLE] <= 0.0:
+			# Fat is a smooth, structureless layer — it has no grain of its own, and
+			# putting muscle's on it would draw fibres across a place where there
+			# are none and the meat has not been reached yet.
+			if patch.hp[base + TissueGrid.FAT] > 0.0 \
+					or patch.hp[base + TissueGrid.MUSCLE] <= 0.0:
 				continue
 			for strand in range(1, 4):
 				var across: float = float(strand) * 0.25
@@ -483,6 +533,8 @@ func _draw_debug() -> void:
 	# foot picks up. Stride is per-limb now — read it off the limb rather than
 	# recomputing, so the ring always shows the threshold actually being used.
 	for limb in creature.gait.limbs:
+		if limb.severed:
+			continue
 		draw_arc(limb.ideal, limb.stride, 0.0, TAU, 32, COL_DBG_STRIDE, 1.0, true)
 		draw_arc(limb.ideal, 4.0, 0.0, TAU, 12, COL_DBG_IDEAL, 1.5, true)
 		draw_line(limb.planted, limb.ideal, Color(INK, 0.28), 1.0, true)
@@ -508,7 +560,80 @@ func _draw_debug() -> void:
 	# Heading and velocity of the head.
 	draw_line(creature.head_pos, creature.head_pos + creature.move_dir * 34.0, Color(INK, 0.65), 1.5, true)
 
+	_draw_anatomy_debug()
 	_draw_grip_debug()
+
+
+## The two supply networks, and what each limb can still do.
+##
+## Drawn because none of it is visible in the body otherwise, and the whole
+## design rests on it: a leg that is weak because its muscle is gone and one that
+## is weak because its nerve is cut look identical from outside, and the second is
+## the case this system exists to make possible. The nerve run and the vessel run
+## are laid along the cells they actually pass through, so a cut shows up exactly
+## where the flesh was taken.
+func _draw_anatomy_debug() -> void:
+	var state: BodyState = creature.anatomy.state
+	var tissue: TissueGrid = creature.anatomy.tissue
+	_draw_conduits(tissue, state.plan.nerves, state.nerves, COL_DBG_NERVE)
+	_draw_conduits(tissue, state.plan.vessels, state.vessels, COL_DBG_VESSEL)
+
+	# The organs, which are otherwise sealed inside the skeleton and invisible
+	# until something has already got through it.
+	_draw_organ(tissue, BodyPlan.BRAIN)
+	_draw_organ(tissue, BodyPlan.HEART)
+
+	# One bar per limb: how much force it has, and how much of it the animal is
+	# still in command of. When the two separate, the second is the interesting one.
+	for limb in creature.gait.limbs:
+		if limb.severed:
+			continue
+		var at: Vector2 = limb.joints[0]
+		var axis: Vector2 = creature.body.anchors[limb.key].perp * limb.side * 9.0
+		draw_line(at, at + axis * limb.drive, COL_MUSCLE, 2.0, true)
+		draw_line(at + Vector2(0.0, 3.0), at + Vector2(0.0, 3.0) + axis * limb.command,
+			COL_DBG_NERVE, 2.0, true)
+
+
+## One `draw_multiline` per run rather than one `draw_line` per cell it passes
+## through, for the same reason the tissue itself is one triangle array: a nerve
+## laid down segment by segment is a couple of hundred canvas commands a frame,
+## and this overlay is most wanted precisely when a chewed-up creature is already
+## the most expensive thing on screen.
+func _draw_conduits(tissue: TissueGrid, runs: Array[BodyPlan.Conduit],
+		network: AnatomyNetwork, tint: Color) -> void:
+	for run in runs:
+		var patch: TissueGrid.Patch = tissue.patch(run.patch_key)
+		if patch == null or not patch.live or run.cells.size() < 2:
+			continue
+		_conduit_lines.resize(0)
+		var previous: Vector2 = patch.centre_of(run.cells[0])
+		for index in range(1, run.cells.size()):
+			var at: Vector2 = patch.centre_of(run.cells[index])
+			if patch.gone[run.cells[index]] == 0:
+				_conduit_lines.append(previous)
+				_conduit_lines.append(at)
+			previous = at
+		if _conduit_lines.is_empty():
+			continue
+		# Alpha carries what arrives rather than what survives locally, so a run
+		# that is itself intact still fades out behind a cut upstream of it — which
+		# is the property the whole network exists to have.
+		var reach: float = clampf(network.delivery[run.region], 0.0, 1.0)
+		draw_multiline(_conduit_lines, Color(tint, 0.18 + 0.62 * reach),
+			1.0 + 1.4 * reach, true)
+
+
+func _draw_organ(tissue: TissueGrid, which: int) -> void:
+	var patch: TissueGrid.Patch = tissue.patch(TissueGrid.BODY_KEY)
+	if patch == null or not patch.live:
+		return
+	var left: float = tissue.organ(which)
+	for cell in patch.cells:
+		if patch.organ[cell] != which or patch.gone[cell] != 0:
+			continue
+		draw_circle(patch.centre_of(cell), 1.8,
+			Color(COL_ORGAN, 0.30 + 0.60 * left))
 
 
 ## The tether a latched bite actually is: jaw point, the flesh it is bound to,

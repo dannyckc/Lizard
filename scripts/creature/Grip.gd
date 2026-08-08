@@ -23,10 +23,13 @@ extends RefCounted
 ## below the jaws' own force, the flesh gives before they do and the meat comes
 ## away in them; above it, they are pulled off a body that stayed in one piece.
 const FLESH_TENSILE: float = 0.62
-## Hit points in an intact cell of skin over muscle — what FLESH_TENSILE is
-## quoted against. A bind still backed by bone therefore resists about twice as
+## Hit points in an intact cell of skin over fat over muscle — what FLESH_TENSILE
+## is quoted against. A bind still backed by bone therefore resists about twice as
 ## much, and one already chewed most of the way through gives almost at once.
-const FLESH_REFERENCE_HP: float = TissueGrid.SKIN_HP + TissueGrid.MUSCLE_HP
+## Padding counts because it is tissue the jaws have hold of: there is more of a
+## fat animal in a mouthful, and more of it holding that mouthful on.
+const FLESH_REFERENCE_HP: float = TissueGrid.SKIN_HP + TissueGrid.FAT_HP \
+	+ TissueGrid.MUSCLE_HP
 ## How far, in pixels, flesh at the point of parting has drawn out of the body.
 ## The tether lengthens by this much as it yields, so the two creatures visibly
 ## come apart before anything tears rather than snapping at a fixed distance.

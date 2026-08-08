@@ -33,6 +33,12 @@ const MIN_MASS: float = 0.02
 ## is the whole reason a small creature can drag proportionally more than a large
 ## one — and why a large one still wins outright.
 const AREA_EXPONENT: float = 2.0 / 3.0
+## How much of its own weight a body's padding is. Quoted against an ordinary
+## animal of the same plan, so a creature at the default reserve weighs exactly
+## what it always did and only a deliberately fat or deliberately lean one moves —
+## which is the whole reason fat can be added to the stack without silently
+## reweighing every existing species.
+const FAT_MASS_GAIN: float = 0.18
 
 ## Mass, in Lizard units. Sets who moves whom in every contact and every grip.
 var mass: float = 1.0
@@ -46,18 +52,31 @@ var bite_force: float = 1.0
 var volume: float = 0.0
 ## Fraction of its original tissue the creature still carries.
 var condition: float = 1.0
+## Padding carried, against an ordinary animal of the same build. Part of what
+## this creature weighs.
+var padding: float = 1.0
 
 
 ## Re-derives all three from the pose and lattice solved this tick.
-func update(body: BodyShape, spine: Spine, tissue: TissueGrid, p: CreatureParams) -> void:
+##
+## `state` is what the body can still *do*, as opposed to what is still there.
+## The distinction matters for exactly one of the three: mass and bite force are
+## properties of tissue and are read off the lattice, while strength is a muscle
+## being driven — so a limb that is entirely present, well fed and simply not
+## answering its nerve contributes its weight and none of its pull.
+func update(body: BodyShape, spine: Spine, tissue: TissueGrid, p: CreatureParams,
+		state: BodyState = null) -> void:
 	if body == null or spine == null or body.widths.size() < 2 or p == null:
 		return
 	volume = body_volume(body, spine)
 	condition = clampf(tissue.integrity(), 0.0, 1.0) if tissue != null else 1.0
-	mass = maxf(p.density * (volume / REFERENCE_VOLUME) * condition, MIN_MASS)
+	padding = tissue.fat_carried() if tissue != null else 1.0
+	mass = maxf(p.density * (volume / REFERENCE_VOLUME) * condition
+		* (1.0 + FAT_MASS_GAIN * (padding - 1.0)), MIN_MASS)
 
 	var area: float = pow(mass, AREA_EXPONENT)
-	strength = maxf(p.muscle_power * area, 0.0001)
+	var drive: float = state.locomotion if state != null and state.impaired else 1.0
+	strength = maxf(p.muscle_power * area * drive, 0.0001)
 
 	# Bite force is sized off the head rather than off the body, because the head
 	# is the part that does the biting and the part you can see doing it: a broad

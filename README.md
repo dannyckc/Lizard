@@ -398,17 +398,26 @@ limits mean the same thing on both flanks and at any heading.
 ### Tissue
 
 Damage lives in a lattice of body cells — 32 x 7 over the body, 10 x 3 per limb
-— and each cell is a stack of three tissues in *depth*, because top-down means
-you are looking down through them: skin over muscle over bone. A bite spends a
-penetration budget strictly outside-in, so nothing under a layer can be touched
-until that layer is gone, and the colour of a cell is simply whatever is now
-uppermost in it. Skin holds its dark surface as a continuous membrane until it
+— and each cell is a stack of five tissues in *depth*, because top-down means
+you are looking down through them: skin over fat over muscle over bone over
+whatever organ lies beneath. A bite spends a penetration budget strictly
+outside-in, so nothing under a layer can be touched until that layer is gone,
+and the colour of a cell is simply whatever is now uppermost in it. Skin holds its dark surface as a continuous membrane until it
 tears; exposed muscle darkens as it is depleted and carries close longitudinal
 fibres so it reads as dense tissue rather than a coloured tile.
 
 The lattice is not an overlay on the creature — it *is* the creature. The body
 is drawn cell by cell rather than as a silhouette with the wounds painted over
 it, which is the whole reason a wound can be a hole (see below).
+
+Fat sits between the two outer layers and is the only one that is not simply
+material to chew through: every hit point of it spends **1.5** of the incoming
+penetration, so a padded animal is not merely carrying more tissue — the same
+jaws arrive at its muscle *shallower*. That is the whole difference between fat
+and thicker skin, and it means a heavy creature is protected by its build rather
+than by a toughness number. `fat_reserve` scales it per species, over a profile
+that is thickest at the trunk and thins toward the head, tail and feet, so it is
+body shape as much as armour — and it is part of what the creature weighs.
 
 Skin is a thin, stretchy rind and muscle is where the fight is. How far into
 that stack one bite gets is not a property of the bite but of the mouth taking
@@ -534,6 +543,156 @@ a frame. Measured in a 1280x760 window, that alone cost **5.5 ms/frame** and too
 the scene from 120 to 72 fps. Drawn as cells the whole creature is about twenty
 commands, shadows included. Skin tension and muscle fibres are each one
 `draw_multiline` for the same reason.
+
+### Anatomy, and what a body can still do
+
+The lattice above says what a creature is *made of*. This says what it can still
+*do* with what is left, and the two are deliberately never the same question:
+
+```
+    anatomy   ->   functional body state   ->   procedural animation
+    (cells)        (strength, control,          (gait, spine, IK)
+                    stability, range,
+                    load, perfusion)
+```
+
+The animator never learns what happened to the creature. There is no wound list
+for it to consult and no injured-walk anywhere to switch into. It asks a limb how
+strong it is and how well it is commanded, gets a number, and the ordinary gait
+does the rest. **Limping, dragging, weakness, instability and collapse are not
+implemented.** They are what the existing movement does when the numbers it reads
+every tick stop all being 1.0.
+
+The seam is also what makes two different injuries different. A leg whose muscle
+has been eaten and a leg whose nerve has been cut are both weak; only this split
+lets the second one be a leg that is undamaged, perfectly healthy, and does not
+answer.
+
+#### One description of the animal
+
+[`BodyPlan`](scripts/creature/BodyPlan.gd) is the only file that names a body
+part. It owns the lattice's dimensions, the skeleton's layout, the fat profile,
+where the organs sit, which cells belong to which region, and how the two supply
+networks are plumbed. Everything else is mechanism: erosion, connectivity,
+consequence, animation — and none of it mentions a limb, a rib or a tail.
+
+A creature with six legs, wings or no tail is a different plan and nothing else.
+
+#### It is all cells
+
+Skin, fat, muscle, bone, brain and heart are layers of the same depth stack, in
+the same lattice, damaged by the same bite. Nerves and vessels are not a layer:
+they are *runs through* cells, and their condition is read off the tissue they
+pass through rather than stored. Nothing is ever flagged as injured. A bite
+erodes cells; every consequence below is worked out afterwards, from the cells
+that survived. That is what keeps the anatomy and the functional state from ever
+disagreeing, including in cases nobody anticipated.
+
+#### The organs are protected by being behind something
+
+Bone stops a bite dead, because there is nothing behind it to reach — so an organ
+laid *under* bone in the same stack can only be got at by grinding through the
+bone first. That is the entire protection mechanism; nothing anywhere says an
+organ is hard to hit.
+
+The brain fills the back of the skull cap, inboard of the cheeks. The heart sits
+in the chest on a **rib** column, not between two of them. Both are asserted, not
+intended: `AnatomyTest` fails if any organ cell has no bone over it, and it
+re-checks after every single bite that while any skull remains, the brain under
+it is untouched.
+
+#### Two networks, one shape, different failures
+
+```
+  nerves    brain  ->  head -> thorax -> lumbar -> pelvis -> tail
+                                |                    |
+                              FL FR                RL RR
+
+  vessels   heart  ->  thorax -> head, lumbar -> pelvis -> tail
+                          |                        |
+                        FL FR                    RL RR
+```
+
+Same topology, and what a region receives is what its parent received times how
+intact its own run is. That one line is the whole of connectivity: cut anywhere
+and everything downstream goes dark, with no rule written about limbs or tails.
+
+They differ in two ways, both the plan's business. They are **rooted
+differently** — so a broken neck silences a body whose heart is fine, and an
+opened chest starves a body whose brain is fine. And the spinal cord runs
+*inside* the vertebrae while the great vessels run against them, so a wound over
+the spine that stops at the bone opens the vessel and leaves the cord alone;
+only breaking the vertebra cuts the cord. Two injuries in the same place with
+entirely different consequences, and neither is a case in any switch.
+
+#### The skeleton is the rig
+
+The anatomical skeleton and the animation rig are the same thing now. Each joint
+of the spine solve is handed the tone of the vertebra at that station: sound, it
+runs exactly the code it always did; ground through, it stops being held to the
+bend limit and goes slack *there and nowhere else*. The last constraint pass
+stays full strength regardless, so a broken back is a slack back and never a
+stretched one. A limb hangs off two skeletons — its own bones and the girdle it
+is slung from — and losing either takes its load-bearing to nothing however
+strong the muscle on it.
+
+#### Force is three things multiplied
+
+```
+    strength = surviving fibre  x  what the nerve delivers  x  what the blood keeps alive
+```
+
+Take any one away and the limb is weak. Muscle groups are actuators across
+specific joints, so a shoulder eaten out and a shank eaten out are different
+injuries that walk differently. Range of motion pointedly does **not** read
+control — a denervated limb has its full passive range and simply nothing to move
+it with.
+
+#### Blood is the slow one
+
+Perfusion follows the vessels quickly; tissue viability follows perfusion
+slowly, and fails faster than it recovers. So a limb whose artery is cut does not
+switch off — it weakens over the following several seconds. That is the one
+behaviour a damage-number model cannot produce at all, and it is asserted as a
+shape over time rather than as a value.
+
+Bleeding has two sources worth different amounts: any open wound seeps, and a
+severed vessel pours. A body losing only the first seals and slowly makes it up;
+one losing the second runs out. That is bleeding to death, with no timer and no
+injury class anywhere.
+
+#### Dying is a collapse now
+
+A creature whose brain is destroyed stops instantly. One whose heart is destroyed
+keeps going, and then goes out several seconds later because nothing is feeding
+its brain — same ending, arrived at from the other side.
+
+Either way the body is **not** rebuilt. `Ragdoll.adopt` takes the limbs exactly
+where the gait left them and the free spine solver picks up from the pose the
+creature was standing in, with its momentum intact. So an animal killed on its
+feet folds up from its own last pose rather than being swapped for a corpse — the
+real collapse the ragdoll had been waiting for.
+
+#### Coming apart
+
+A limb eaten through at its socket is emptied into the world as meat, and its
+patch is left with nothing in it. That is all severance needs to be, because
+*empty* is a state everything already understands completely: an empty patch is
+not drawn, does not collide, cannot be bitten and reports no reach. A
+three-legged creature needed no special case anywhere.
+
+#### A healthy creature pays nothing
+
+`BodyState.impaired` is false while every number is nominal, and every consumer
+short-circuits on it — the gait, the spine tone, locomotion and steering all run
+the identical code path they did before any of this existed. It is a promise more
+than an optimisation, and `AnatomyTest` checks it: an undamaged creature must
+report all four limbs unmodulated.
+
+The structural half — the cell walks — only re-runs when the lattice says it
+changed, so an animal nobody has bitten never floods a network to be told its
+nerves are fine. What runs every tick is about a hundred float operations of
+supply and decline, because those move continuously while the body does not.
 
 ### Teeth, and the mark they leave
 
@@ -856,6 +1015,7 @@ The parameters worth reaching for first:
 | A wider mouthful | `bite_radius` up (the gape's forward reach, capped against the skull) and `jaw_gape_deg` up |
 | Heavier for the same silhouette | `density` up — and remember the width sliders already move mass |
 | Strong for its size (drags more, is dragged less) | `muscle_power` up |
+| Padded — heavier, and harder to reach the muscle of | `fat_reserve` up |
 | Jaws that will not be shaken off | `jaw_power` up — this is grip, not penetration |
 | How fast the jaws can be worked while latched | `chew_interval` down / up — a floor on player-driven chewing, not a rate |
 | How readily held flesh tears | `Grip.FLESH_TENSILE` / `Creature.TEAR_YIELD` / `TEAR_WORK` — global properties of meat, not per-species |
@@ -992,8 +1152,8 @@ the other senses.
 
 ## Tests
 
-Ten headless checks cover controls, movement feel, simulation, rendering, UI,
-combat, sight, smell, hearing and the bodies in the habitat:
+Eleven headless checks cover controls, movement feel, simulation, rendering, UI,
+combat, sight, smell, hearing, anatomy and the bodies in the habitat:
 
 ```sh
 godot --headless --path . --script tests/ControlsTest.gd # input/head-look isolation
@@ -1006,6 +1166,7 @@ godot --headless --path . --script tests/SmellTest.gd    # scent persistence/tra
 godot --headless --path . --script tests/HearingTest.gd  # arrival/occlusion/events/reset
 godot --headless --path . --script tests/CombatTest.gd    # bite/anatomy slice
 godot --headless --path . --script tests/RagdollTest.gd   # the dead body
+godot --headless --path . --script tests/AnatomyTest.gd   # structure -> function -> gait
 ```
 
 `SmellTest` checks the two halves separately and then the seam. On the world
@@ -1123,6 +1284,42 @@ bite under load goes in shallower than the same bite when free. Weight gets its
 own pair: two identical creatures still split a contact exactly down the middle,
 and a Crocodile shoves a Gecko several times further than the reverse.
 
+`AnatomyTest` is weighted toward the seam the whole system exists to create:
+that *what happened* and *what it does* are two different questions. It checks
+that the body is built out of the structures it claims to be — every cell skinned,
+fatted and muscled, bone a frame rather than a plate, every region populated, fat
+laid as a profile rather than a constant. That the organs are enclosed: no organ
+cell may have anything but bone over it, and while any skull survives the brain
+under it must be untouched, re-asserted after every bite rather than only at the
+end.
+
+Then the claims that are easy to write and hard to keep. Fat cushions — the same
+bite leaves more muscle on a padded body than a lean one. The two networks fail
+differently: a wound over the spine that stops at the bone opens the vessel and
+leaves the cord alone, while grinding the vertebra through silences the hind legs
+and leaves the forelegs talking. Cutting a limb's nerve leaves its muscle, bone
+and passive range intact and its force at zero. Losing a blood supply is a
+decline rather than a switch, so it is asserted as a shape over time: still strong
+on the tick it is cut, most of the way down nine seconds later, with the limb
+still taking orders the whole way. A broken bone costs load-bearing without
+costing muscle.
+
+And that all of it reaches the gait. The weak leg's foot moves through its swing
+at under 80% of the sound leg's — a limp, measured as the asymmetry it actually
+is rather than by looking for one. A limb with no nerve takes *zero* ticks of
+steps across four seconds of walking, never lifts, and is still held inside the
+envelope its own bones allow: dragged, not abandoned. Two dead hind legs cost
+real ground. A destroyed brain collapses the body in place, within 30 px of where
+it was standing. A destroyed heart does not kill on the same tick and does within
+thirty seconds. A limb eaten off at the socket stops being solved, stops
+occupying space, stops answering the bite query, and leaves meat behind.
+
+The check that earns its place most is the dullest: an undamaged creature must
+report itself entirely nominal, with all four limbs unmodulated. It is what
+guarantees a healthy animal runs the same code it did before the anatomy existed —
+and it is what caught the diagonal-coupling gate, where a dead limb was being
+pulled into its partner's step and picking itself up on alternate beats.
+
 `SimTest` drives each preset through idle → walk → turn → pivot → idle and
 asserts that segment lengths hold, bends stay inside the limit, IK bones keep
 their length, the gait never lifts both diagonals at once, a resting creature's
@@ -1148,13 +1345,18 @@ Deliberate, in the interest of a stable and readable prototype:
   how much speed a contact sheds, so a heavy creature can shoulder a light one
   aside — but nothing is transferred: a creature that stops pushing stops moving
   whatever it was carrying, and there is no impact, recoil or knockback.
+- A severed limb becomes scrap rather than a body of its own: it lands, settles
+  and can be eaten, but it is not separately simulated as an articulated piece.
+  That is the granularity the world has — scraps are its independent physical
+  objects — and not a claim that a detached leg should be one.
 - Nothing in the habitat is alive. A body placed there is simulated as a carcass
   rather than parked as a living creature, which is honest about the missing AI
   but is still the absence of one: it never gets up, never reacts, and the only
   things that move it are other bodies and the jaws holding it.
-- A carcass settles into its resting pose at build time rather than falling into
-  it, so a body cannot be watched dying. When something can actually be killed,
-  that is the moment this has to become a real collapse.
+- A body *placed* in the habitat still settles into its resting pose at build
+  time rather than falling into it — it was never alive to fall. A creature that
+  dies while running is a different path and does collapse properly, from its own
+  last pose.
 - A creature can only be held by one set of jaws at a time. A second grip on the
   same victim is formed and resolved, but only the first one found decides how
   much locomotion that victim keeps.

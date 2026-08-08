@@ -95,6 +95,12 @@ extends Resource
 ## is this times mass^(2/3), so raising it makes a creature strong *for its size*
 ## rather than simply large.
 @export_range(0.2, 4.0, 0.01) var muscle_power: float = 1.0
+## How much fat the species lays down, as a multiple of the body plan's profile —
+## thickest over the trunk, thinning toward the head, tail and limbs. It is not a
+## damage-resistance number: fat is a real layer in the depth stack, so a padded
+## creature is heavier, and the same jaws reach its muscle shallower because the
+## fat spent part of the bite getting there. 0 is an animal with none.
+@export_range(0.0, 3.0, 0.05) var fat_reserve: float = 1.0
 
 # ------------------------------------------------------------- movement ----
 @export_group("Movement")
@@ -230,6 +236,7 @@ const SCHEMA: Array = [
 	{"group": "Physique"},
 	{"prop": "density", "label": "Density", "min": 0.2, "max": 4.0, "step": 0.01},
 	{"prop": "muscle_power", "label": "Muscle power", "min": 0.2, "max": 4.0, "step": 0.01},
+	{"prop": "fat_reserve", "label": "Fat reserve", "min": 0.0, "max": 3.0, "step": 0.05},
 
 	{"group": "Movement"},
 	{"prop": "move_speed", "label": "Move speed", "min": 20.0, "max": 600.0, "step": 5.0},
@@ -276,7 +283,7 @@ const PRESETS: Dictionary = {
 		"arm_length": 30.0, "leg_length": 33.0, "stance_width": 1.25, "stance_reach": 0.72,
 		"stride_distance": 20.0, "step_duration": 0.18, "step_height": 7.0,
 		"move_speed": 230.0, "turn_speed_deg": 260.0,
-		"density": 0.85, "muscle_power": 1.25, "jaw_power": 0.55,
+		"density": 0.85, "muscle_power": 1.25, "jaw_power": 0.55, "fat_reserve": 0.5,
 		"bite_damage": 1.8, "bite_reach": 26.0, "bite_radius": 12.0,
 		"bite_cooldown": 0.3, "chew_interval": 0.4,
 		# A crowded comb of small pegs. Nothing in it concentrates, so it grazes
@@ -294,7 +301,7 @@ const PRESETS: Dictionary = {
 		"arm_length": 26.0, "leg_length": 29.0, "stance_width": 1.35,
 		"stride_distance": 22.0, "step_duration": 0.30, "step_height": 6.0,
 		"move_speed": 150.0, "turn_speed_deg": 150.0, "turn_pivot": 70.0,
-		"density": 0.8, "muscle_power": 0.8, "jaw_power": 0.5,
+		"density": 0.8, "muscle_power": 0.8, "jaw_power": 0.5, "fat_reserve": 0.7,
 		"bite_damage": 1.6, "bite_radius": 14.0,
 		# Rows of fine hooks over a wide mouth: it holds soft prey and strips
 		# nothing off anything solid.
@@ -310,7 +317,7 @@ const PRESETS: Dictionary = {
 		"stride_distance": 42.0, "step_duration": 0.42, "step_height": 14.0,
 		"move_speed": 130.0, "acceleration": 400.0,
 		"turn_speed_deg": 110.0, "turn_responsiveness": 7.0, "turn_pivot": 80.0,
-		"density": 1.15, "muscle_power": 1.1, "jaw_power": 2.4,
+		"density": 1.15, "muscle_power": 1.1, "jaw_power": 2.4, "fat_reserve": 1.3,
 		"bite_damage": 3.2, "bite_reach": 36.0, "bite_radius": 20.0,
 		"chew_interval": 0.5,
 		# The other extreme from the Crocodile's, at nearly the same jaw size.
@@ -336,7 +343,7 @@ const PRESETS: Dictionary = {
 		"stride_distance": 40.0, "step_duration": 0.44, "step_height": 9.0,
 		"move_speed": 120.0, "acceleration": 340.0,
 		"turn_speed_deg": 95.0, "turn_responsiveness": 6.5, "turn_pivot": 90.0,
-		"density": 1.45, "muscle_power": 1.15, "jaw_power": 7.5,
+		"density": 1.45, "muscle_power": 1.15, "jaw_power": 7.5, "fat_reserve": 1.8,
 		"bite_damage": 3.6, "bite_reach": 41.0, "bite_radius": 21.0,
 		"bite_cooldown": 0.6, "chew_interval": 0.45,
 		# Big irregular cones on a mouth that opens wide. Conical means stout —
