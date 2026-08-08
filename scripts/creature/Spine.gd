@@ -158,6 +158,20 @@ func translate(offset: Vector2) -> void:
 		prev[i] += offset
 
 
+## Articulates only the head around the solved neck. Locomotion pins and solves
+## the complete chain first; applying look afterwards means cursor aim cannot
+## tow the torso, alter the authoritative movement heading, or leak momentum
+## into the next tick. The first segment remains exactly its configured length.
+func pose_head(forward: Vector2, seg_len: float) -> void:
+	if points.size() < 2:
+		return
+	var direction: Vector2 = forward.normalized() \
+		if forward.length_squared() > 0.000001 else forwards[0]
+	points[0] = points[1] + direction * seg_len
+	prev[0] = points[0]
+	_compute_frames()
+
+
 ## Local forward/perpendicular basis at every spine point. The body shape and
 ## the limb anchors are built entirely out of these, which is what keeps the
 ## silhouette readable while the chain bends.
@@ -167,6 +181,10 @@ func _compute_frames() -> void:
 		var f: Vector2
 		if i == 0:
 			f = points[0] - points[1]
+		elif i == 1 and n > 2:
+			# Point 0 is an independently articulated head. The neck/torso frame
+			# must follow its own axis so looking cannot rotate downstream frames.
+			f = points[1] - points[2]
 		else:
 			f = points[i - 1] - points[i]
 		if f.length_squared() < 0.000001:

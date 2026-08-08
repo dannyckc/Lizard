@@ -89,12 +89,15 @@ void fragment() {
 
 
 func _physics_process(_delta: float) -> void:
-	# Don't drive the creature with the mouse while the cursor is on a slider.
-	input.mouse_steering = get_viewport().gui_get_hovered_control() == null
+	# Let the head settle forward while the cursor is operating a slider. Mouse
+	# look is purely cosmetic/gameplay aim and never changes the body command.
+	input.mouse_look = get_viewport().gui_get_hovered_control() == null
 	creature.command = input.read(creature.head_pos, creature.heading, get_global_mouse_position())
 
 	food_field.refresh(creature.head_pos)
-	var eaten: int = food_field.consume(creature.head_pos, creature.mouth_radius())
+	# The mouse can articulate the visible head around the neck without moving
+	# the locomotion anchor, so mouth interactions use the solved head itself.
+	var eaten: int = food_field.consume(creature.body.head.pos, creature.mouth_radius())
 	if eaten > 0:
 		creature.feed(eaten)
 
@@ -160,13 +163,30 @@ func _unhandled_input(event: InputEvent) -> void:
 				scrap_field.clear()
 				camera.global_position = creature.head_pos
 				hud.reset_hint()
-	elif event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+	elif event is InputEventMouseButton:
+		if event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_zoom_by(1.1)
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_zoom_by(1.0 / 1.1)
 		elif event.button_index == MOUSE_BUTTON_LEFT:
-			creature.request_bite(get_global_mouse_position())
+			creature.set_bite_held(event.pressed)
+			if event.pressed:
+				creature.request_bite(get_global_mouse_position())
+
+
+## A bite may begin only from unhandled world input, but its release must be
+## observed even if the cursor moves over the tuning UI while the jaws are
+## clamped. `_input` runs before GUI dispatch, so handling only the release here
+## preserves both rules.
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton \
+			and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		creature.set_bite_held(false)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and is_instance_valid(creature):
+		creature.set_bite_held(false)
 
 
 func _zoom_by(factor: float) -> void:

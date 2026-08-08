@@ -24,9 +24,11 @@ godot --path . --editor   # open the editor
 
 | | |
 |---|---|
-| `W` `A` `S` `D` / arrows | move and turn |
-| move mouse | aim the head toward the cursor |
+| `W` `S` / up/down arrows | move forward/backward along the creature's orientation |
+| `A` `D` / left/right arrows | turn the body left/right |
+| move mouse | shift and look the head toward the cursor; the mouse never steers the body |
 | left click | bite (anatomical hit + cooldown) |
+| hold left click | latch a connected bite until release |
 | `Shift` | sprint |
 | `F1` | show/hide the tuning panel |
 | `F2` | toggle debug draw |
@@ -41,8 +43,10 @@ system will drive when it lands.
 A stationary second creature starts ahead of the player as the first combat
 slice. A click throws the head forward in a lunge and the bite resolves at full
 extension, eating into a lattice of body cells layered skin over muscle over
-bone. Tissue that comes off falls into the world as meat and can be eaten.
-Bodies are solid, so the two creatures can be walked into rather than through.
+bone. If the button remains held when the bite connects, the jaws stay latched
+at full extension until release. Tissue that comes off falls into the world as
+meat and can be eaten. Bodies are solid, so the two creatures can be walked into
+rather than through.
 
 ## How it works
 
@@ -56,7 +60,7 @@ input ──▶ head position ──▶ contacts ──▶ spine ──▶ body 
 
 | File | Responsibility |
 |---|---|
-| [MovementInput.gd](scripts/MovementInput.gd) | devices → an abstract `{throttle, turn, sprint}` command |
+| [MovementInput.gd](scripts/MovementInput.gd) | devices → an abstract `{throttle, turn, sprint, aim}` command |
 | [Creature.gd](scripts/creature/Creature.gd) | motion integration plus body and limb contact queries; drives the four systems below in order |
 | [Constraints.gd](scripts/creature/Constraints.gd) | the two projection primitives everything is built from |
 | [Spine.gd](scripts/creature/Spine.gd) | the particle chain and its relaxation solve |
@@ -379,6 +383,11 @@ settle. The bite resolves at full extension, against the pose the snout actually
 reached. There is no sideways mouth wedge in the top-down silhouette; a brief
 world-space **Bite** cue marks the exact impact point instead.
 
+If that hit connects while the button is still held, the strike clock stays on
+its apex and the jaws remain clamped until release. The tissue is damaged once,
+on the original hit frame; holding is a latch, not an automatic repeat attack.
+Misses recover normally.
+
 The throw is fed to **the spine's head point, not to `head_pos`**. That is the
 load-bearing detail, twice over. The body has to follow it through the
 constraint solve — that is what makes it whip rather than slide — and it must
@@ -386,6 +395,12 @@ never accumulate into the motion integrator, or every strike would walk the
 creature forward by its own reach. `head_pos` stays the creature's honest
 position throughout, which is also what keeps the camera still while the body
 lunges.
+
+Cursor look is applied after that body solve by rotating only the head point
+around the solved neck, within the configured bend limit. The rest of the spine
+is therefore identical regardless of cursor position during ordinary movement:
+W/S own translation and A/D own body heading, while the mouse owns only the
+final head pose and the direction of a bite lunge.
 
 ## Tuning
 
@@ -437,9 +452,10 @@ defaults (6 and 6) are already past the point of visible improvement.
 
 ## Tests
 
-Four headless checks cover simulation, rendering, UI and combat:
+Five headless checks cover controls, simulation, rendering, UI and combat:
 
 ```sh
+godot --headless --path . --script tests/ControlsTest.gd # input/head-look isolation
 godot --headless --path . --script tests/SimTest.gd      # simulation invariants
 godot --headless --path . --script tests/RenderSmoke.gd  # every draw path
 godot --headless --path . --script tests/UIInteractionTest.gd # HUD interactions

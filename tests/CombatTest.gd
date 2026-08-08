@@ -1,5 +1,5 @@
 ## Focused first-slice test for mouse aim, anatomy queries, the layered tissue
-## lattice, procedural body/limb contacts and the one-click/one-bite cooldown contract.
+## lattice, procedural body/limb contacts and the click/hold bite contract.
 ##
 ##   /Applications/Godot.app/Contents/MacOS/Godot --headless \
 ##       --path . --script tests/CombatTest.gd
@@ -63,67 +63,142 @@ func _run_checks() -> void:
 	_check_tissue(target)
 	_check_voids(target)
 
-	# Mouse aim turns without secretly applying forward throttle.
+	# The mouse supplies an articulated-head target, never a locomotion turn or
+	# point-and-go throttle. ControlsTest owns the detailed pose geometry.
 	var mouse_input := MovementInput.new()
 	var aimed: MovementInput.Command = mouse_input.read(Vector2.ZERO, 0.0, Vector2(0.0, 100.0))
-	_check(aimed.turn > 0.9, "always-on mouse aim did not steer toward the cursor")
+	_check(absf(aimed.turn) < 0.001, "mouse aim still wrote the body's turn command")
 	_check(absf(aimed.throttle) < 0.001, "mouse aim still applied point-and-go throttle")
+	_check(aimed.aim_active and aimed.aim_world.is_equal_approx(Vector2(0.0, 100.0)),
+		"enabled mouse look did not carry its aim target into the command")
 
-	# Put the two heads inside bite range and exercise the real signal/world
-	# resolver path used by a left click.
-	player.reset(Vector2.ZERO, 0.0)
-	target.reset(Vector2(50.0, 0.0), PI)
-	var accepted: bool = player.request_bite(Vector2(100.0, 0.0))
-	_check(accepted, "ready player rejected a bite request")
-	var stand: Vector2 = player.head_pos
-	player._physics_process(TICK)
-	_check(player.is_lunging(), "an accepted bite did not start a lunge")
-	_check(player.lunge_offset < 0.0, "the lunge skipped its wind-up")
-	_check(not main.bite_cue.is_showing(), "the Bite cue appeared before impact")
-	_check(is_equal_approx(target.anatomy.tissue.integrity(), 1.0),
-		"the bite landed before the lunge had extended")
-
-	# The strike resolves at full extension, several ticks after the click —
-	# that is the point of the animation, so it is worth pinning down.
-	var extension: float = 0.0
-	for _i in int(ceil((Creature.LUNGE_WINDUP + Creature.LUNGE_STRIKE) / TICK)) + 1:
-		player._physics_process(TICK)
-		extension = maxf(extension, player.body.head.pos.distance_to(player.head_pos))
-	_check(target.anatomy.tissue.integrity() < 1.0,
-		"the lunge never resolved into a bite on the nearby target")
-	_check(extension > player.params.bite_reach * 0.5,
-		"the head was never thrown appreciably forward (%.1f px)" % extension)
-	_check(main.bite_cue.is_showing(), "the bite impact did not show its world-space Bite cue")
-	# The whole reason the throw is fed to the spine and not to the motion
-	# state: a strike must not walk the creature forward by its own reach.
-	_check(player.head_pos.is_equal_approx(stand),
-		"lunging displaced the creature itself")
-	_check(player.bite_connected, "landed bite was reported as a miss")
-	_check(player.bite_cooldown_remaining > 0.0, "bite did not start its cooldown")
-	_check(not player.request_bite(Vector2(100.0, 0.0)),
-		"second click was accepted during bite cooldown")
-
-	for _i in 32:
-		player._physics_process(TICK)
-	_check(player.can_bite(), "bite did not become ready after its cooldown")
-	_check(not player.is_lunging(), "the lunge never ended")
-	_check(is_equal_approx(player.lunge_offset, 0.0),
-		"the lunge did not return the head to its resting position")
-	_check(main.scrap_field.scraps.size() > 0,
-		"a bite through skin and muscle shed nothing edible into the world")
-
-	# One click is one hit frame however coarse the tick carrying it, and that
-	# frame still resolves at full extension rather than from resting reach.
-	var before: float = target.anatomy.tissue.integrity()
-	_check(player.request_bite(Vector2(100.0, 0.0)), "ready player rejected a bite request")
-	player._physics_process(Creature.LUNGE_TOTAL * 2.0)
-	_check(target.anatomy.tissue.integrity() < before,
-		"a tick longer than the whole lunge stepped over its hit frame")
+	_check_bite_contract(player, target)
 
 	_check_contacts(player, target)
 
 	main.queue_free()
 	_finish()
+
+
+## A press starts one strike. If that strike connects while the button remains
+## down, it stays clamped at the hit frame without becoming repeated damage;
+## release resumes the original recovery. Misses and quick clicks never clamp.
+func _check_bite_contract(player: Creature, target: Creature) -> void:
+	const APEX: float = Creature.LUNGE_WINDUP + Creature.LUNGE_STRIKE
+	var apex_ticks: int = int(ceil(APEX / TICK)) + 2
+
+	# Connected hold: exercise the same synchronous signal/world resolver path as
+	# a real left-button press, then keep it held well past every ordinary timer.
+	player.reset(Vector2.ZERO, 0.0)
+	target.reset(Vector2(50.0, 0.0), PI)
+	player.set_bite_held(true)
+	_check(player.request_bite(Vector2(100.0, 0.0)),
+		"ready player rejected a held bite request")
+	var stand: Vector2 = player.head_pos
+	player._physics_process(TICK)
+	_check(player.is_lunging(), "an accepted held bite did not start a lunge")
+	_check(player.lunge_offset < 0.0, "the held lunge skipped its wind-up")
+	_check(not main.bite_cue.is_showing(), "the Bite cue appeared before impact")
+	_check(is_equal_approx(target.anatomy.tissue.integrity(), 1.0),
+		"the held bite landed before the lunge had extended")
+
+	var extension: float = 0.0
+	for _i in apex_ticks:
+		player._physics_process(TICK)
+		extension = maxf(extension, player.body.head.pos.distance_to(player.head_pos))
+	var latched_integrity: float = target.anatomy.tissue.integrity()
+	_check(latched_integrity < 1.0,
+		"the held lunge never resolved into a bite on the nearby target")
+	_check(extension > player.params.bite_reach * 0.5,
+		"the head was never thrown appreciably forward (%.1f px)" % extension)
+	_check(main.bite_cue.is_showing(),
+		"the bite impact did not show its world-space Bite cue")
+	_check(player.head_pos.is_equal_approx(stand),
+		"lunging displaced the creature itself")
+	_check(player.bite_connected, "landed held bite was reported as a miss")
+	_check(player.is_bite_latched(), "holding a connected bite did not latch it")
+	_check(is_equal_approx(player.bite_time, APEX),
+		"a connected latch did not hold at the bite apex")
+	_check(player.bite_cooldown_remaining > 0.0, "bite did not start its cooldown")
+
+	var held_ticks: int = int(ceil(
+		(maxf(player.params.bite_cooldown, Creature.LUNGE_TOTAL) + 0.25) / TICK))
+	for _i in held_ticks:
+		player._physics_process(TICK)
+	_check(player.is_bite_latched(), "connected bite released itself while click stayed held")
+	_check(player.is_lunging() and is_equal_approx(player.bite_time, APEX),
+		"held bite drifted away from full extension")
+	_check(is_equal_approx(target.anatomy.tissue.integrity(), latched_integrity),
+		"holding one bite applied tissue damage more than once")
+	_check(player.bite_cooldown_remaining <= 0.0,
+		"latch test did not actually outlast the cooldown")
+	_check(not player.request_bite(Vector2(100.0, 0.0)),
+		"second bite was accepted while the first was latched")
+	_check(main.scrap_field.scraps.size() > 0,
+		"a bite through skin and muscle shed nothing edible into the world")
+
+	# Release must leave the latch immediately, then finish the existing recovery.
+	player.set_bite_held(false)
+	_check(not player.is_bite_latched(), "button release left the bite latched")
+	for _i in int(ceil(Creature.LUNGE_RECOVER / TICK)) + 2:
+		player._physics_process(TICK)
+	_check(not player.is_lunging(), "released latch never finished its recovery")
+	_check(is_equal_approx(player.lunge_offset, 0.0),
+		"released latch did not return the head to rest")
+	_check(player.can_bite(), "released bite did not become ready after recovery")
+
+	# Holding empty air is still one ordinary bite: it must never manufacture a
+	# latch, retry automatically, or remain at full extension.
+	player.reset(Vector2.ZERO, 0.0)
+	target.reset(Vector2(900.0, 0.0), PI)
+	player.set_bite_held(true)
+	_check(player.request_bite(Vector2(100.0, 0.0)),
+		"ready player rejected a held miss request")
+	var miss_latched: bool = false
+	for _i in int(ceil(Creature.LUNGE_TOTAL / TICK)) + 4:
+		player._physics_process(TICK)
+		miss_latched = miss_latched or player.is_bite_latched()
+	_check(not miss_latched, "a held miss latched without a target")
+	_check(not player.bite_connected, "a bite into empty space reported a connection")
+	_check(not player.is_lunging(), "holding a miss prevented normal recovery")
+	_check(is_equal_approx(player.lunge_offset, 0.0),
+		"held miss did not return the head to rest")
+	player.set_bite_held(false)
+
+	# Reset is authoritative even in the middle of a live clamp.
+	player.reset(Vector2.ZERO, 0.0)
+	target.reset(Vector2(50.0, 0.0), PI)
+	player.set_bite_held(true)
+	_check(player.request_bite(Vector2(100.0, 0.0)),
+		"ready player rejected the reset latch precondition")
+	for _i in apex_ticks:
+		player._physics_process(TICK)
+	_check(player.is_bite_latched(), "reset case never reached its latch precondition")
+	player.reset(Vector2.ZERO, 0.0)
+	_check(not player.bite_held and not player.bite_latched,
+		"reset retained held or latched bite state")
+	_check(not player.is_lunging() and is_equal_approx(player.lunge_offset, 0.0),
+		"reset retained an active lunge")
+	_check(player.can_bite(), "reset did not make the bite immediately ready")
+
+	# A quick press/release before the next physics tick still performs one bite.
+	# A deliberately coarse step must stop at its apex rather than skipping damage.
+	target.reset(Vector2(50.0, 0.0), PI)
+	var quick_before: float = target.anatomy.tissue.integrity()
+	player.set_bite_held(true)
+	_check(player.request_bite(Vector2(100.0, 0.0)),
+		"ready player rejected a quick bite request")
+	player.set_bite_held(false)
+	player._physics_process(Creature.LUNGE_TOTAL * 2.0)
+	var quick_impact: float = target.anatomy.tissue.integrity()
+	_check(quick_impact < quick_before,
+		"a coarse tick stepped over the quick bite's hit frame")
+	_check(player.bite_connected, "quick released bite was reported as a miss")
+	_check(not player.is_bite_latched(), "quick released bite latched after release")
+	player._physics_process(Creature.LUNGE_TOTAL * 2.0)
+	_check(not player.is_lunging(), "quick released bite never completed recovery")
+	_check(is_equal_approx(target.anatomy.tissue.integrity(), quick_impact),
+		"one quick click resolved more than one bite")
 
 
 ## The skeleton has to stay a frame rather than spread into a plate. If bone

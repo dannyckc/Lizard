@@ -40,6 +40,15 @@ var move_dir: Vector2 = Vector2.RIGHT
 ## Speed as a 0..1 fraction of top speed. Drives stride, step timing and sway.
 var speed_norm: float = 0.0
 
+## The cursor articulates only the head around the solved neck. This angle is
+## deliberately separate from `heading`, which remains the WASD-owned body
+## direction used by locomotion, gait and collision braking.
+const HEAD_LOOK_MAX_ANGLE: float = deg_to_rad(82.0)
+const HEAD_LOOK_RESPONSE: float = 14.0
+const HEAD_LOOK_DEADZONE_SQ: float = 36.0
+var head_look_angle: float = 0.0
+var head_look_dir: Vector2 = Vector2.RIGHT
+
 var food_eaten: int = 0
 ## Uniform scale on the whole creature — body, limbs, stride, reach and bite all
 ## read off it. Growth has been taken out for now, so it is pinned at 1.0 and
@@ -81,6 +90,11 @@ const LUNGE_SETBACK: float = -0.22
 
 var bite_cooldown_remaining: float = 0.0
 var bite_connected: bool = false
+## True from a world-space left-button press until its matching release. A
+## connected strike that reaches its hit frame during that interval clamps at
+## full extension; holding a miss never creates a latch.
+var bite_held: bool = false
+var bite_latched: bool = false
 ## Seconds into the current strike, or -1 while not striking.
 var bite_time: float = -1.0
 ## How far ahead of its resting position the lunge is currently holding the
@@ -99,6 +113,8 @@ func _ready() -> void:
 	head_pos = spawn_position
 	heading = spawn_heading
 	move_dir = Vector2.RIGHT.rotated(heading)
+	head_look_angle = heading
+	head_look_dir = move_dir
 	add_to_group("creatures")
 	rebuild()
 
@@ -125,11 +141,15 @@ func reset(at: Vector2 = Vector2.ZERO, facing: float = 0.0) -> void:
 	speed = 0.0
 	ang_vel = 0.0
 	move_dir = Vector2.RIGHT.rotated(heading)
+	head_look_angle = heading
+	head_look_dir = move_dir
 	food_eaten = 0
 	command = MovementInput.Command.new()
 	anatomy.reset()
 	bite_cooldown_remaining = 0.0
 	bite_connected = false
+	bite_held = false
+	bite_latched = false
 	bite_time = -1.0
 	lunge_offset = 0.0
 	_bite_requested = false
@@ -149,6 +169,7 @@ func _physics_process(delta: float) -> void:
 		_bite_requested = false
 		bite_time = 0.0
 		bite_connected = false
+		bite_latched = false
 		_impact_done = false
 		bite_cooldown_remaining = params.bite_cooldown
 	_advance_lunge(delta)
@@ -165,7 +186,11 @@ func _physics_process(delta: float) -> void:
 	# not accumulate into the motion integrator or a strike would teleport the
 	# creature forward by its own reach.
 	var seg_len: float = params.segment_length * size_scale
-	spine.step(delta, head_pos + move_dir * lunge_offset, params, speed_norm, seg_len)
+	spine.step(delta, head_pos + head_look_dir * lunge_offset, params, speed_norm, seg_len)
+	_update_head_look(delta)
+	# Mouse look is posed after the body solve, so it can move and turn point 0
+	# without changing point 1 or anything downstream of it.
+	spine.pose_head(head_look_dir, seg_len)
 	body.build(spine, params, size_scale)
 	gait.update(delta, body, move_dir, speed_norm, params, size_scale,
 		Callable(self, "_limb_contact_push"))
@@ -196,6 +221,13 @@ func _advance_lunge(delta: float) -> void:
 	if bite_time < 0.0:
 		lunge_offset = 0.0
 		return
+	# A held bite clamps only after the synchronous world resolver confirmed that
+	# the jaws connected. Keeping the clock on the hit frame holds the visible
+	# head at full extension without applying another hit or restarting cooldown.
+	if bite_latched and bite_held:
+		bite_time = LUNGE_WINDUP + LUNGE_STRIKE
+		lunge_offset = params.bite_reach * size_scale * 0.85
+		return
 	# The clock never advances past the hit frame in a single step. A tick large
 	# enough to span the whole animation would otherwise leave the head already
 	# recovered on the frame the bite resolves, and it would strike from resting
@@ -223,8 +255,53 @@ func is_lunging() -> bool:
 	return bite_time >= 0.0
 
 
+## Smooth, anatomically bounded cursor look. Only this derived head direction
+## reads `aim_world`; body heading and motion remain exclusively command-driven.
+func _update_head_look(delta: float) -> void:
+	# Once the jaws connect, holding the button holds the pose too. Cursor motion
+	# cannot sweep a latched bite across the target or silently retarget it.
+	if is_bite_latched():
+		return
+	# The solved neck is the truthful centre of the head's range. It can lag the
+	# logical movement heading during a turn, and clamping against `heading`
+	# instead would let the first joint exceed the spine's bend invariant.
+	var neck_angle: float = spine.forwards[1].angle() if spine != null and spine.size() > 2 else heading
+	var max_look: float = minf(HEAD_LOOK_MAX_ANGLE, deg_to_rad(params.max_bend_deg))
+	var desired: float = neck_angle
+	if command.aim_active:
+		var look_origin: Vector2 = head_pos
+		if spine != null and spine.size() > 1:
+			look_origin = spine.points[1]
+		var to_aim: Vector2 = command.aim_world - look_origin
+		if to_aim.length_squared() > HEAD_LOOK_DEADZONE_SQ:
+			var local: float = clampf(
+				wrapf(to_aim.angle() - neck_angle, -PI, PI),
+				-max_look,
+				max_look)
+			desired = neck_angle + local
+
+	var response: float = 1.0 - exp(-HEAD_LOOK_RESPONSE * delta)
+	head_look_angle = lerp_angle(head_look_angle, desired, response)
+	# Clamp again after interpolation because the neck may itself have swung
+	# sharply this tick while the head angle was easing from its previous pose.
+	var relative: float = clampf(
+		wrapf(head_look_angle - neck_angle, -PI, PI),
+		-max_look,
+		max_look)
+	head_look_angle = wrapf(neck_angle + relative, -PI, PI)
+	head_look_dir = Vector2.RIGHT.rotated(head_look_angle)
+
+
 func _integrate_motion(delta: float) -> void:
 	var p: CreatureParams = params
+	if is_bite_latched():
+		# A latch is a brace, not another movement mode. Stopping the authoritative
+		# anchor keeps the full-extension jaw pose planted until button release.
+		speed = 0.0
+		ang_vel = 0.0
+		speed_norm = 0.0
+		move_dir = Vector2.RIGHT.rotated(heading)
+		return
 
 	# Turn rate falls off with speed so the arc stays wider than the body. At a
 	# standstill the full rate is available, which is what lets the creature
@@ -614,18 +691,32 @@ func feed(amount: int = 1) -> void:
 	ate_food.emit(food_eaten)
 
 
-## Queues one bite for the next solved physics pose. Clicks during recovery are
-## deliberately discarded rather than buffered, so one click always means at
-## most one attack.
+## Queues one bite for the next solved physics pose. Clicks during an active
+## strike or recovery are deliberately discarded rather than buffered, so one
+## click always means at most one attack even when cooldown is tuned shorter
+## than the lunge animation.
 func request_bite(_aim_world: Vector2) -> bool:
-	if bite_cooldown_remaining > 0.0 or _bite_requested:
+	if bite_cooldown_remaining > 0.0 or _bite_requested or bite_time >= 0.0:
 		return false
 	_bite_requested = true
 	return true
 
 
 func can_bite() -> bool:
-	return bite_cooldown_remaining <= 0.0 and not _bite_requested
+	return bite_cooldown_remaining <= 0.0 and not _bite_requested and bite_time < 0.0
+
+
+## Tracks the physical button independently from the one-shot bite request.
+## Releasing a connected clamp does not cancel the bite; it simply lets the
+## existing animation continue through recovery from the apex.
+func set_bite_held(held: bool) -> void:
+	bite_held = held
+	if not held:
+		bite_latched = false
+
+
+func is_bite_latched() -> bool:
+	return bite_latched and bite_held
 
 
 ## Pure query used by the world combat resolver so only the closest creature is
@@ -651,6 +742,7 @@ func apply_bite(center: Vector2, radius: float, depth: float) -> float:
 ## target, so the strike knows whether it connected.
 func resolve_bite(connected: bool) -> void:
 	bite_connected = connected
+	bite_latched = connected and bite_held
 
 
 ## The hit frame. Announces the jaw volume at full extension and lets the world

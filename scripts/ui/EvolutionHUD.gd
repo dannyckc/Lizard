@@ -282,7 +282,7 @@ func _build_biomass_and_legend() -> void:
 	legend.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	block.add_child(legend)
 	legend.add_child(_legend_item(["W", "A", "S", "D"], "MOVE"))
-	legend.add_child(_legend_item(["LMB"], "STEER"))
+	legend.add_child(_legend_item(["LMB"], "BITE / LATCH"))
 	legend.add_child(_legend_item(["⇧"], "SPRINT"))
 	legend.add_child(_legend_item(["F1"], "TUNING"))
 	legend.add_child(_legend_item(["F2"], "DEBUG"))
