@@ -38,6 +38,7 @@ func _process(delta: float) -> void:
 	_elapsed += delta
 	var viewport := get_viewport()
 	var canvas_transform: Transform2D = viewport.get_canvas_transform()
+	var visible_rect: Rect2 = viewport.get_visible_rect()
 	var origin_world: Vector2 = senses.sight.origin()
 	var direction_world: Vector2 = senses.sight.direction()
 	var origin_screen: Vector2 = canvas_transform * origin_world
@@ -49,7 +50,16 @@ func _process(delta: float) -> void:
 	var speed_gain: float = 1.0 + minf(1.0, absf(creature.speed) / 190.0) \
 		* senses.sight.profile.motion_reach_gain
 
-	_shader_material.set_shader_parameter("sight_origin_px", origin_screen)
+	# SCREEN_UV belongs to the render target, while the canvas transform is in
+	# logical viewport coordinates. Embedded play and canvas-item stretching can
+	# render those logical coordinates at a much larger physical resolution. A
+	# pixel-space uniform therefore drifts and shrinks SIGHT as the window grows.
+	# Express the eye in normalized viewport space and let the shader convert UV
+	# deltas back through the same logical viewport dimensions instead.
+	var viewport_size: Vector2 = visible_rect.size
+	var sight_origin_uv: Vector2 = (origin_screen - visible_rect.position) / viewport_size
+	_shader_material.set_shader_parameter("sight_origin_uv", sight_origin_uv)
+	_shader_material.set_shader_parameter("viewport_size", viewport_size)
 	_shader_material.set_shader_parameter("sight_direction", direction_screen.normalized())
 	_shader_material.set_shader_parameter("pixels_per_world", pixels_per_world * creature.size_scale)
 	_shader_material.set_shader_parameter("time_seconds", _elapsed)

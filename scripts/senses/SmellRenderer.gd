@@ -55,13 +55,21 @@ const SIZE_GAIN: float = 2.4
 const CENTRE_BOX: float = 160.0
 const PIGMENT_SHADER: String = "res://shaders/smell.gdshader"
 
+
+## Text choice, shaping and hue are immutable for a mark. TextLine retains the
+## shaped glyph run, so an active field no longer asks the text server to shape
+## hundreds of identical one-character strings again every frame.
+class MarkVisual extends RefCounted:
+	var line: TextLine
+	var hue: Color = Color.WHITE
+
+
 var senses: CreatureSenses
 
 var _font: Font
 var _tracked: Font
 var _glyphs: Array[PackedStringArray] = []
-## get_ascent/get_descent per integer size, resolved once each.
-var _baselines: Dictionary = {}
+var _mark_visuals: Dictionary = {}
 
 
 func _ready() -> void:
@@ -87,6 +95,7 @@ func _process(_delta: float) -> void:
 ## Kept for symmetry with SightRenderer: a species swap replaces the profile, and
 ## nothing here caches anything off it that a redraw will not pick up.
 func refresh_profile() -> void:
+	_mark_visuals.clear()
 	queue_redraw()
 
 
@@ -125,7 +134,10 @@ func _draw() -> void:
 		return
 	var smell: SmellSense = senses.smell
 	var profile: SmellProfile = smell.profile
-	if profile == null or smell.marks.is_empty():
+	if profile == null:
+		return
+	if smell.marks.is_empty():
+		_mark_visuals.clear()
 		return
 
 	# Draw in screen pixels while staying an ordinary node in the world canvas, so
@@ -136,6 +148,7 @@ func _draw() -> void:
 	var screen: Vector2 = get_viewport_rect().size
 	var cell: float = maxf(profile.lattice_cell, 1.0)
 	var steps: float = float(profile.opacity_steps)
+	_prune_visuals(smell.marks)
 
 	for mark in smell.marks:
 		var at: Vector2 = canvas * mark.pos
@@ -147,22 +160,48 @@ func _draw() -> void:
 		if alpha <= MIN_ALPHA:
 			continue
 		at = (at / cell).round() * cell
-
-		var size: int = int(LEGIBLE_SIZE)
-		var text: String = ""
-		if mark.legible:
-			text = _phrase(mark)
-		else:
-			var bank: PackedStringArray = _glyphs[_band(mark.confidence)]
-			text = bank[_pick(mark.seed, 977.0, bank.size())]
-			size = roundi(profile.glyph_size + _jitter(mark.seed, 13.0) * SIZE_SPREAD
-				+ mark.confidence * SIZE_GAIN)
-		size = maxi(size, 1)
-		draw_string(_tracked if mark.legible else _font,
-			Vector2(at.x - CENTRE_BOX * 0.5, at.y + _baseline(size)),
-			text, HORIZONTAL_ALIGNMENT_CENTER, CENTRE_BOX, size,
-			_pigment(mark, alpha * profile.layer_opacity, profile))
+		var visual: MarkVisual = _visual_for(mark, profile)
+		var line_size: Vector2 = visual.line.get_size()
+		visual.line.draw(get_canvas_item(),
+			Vector2(at.x - CENTRE_BOX * 0.5, at.y - line_size.y * 0.5),
+			Color(visual.hue, alpha * profile.layer_opacity))
 	draw_set_transform_matrix(Transform2D.IDENTITY)
+
+
+func _visual_for(mark: SmellSense.Mark, profile: SmellProfile) -> MarkVisual:
+	var mark_id: int = mark.get_instance_id()
+	if _mark_visuals.has(mark_id):
+		return _mark_visuals[mark_id] as MarkVisual
+	var visual := MarkVisual.new()
+	var size: int = int(LEGIBLE_SIZE)
+	var text: String
+	var font: Font
+	if mark.legible:
+		text = _phrase(mark)
+		font = _tracked
+	else:
+		var bank: PackedStringArray = _glyphs[_band(mark.confidence)]
+		text = bank[_pick(mark.seed, 977.0, bank.size())]
+		size = roundi(profile.glyph_size + _jitter(mark.seed, 13.0) * SIZE_SPREAD
+			+ mark.confidence * SIZE_GAIN)
+		font = _font
+	size = maxi(size, 1)
+	visual.line = TextLine.new()
+	visual.line.width = CENTRE_BOX
+	visual.line.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	visual.line.add_string(text, font, size)
+	visual.hue = _pigment_hue(mark, profile)
+	_mark_visuals[mark_id] = visual
+	return visual
+
+
+func _prune_visuals(marks: Array[SmellSense.Mark]) -> void:
+	var live: Dictionary = {}
+	for mark in marks:
+		live[mark.get_instance_id()] = true
+	for mark_id in _mark_visuals.keys():
+		if not live.has(mark_id):
+			_mark_visuals.erase(mark_id)
 
 
 ## Appear on the beat, hold, dissolve — with a fine tremor over the whole of it,
@@ -178,15 +217,14 @@ func _opacity(mark: SmellSense.Mark, elapsed: float, profile: SmellProfile) -> f
 
 ## Uncertainty is cool and anonymous; certainty warms toward the hue of the thing
 ## being read, which is how a glance at the field says *what* as well as *where*.
-func _pigment(mark: SmellSense.Mark, alpha: float, profile: SmellProfile) -> Color:
+func _pigment_hue(mark: SmellSense.Mark, profile: SmellProfile) -> Color:
 	var cool: Color = profile.unread_tone
 	if mark.kind != SmellSense.UNREAD and not profile.cool_tones.is_empty():
 		cool = profile.cool_tones[_pick(mark.seed, 311.0, profile.cool_tones.size())]
 	var warm: Color = cool
 	if mark.kind >= 0 and mark.kind < profile.warm_tones.size():
 		warm = profile.warm_tones[mark.kind]
-	var hue: Color = cool.lerp(warm, minf(1.0, mark.confidence * WARM_GAIN))
-	return Color(hue, alpha)
+	return cool.lerp(warm, minf(1.0, mark.confidence * WARM_GAIN))
 
 
 func _phrase(mark: SmellSense.Mark) -> String:
@@ -212,12 +250,3 @@ func _jitter(seed: float, salt: float) -> float:
 
 func _pick(seed: float, salt: float, count: int) -> int:
 	return mini(int(_jitter(seed, salt) * float(count)), maxi(count - 1, 0))
-
-
-## Offset from a centred mark to the text baseline for one size.
-func _baseline(size: int) -> float:
-	if _baselines.has(size):
-		return _baselines[size]
-	var offset: float = (_font.get_ascent(size) - _font.get_descent(size)) * 0.5
-	_baselines[size] = offset
-	return offset

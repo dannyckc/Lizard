@@ -257,6 +257,15 @@ func _layering(senses: CreatureSenses, field: ScentField) -> void:
 	_check(pigment != null and pigment.shader != null
 		and pigment.shader.code.contains("COLOR.a"),
 		"the multiply blend ignores glyph coverage and will stamp solid blocks")
+	var cache_mark := SmellSense.Mark.new()
+	cache_mark.kind = ScentField.Kind.BLOOD
+	cache_mark.confidence = 0.8
+	cache_mark.seed = 0.37
+	var cached_visual: SmellRenderer.MarkVisual = renderer._visual_for(cache_mark,
+		senses.smell.profile)
+	_check(cached_visual != null and cached_visual.line != null
+		and renderer._visual_for(cache_mark, senses.smell.profile) == cached_visual,
+		"SMELL reshapes an unchanged mark every frame instead of reusing its glyph run")
 
 	var species_profile := SmellProfile.new()
 	species_profile.reach = 333.0

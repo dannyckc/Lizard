@@ -52,6 +52,23 @@ func _process(_delta: float) -> bool:
 	_check(renderer.z_index < player_view.z_index,
 		"player creature is not kept crisp above sight treatment")
 	_check(renderer.senses == senses, "SightRenderer is not consuming the creature component")
+	# Canvas-item stretch and embedded play can render a logical viewport into a
+	# much larger physical target. The shader must receive normalized coordinates;
+	# passing this same position as logical pixels made the field shrink and drift
+	# whenever the embedded resolution increased.
+	renderer._process(0.0)
+	var sight_material := renderer.material as ShaderMaterial
+	var visible_rect: Rect2 = renderer.get_viewport().get_visible_rect()
+	var origin_screen: Vector2 = renderer.get_viewport().get_canvas_transform() * sight.origin()
+	var expected_uv: Vector2 = (origin_screen - visible_rect.position) / visible_rect.size
+	_check(sight_material != null, "SightRenderer has no shader material")
+	if sight_material != null:
+		var actual_uv: Vector2 = sight_material.get_shader_parameter("sight_origin_uv")
+		var shader_viewport_size: Vector2 = sight_material.get_shader_parameter("viewport_size")
+		_check(actual_uv.is_equal_approx(expected_uv),
+			"SIGHT eye position is not normalized to the logical viewport")
+		_check(shader_viewport_size.is_equal_approx(visible_rect.size),
+			"SIGHT shader does not use the logical viewport dimensions")
 	var species_profile := SightProfile.new()
 	species_profile.clear_reach = 444.0
 	senses.set_sight_profile(species_profile)

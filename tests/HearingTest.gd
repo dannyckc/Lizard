@@ -122,6 +122,14 @@ func _occlusion(hearing: HearingSense, field: SoundField) -> void:
 	var stop: float = field.blocking_distance(source, Vector2.LEFT, 180.0)
 	_check(stop > 0.0 and stop < source.distance_to(listener),
 		"wave particles have no physical stopping boundary on an obstacle")
+	var directions := PackedVector2Array([Vector2.LEFT, Vector2.UP, Vector2.RIGHT])
+	var batched: PackedFloat32Array = field.blocking_distances(source, directions, 180.0)
+	_check(batched.size() == directions.size(),
+		"batched wave occlusion lost particle directions")
+	for i in directions.size():
+		_check(is_equal_approx(batched[i],
+			field.blocking_distance(source, directions[i], 180.0)),
+			"batched wave occlusion disagrees with the physical ray query")
 
 	var wave := field.emit_sound(source, 1.0, SoundField.Kind.IMPACT)
 	field.advance(wave.life * 0.7)
@@ -156,6 +164,11 @@ func _layering(senses: CreatureSenses) -> void:
 	var profile: HearingProfile = senses.hearing.profile
 	_check(profile.angular_jitter < 1.0 and profile.radial_jitter_px <= 2.0,
 		"default particles can scatter out of their coherent ring")
+	_check(pigment != null and pigment.shader.code.contains("fwidth"),
+		"batched sound dots lost their shader-antialiased edge")
+	_check(main._msaa_for_output_size(Vector2i(2560, 1440)) == Viewport.MSAA_4X
+		and main._msaa_for_output_size(Vector2i(3840, 2160)) == Viewport.MSAA_2X,
+		"output MSAA no longer keeps 4× through 1440p and falls back above it")
 	_check(main.camera.is_current(), "adding the hearing layer displaced the active camera")
 	var zoom_before: float = main.camera.zoom.x
 	var wheel := InputEventMouseButton.new()

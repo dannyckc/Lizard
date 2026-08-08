@@ -8,6 +8,10 @@ extends Node2D
 const GRID_SPACING: float = 90.0
 ## The design mockup presents the default 200 px body close to actual size.
 const DEFAULT_ZOOM: float = 1.0
+## 4× MSAA is comfortably inside budget through 1440p after the sense renderer
+## optimisations. Beyond that, target pixel count dominates again; 2× at 4K has
+## both better frame time and comparable edge density to 4× at 1440p.
+const MSAA_4X_PIXEL_BUDGET: int = 2560 * 1440
 const PAPER := Color("f3f1ec")
 const INK := Color("14140f")
 const COL_GRID := Color(INK, 0.13)
@@ -36,6 +40,8 @@ var _footfall_counts: Dictionary = {}
 
 
 func _ready() -> void:
+	get_viewport().size_changed.connect(_update_output_msaa)
+	_update_output_msaa()
 	camera.make_current()
 	camera.zoom = Vector2(DEFAULT_ZOOM, DEFAULT_ZOOM)
 	camera.global_position = creature.head_pos
@@ -50,6 +56,16 @@ func _ready() -> void:
 		each.foot_landed.connect(_on_foot_landed.bind(each))
 	food_field.refresh(creature.head_pos)
 	_build_ui()
+
+
+func _update_output_msaa() -> void:
+	var viewport := get_viewport()
+	viewport.msaa_2d = _msaa_for_output_size(viewport.size)
+
+
+func _msaa_for_output_size(output_size: Vector2i) -> Viewport.MSAA:
+	var pixels: int = output_size.x * output_size.y
+	return Viewport.MSAA_4X if pixels <= MSAA_4X_PIXEL_BUDGET else Viewport.MSAA_2X
 
 
 func _build_ui() -> void:

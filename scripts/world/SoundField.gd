@@ -113,6 +113,32 @@ func blocking_distance(from: Vector2, direction: Vector2, max_distance: float,
 	return nearest
 
 
+## Batched counterpart used by HearingRenderer. Fetching and allocating the
+## obstacle outlines once per wave is much cheaper than repeating the scene-tree
+## group queries for every one of its visual particles.
+func blocking_distances(from: Vector2, directions: PackedVector2Array,
+		max_distance: float, ignore_source_id: int = 0,
+		ignore_listener_id: int = 0) -> PackedFloat32Array:
+	var distances := PackedFloat32Array()
+	distances.resize(directions.size())
+	if max_distance <= 0.0:
+		distances.fill(max_distance)
+		return distances
+	var outlines: Array = _obstacle_outlines(ignore_source_id, ignore_listener_id)
+	for i in directions.size():
+		var direction: Vector2 = directions[i]
+		if direction.length_squared() <= 0.000001:
+			distances[i] = max_distance
+			continue
+		var ray: Vector2 = direction.normalized()
+		var nearest: float = max_distance
+		for polygon in outlines:
+			nearest = minf(nearest,
+				_ray_polygon_distance(from, ray, nearest, polygon))
+		distances[i] = nearest
+	return distances
+
+
 ## Number of distinct solid bodies crossed by a direct source/listener path.
 ## HearingSense turns this physical answer into species-specific attenuation.
 func occlusion_count(from: Vector2, to: Vector2, ignore_source_id: int = 0,
