@@ -801,9 +801,11 @@ defaults (6 and 6) are already past the point of visible improvement.
 ## SENSES: sight
 
 The player creature owns a `CreatureSenses` child. Each sense registers as an
-independent perception layer; sight is the only layer currently implemented, so
-hearing and smell can be added beside it without depending on sight. `SightSense`
-provides the gameplay-facing head pose and continuous `clarity_at()` query, while
+independent perception layer; sight and smell exist now and neither depends on
+the other, so hearing can be added beside them the same way — construct it in
+`CreatureSenses._ready`, hand it to `register_layer`, and give it a `reset()` if
+it holds state and an `advance()` if it needs a clock. `SightSense` provides the
+gameplay-facing head pose and continuous `clarity_at()` query, while
 `SightRenderer` consumes that state only for presentation.
 
 The default `SightProfile` defines a clear near/forward field and a broader
@@ -814,10 +816,88 @@ below the player, leaving the controlled creature and HUD sharp; unresolved spac
 is kept paper-bright, softly blurred, desaturated and low contrast rather than
 darkened or clipped by a hard visibility mask.
 
+## SENSES: smell
+
+Smell is split in two, and the split is the design: **the world holds the scent,
+the creature holds the read.**
+
+`ScentField` is the world half and draws nothing at all. A pellet, a carcass, a
+scrap and a walking animal look exactly as they did before it existed; what they
+gain is a `Trace` — *something of this kind was at this place, this recently*.
+Five kinds smell distinctly (`FORAGE`, `QUARRY`, `CARRION`, `BLOOD`, `SCRAP`),
+and sources are *read* off the habitat on a slow tick rather than notifying
+anything, so no object in the world knows the field exists.
+
+One mechanism gives persistence, trails and decay together. A source still
+present renews the trace under it every tick, so it stays fresh while it exists
+and starts dying the moment it stops — eat a pellet and its smell hangs about
+after it. A source that has moved further than the merge radius renews nothing
+and lays a new trace instead, so what is left behind it is the path it walked,
+ageing from the tail forward. Take the source away and the chain simply runs out.
+Blood arrives both ways: a spill at the point of a connecting bite, unowned
+because it is on the ground now, and a slow drip from a wound scaled by how badly
+the creature is hurt. Kinds differ in how long they last and in `CARRY`, how far
+they announce themselves as a multiple of the smeller's reach — a carcass travels,
+a seed has to be underfoot — rather than in being muffled up close. You always
+know what is under your own nose.
+
+`SmellSense` is the creature half, and it is **perception, not emission**.
+Nothing leaves the source. The sense works in beats: each one resolves the
+strongest reads in range and leaves marks in the air *around* what it found,
+which tighten while the read holds and dissolve when it lapses. Confidence is the
+creature's — distance, freshness, and a little for having the muzzle turned
+toward the thing — so weak reads are sparse and scattered and sure ones cluster.
+A creature never reads its own trail, or it would spend its life following itself
+home. Gameplay asks `confidence_at()`, the counterpart of sight's `clarity_at()`,
+and gets a field rather than a detector.
+
+`SmellRenderer` draws the marks and only the marks. A mark carries how sure the
+read was and a fixed seed; the renderer derives its glyph, size and hue from that
+seed, so typography stays out of the sense and a mark never changes character
+while it is on the paper. Marks are painted in screen pixels on a fixed reading
+lattice — they belong to the observer, not to the habitat — and multiplied into
+the page as pigment rather than laid over it as light, which is why
+`shaders/smell.gdshader` exists: `CanvasItemMaterial`'s multiply mode has no use
+for a glyph's coverage and would stamp solid blocks, so the blend folds the
+coverage in itself. The layer sits above the sight treatment and below the
+controlled creature, which is the argument for it: what the eyes could not
+resolve, the nose still annotates.
+
+`SmellProfile` carries the tunable half of both — reach, beat, spread, lives,
+drift and the palette — and swaps per species through the same hook sight uses.
+
+## SENSES: hearing
+
+Hearing follows the same world/read/presentation split without borrowing either
+Sight's pixels or Smell's traces. `SoundField` owns short-lived physical events:
+their source, kind, amplitude, travel radius and the habitat geometry between two
+points. Movement, bites and eating announce `STEP`, `BITE` and `FEED` events to
+that field. No emitter knows which creature may hear it or how it will be drawn.
+
+`HearingSense` is the creature half. A sound is resolved only when its expanding
+wavefront reaches the solved head, then distance, the creature's sensitivity and
+each intervening solid body attenuate the read. The resulting direction,
+strength, kind and occluded flag are gameplay-facing state with bounded memory,
+ready for AI without a graphics backend. `strength_at()` supplies the continuous
+query alongside Sight's `clarity_at()` and Smell's `confidence_at()`.
+
+`HearingRenderer` presents the same travelling events as the design's thin rings
+of near-even, sub-pixel ink dots. All dots in one sound share one radius; they
+quietly drop out as the circumference grows. A route that reaches solved creature
+geometry stops at the boundary and dissolves there, leaving a clean acoustic
+shadow rather than continuing through the body. The layer prints above Sight and
+below Smell and the controlled creature, so sound remains legible outside the
+visual field without becoming a bright overlay.
+
+`HearingProfile` carries the per-creature reach, sensitivity, threshold,
+occlusion response and memory separately from the dot density, line softness,
+fade and ink treatment. It swaps and resets through the same component seam as
+the other senses.
+
 ## Tests
 
-Eight headless checks cover controls, movement feel, simulation, rendering, UI,
-combat, sight and the bodies in the habitat:
+Ten headless checks cover controls, movement feel, simulation, rendering, UI,
+combat, sight, smell, hearing and the bodies in the habitat:
 
 ```sh
 godot --headless --path . --script tests/ControlsTest.gd # input/head-look isolation
@@ -826,9 +906,39 @@ godot --headless --path . --script tests/SimTest.gd      # simulation invariants
 godot --headless --path . --script tests/RenderSmoke.gd  # every draw path
 godot --headless --path . --script tests/UIInteractionTest.gd # HUD interactions
 godot --headless --path . --script tests/SightTest.gd    # perception/reset/render order
+godot --headless --path . --script tests/SmellTest.gd    # scent persistence/trails/reads
+godot --headless --path . --script tests/HearingTest.gd  # arrival/occlusion/events/reset
 godot --headless --path . --script tests/CombatTest.gd    # bite/anatomy slice
 godot --headless --path . --script tests/RagdollTest.gd   # the dead body
 ```
+
+`SmellTest` checks the two halves separately and then the seam. On the world
+side: a deposit leaves one trace, a source renewing in place stays one smell
+rather than multiplying, two kinds in one place stay two, scent weakens and then
+disappears on its own clock, and a source moving away leaves a chain that is
+freshest at its head and laid along the path actually walked. On the creature
+side: reads resolve with distance and favour the muzzle, kinds carry different
+distances while anything under the nose is read for certain, and a creature gets
+nothing at all from its own trail.
+
+Then the claims the design rests on, which are the ones easy to regress into a
+particle system. No mark is ever spawned *on* its source, the marks occupy the
+air around it, and none of them stream further than the read's own spread — so
+nothing appears to pour out of anything. The sense goes on making marks with
+nothing in range. Marks dissolve. Neither the read nor the field can grow without
+bound under a saturated habitat. Gathering scent changes nothing about the
+habitat it read — same pellets, same scraps, same integrity — while the bodies
+already standing in it do smell, of the right things. And the layer is where it
+claims to be: over the sight treatment, under the controlled creature, multiplied
+into the paper with the glyph coverage folded into the blend, which is the one
+way this layer can fail while still drawing.
+
+`HearingTest` checks the same separation from both sides. It holds a wave before
+and after arrival, verifies range, direction, distance falloff, profile swapping
+and bounded world/memory state, then places the real carcass body across the path
+and asserts both gameplay attenuation and the renderer's stopping distance. It
+also exercises movement, combat and food event seams, the Sight/Hearing/Smell
+layer order, camera zoom, species changes and full reset.
 
 `RagdollTest` asserts the four things a carcass claims to be. That it is *found*
 at rest and not standing to attention: a slumped spine, limbs sprawled short of

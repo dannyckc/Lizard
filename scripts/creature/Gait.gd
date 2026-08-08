@@ -27,10 +27,15 @@ const STEP_RETARGET_RESPONSE: float = 14.0
 const LANDING_PREDICTION_STRIDES: float = 0.65
 
 var limbs: Array[Limb] = []
+## World-space contacts completed during the most recent update. This is motion
+## state, not audio: Creature announces the landing and the world decides what
+## sensory event, if any, it produces.
+var landed: PackedVector2Array = PackedVector2Array()
 
 
 func setup() -> void:
 	limbs.clear()
+	landed.clear()
 	var fl: Limb = Limb.new(); fl.setup("FL", Limb.FRONT, 1.0)
 	var fr: Limb = Limb.new(); fr.setup("FR", Limb.FRONT, -1.0)
 	var rl: Limb = Limb.new(); rl.setup("RL", Limb.REAR, 1.0)
@@ -44,6 +49,7 @@ func setup() -> void:
 func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		p: CreatureParams, scale: float,
 		collision_query: Callable = Callable()) -> void:
+	landed.clear()
 	if body.anchors.is_empty():
 		return
 
@@ -113,6 +119,7 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 			limb.step_t = 1.0
 			limb.stepping = false
 			limb.planted = limb.step_to
+			landed.append(limb.planted)
 
 		# Smoothstep along the ground path (ease out of and into the plant) with
 		# a sine arc for the fake lift — a half period is exactly one hop.

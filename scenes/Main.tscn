@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=16 format=3]
 
 [ext_resource type="Script" path="res://scripts/Main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/FoodField.gd" id="2_food"]
@@ -9,6 +9,10 @@
 [ext_resource type="Script" path="res://scripts/world/BiteCue.gd" id="7_bite_cue"]
 [ext_resource type="Script" path="res://scripts/senses/CreatureSenses.gd" id="8_senses"]
 [ext_resource type="Script" path="res://scripts/senses/SightRenderer.gd" id="9_sight_renderer"]
+[ext_resource type="Script" path="res://scripts/world/ScentField.gd" id="10_scent"]
+[ext_resource type="Script" path="res://scripts/senses/SmellRenderer.gd" id="11_smell_renderer"]
+[ext_resource type="Script" path="res://scripts/world/SoundField.gd" id="12_sound"]
+[ext_resource type="Script" path="res://scripts/senses/HearingRenderer.gd" id="13_hearing_renderer"]
 
 [sub_resource type="Resource" id="Resource_params"]
 script = ExtResource("5_params")
@@ -25,12 +29,20 @@ script = ExtResource("2_food")
 [node name="ScrapField" type="Node2D" parent="."]
 script = ExtResource("6_scrap")
 
+[node name="ScentField" type="Node" parent="."]
+script = ExtResource("10_scent")
+
+[node name="SoundField" type="Node" parent="."]
+script = ExtResource("12_sound")
+
 [node name="Creature" type="Node2D" parent="."]
 script = ExtResource("3_creature")
 params = SubResource("Resource_params")
 
 [node name="Senses" type="Node" parent="Creature"]
 script = ExtResource("8_senses")
+scent_field_path = NodePath("../../ScentField")
+sound_field_path = NodePath("../../SoundField")
 
 [node name="View" type="Node2D" parent="Creature"]
 script = ExtResource("4_view")
@@ -48,6 +60,14 @@ render_z_index = 4
 
 [node name="SightRenderer" type="Node2D" parent="."]
 script = ExtResource("9_sight_renderer")
+senses_path = NodePath("../Creature/Senses")
+
+[node name="SmellRenderer" type="Node2D" parent="."]
+script = ExtResource("11_smell_renderer")
+senses_path = NodePath("../Creature/Senses")
+
+[node name="HearingRenderer" type="Node2D" parent="."]
+script = ExtResource("13_hearing_renderer")
 senses_path = NodePath("../Creature/Senses")
 
 [node name="BiteCue" type="Node2D" parent="."]

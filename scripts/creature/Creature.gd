@@ -26,6 +26,9 @@ signal bite_started(center: Vector2, radius: float)
 signal tissue_damaged(integrity: float)
 ## Chunks of skin and muscle a bite tore off, for the world to scatter.
 signal tissue_shed(chunks: Array, origin: Vector2)
+## Physical foot contact. The creature reports motion; the habitat decides how
+## far that contact carries as sound.
+signal foot_landed(at: Vector2, intensity: float)
 
 @export var params: CreatureParams
 ## Simulation-space spawn because this node intentionally remains at the world
@@ -422,6 +425,9 @@ func _physics_process(delta: float) -> void:
 		or (absf(speed) <= 0.01 and command.throttle < 0.0) else move_dir
 	gait.update(delta, body, gait_dir, speed_norm, params, size_scale,
 		Callable(self, "_limb_contact_push"))
+	for contact in gait.landed:
+		var footfall: float = (0.07 + minf(0.11, absf(speed) / 1600.0)) * size_scale
+		foot_landed.emit(contact, footfall)
 	anatomy.update(self)
 	physique.update(body, spine, anatomy.tissue, params)
 	_update_bounds()

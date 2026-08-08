@@ -314,6 +314,11 @@ class Component extends DCLogic {
     for (let i = 0; i < 3; i++) this.carrion.push(this.spawnCarrion());
     this.sense = [];
     this.senseT = 0;
+    this.sounds = [];
+    this.balls = [
+      { x: 210, y: -160, vx: 62, vy: 38, z: 90, vz: 0, r: 7, mass: 0.55 },
+      { x: -260, y: 190, vx: -48, vy: 54, z: 150, vz: 0, r: 17, mass: 1 }
+    ];
     this.beat = 0;
     this.cam = { x: 0, y: 0 };
     this.time = 0;
@@ -482,6 +487,128 @@ class Component extends DCLogic {
     try { c.letterSpacing = '0px'; } catch (e) {}
   }
 
+  // ── Hearing ────────────────────────────────────────────────────────────────
+  // A sound is a wavefront, not an impact: particles hold a single thin ring that
+  // travels outward at an even pace, keeping its circle intact. Nothing moves
+  // radially on its own — the ring simply thins as its circumference grows, and
+  // individual dots quietly drop out until none are left.
+  emit(x, y, amp, kind) {
+    if (amp < 0.05) return;
+    amp = Math.min(1.2, amp);
+    if (this.sounds.length > 8) this.sounds.shift();
+    const blur = 4 + amp * 9;
+    const reach = 70 + amp * 175;
+    const count = Math.round(54 + amp * 86);
+    const pts = [];
+    for (let i = 0; i < count; i++) {
+      // Near-even angular spacing; jitter is a fraction of one step, so the line
+      // stays continuous rather than clumping.
+      const a = (i / count) * 6.2832 + (Math.random() - 0.5) * (0.45 / count) * 6.2832;
+      pts.push({
+        a,
+        jit: (Math.random() - 0.5) * 1.6,   // screen px — softens the line, no radial travel
+        fade: 0.34 + Math.random() * 0.66,  // fraction of life this dot survives
+        sz: 0.5 + Math.random() * 0.22
+      });
+    }
+    this.sounds.push({
+      x: x + (Math.random() - 0.5) * blur,
+      y: y + (Math.random() - 0.5) * blur,
+      amp, kind, age: 0,
+      life: 0.95 + amp * 0.95,
+      reach, pts,
+      quake: amp > 0.62 ? (amp - 0.62) / 0.58 : 0
+    });
+  }
+
+  stepSounds(dt) {
+    for (let i = this.sounds.length - 1; i >= 0; i--) {
+      const s = this.sounds[i];
+      s.age += dt;
+      if (s.age >= s.life) this.sounds.splice(i, 1);
+    }
+  }
+
+  stepBalls(dt) {
+    for (const b of this.balls) {
+      if (b.rest > 0) {
+        b.rest -= dt;
+        b.x += b.vx * dt * 0.25; b.y += b.vy * dt * 0.25;
+        if (b.rest <= 0) { b.vz = 300 + Math.random() * 260; b.rest = 0; }
+        continue;
+      }
+      b.x += b.vx * dt; b.y += b.vy * dt;
+      b.vz -= 620 * dt;
+      b.z += b.vz * dt;
+      // Loose containment so they stay near the observed field rather than wandering off.
+      const dx = b.x - this.cam.x, dy = b.y - this.cam.y;
+      if (Math.hypot(dx, dy) > 520) { b.vx -= dx * 0.0016; b.vy -= dy * 0.0016; }
+      if (b.z <= 0) {
+        const impact = Math.min(1, Math.abs(b.vz) / 520);
+        b.z = 0;
+        b.vz = Math.abs(b.vz) * 0.7;
+        // Rest, then a fresh drop — so impacts arrive as separate events, not a loop.
+        if (b.vz < 90) { b.vz = 0; b.rest = 0.9 + Math.random() * 2.6; }
+        if (impact > 0.2) this.emit(b.x, b.y, impact * (b.mass > 0.8 ? 0.95 : 0.34), 'impact');
+      }
+    }
+  }
+
+  // Radius of the wavefront: near-constant propagation speed, easing off only
+  // slightly so the ring never snaps to a stop.
+  soundR(s, t) {
+    const k = Math.min(1, (t === undefined ? s.age / s.life : t));
+    return s.reach * Math.pow(k, 0.82);
+  }
+
+  // Painted as particulate, never line work — every dot of a given sound sits on
+  // the same travelling radius, so the ring reads as one coherent wavefront.
+  paintHearing(L, w, h, S, dpr) {
+    const c = L.hear.ctx;
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, w, h);
+
+    for (const s of this.sounds) {
+      const t = s.age / s.life;
+      if (t >= 1) continue;
+      const rs = this.soundR(s) * S;
+      const cx = w / 2 + (s.x - this.cam.x) * S;
+      const cy = h / 2 + (s.y - this.cam.y) * S;
+      if (cx + rs < -20 || cy + rs < -20 || cx - rs > w + 20 || cy - rs > h + 20) continue;
+      // One envelope for the whole ring: eased in so nothing flashes, eased out
+      // so the wavefront dissolves rather than cutting.
+      const base = (0.24 + s.amp * 0.26) * Math.min(1, t / 0.12) * Math.pow(1 - t, 1.1);
+      for (const p of s.pts) {
+        if (t >= p.fade) continue;
+        const a = base * Math.min(1, (p.fade - t) / 0.22);
+        if (a <= 0.012) continue;
+        const rr = rs + p.jit;
+        c.fillStyle = 'rgba(20,20,15,' + a.toFixed(3) + ')';
+        c.beginPath();
+        c.arc(cx + Math.cos(p.a) * rr, cy + Math.sin(p.a) * rr, p.sz, 0, 6.284);
+        c.fill();
+      }
+    }
+  }
+
+  // Only heavy impacts reach the ground: a short, tight swell of the registration
+  // grid at the wavefront. Everything quieter leaves the paper undisturbed.
+  gridPush(x, y) {
+    let px = 0, py = 0, swell = 0;
+    for (const s of this.sounds) {
+      if (!s.quake) continue;
+      const r = this.soundR(s);
+      const dx = x - s.x, dy = y - s.y, d = Math.hypot(dx, dy);
+      if (d < 1 || Math.abs(d - r) > 40) continue;
+      const band = Math.exp(-Math.pow((d - r) / 20, 2));
+      const env = Math.pow(1 - s.age / s.life, 2) * s.quake;
+      const m = band * env * 5;
+      px += (dx / d) * m; py += (dy / d) * m;
+      swell += band * env * 0.5;
+    }
+    return [px, py, swell];
+  }
+
   widthAt(u) {
     const P = this.P;
     const stops = [[0, P.head], [0.22, P.chest], [0.5, P.waist], [0.72, P.hip], [1, P.tail ? P.tailTip : P.hip * 0.55]];
@@ -573,7 +700,18 @@ class Component extends DCLogic {
       lb.ideal = ideal;
       const f = this.feet[lb.i];
       if (f.planted && (f.x === 0 && f.y === 0)) { f.x = ideal.x; f.y = ideal.y; }
-      if (!f.planted) { air++; f.t += dt / P.stepDur; if (f.t >= 1) { f.planted = true; f.x = f.to.x; f.y = f.to.y; f.air = 0; } }
+      if (!f.planted) {
+        air++; f.t += dt / P.stepDur;
+        if (f.t >= 1) {
+          f.planted = true; f.x = f.to.x; f.y = f.to.y; f.air = 0;
+          // Only every other footfall registers, and only when actually moving:
+          // a quiet world stays quiet.
+          this.stepCount = (this.stepCount || 0) + 1;
+          if (this.stepCount % 2 === 0 && Math.abs(this.vel) > 30) {
+            this.emit(f.x, f.y, (0.07 + Math.min(0.11, Math.abs(this.vel) / 1600)) * this.sizeScale, 'step');
+          }
+        }
+      }
       else {
         const d = Math.hypot(f.x - ideal.x, f.y - ideal.y);
         if (d > stride) cand.push({ lb, f, d, ideal });
@@ -604,9 +742,12 @@ class Component extends DCLogic {
       if (Math.hypot(p.x - this.head.x, p.y - this.head.y) < 16 * this.sizeScale) {
         this.pellets.splice(i, 1); this.pellets.push(this.spawnPellet());
         this.food++; this.sizeScale = Math.min(1.9, this.sizeScale + 0.022);
+        this.emit(p.x, p.y, 0.42 * this.sizeScale, 'bite');
       }
     }
 
+    this.stepBalls(dt);
+    this.stepSounds(dt);
     this.stepSense(dt);
 
     this.cam.x += (this.head.x - this.cam.x) * Math.min(1, dt * 3.2);
@@ -626,12 +767,12 @@ class Component extends DCLogic {
   ensureLayers(w, h, dpr) {
     if (!this.L) {
       const mk = () => { const el = document.createElement('canvas'); return { el, ctx: el.getContext('2d') }; };
-      this.L = { world: mk(), latent: mk(), periph: mk(), sharp: mk(), core: mk(), outer: mk(), fog: mk(), ghost: mk(), sense: mk() };
+      this.L = { world: mk(), latent: mk(), periph: mk(), sharp: mk(), core: mk(), outer: mk(), fog: mk(), ghost: mk(), sense: mk(), hear: mk() };
     }
     const L = this.L;
     const fit = (o, pw, ph) => { if (o.el.width !== pw || o.el.height !== ph) { o.el.width = pw; o.el.height = ph; } };
     const pw = Math.max(1, Math.round(w * dpr)), ph = Math.max(1, Math.round(h * dpr));
-    fit(L.world, pw, ph); fit(L.latent, pw, ph); fit(L.periph, pw, ph); fit(L.sharp, pw, ph); fit(L.fog, pw, ph); fit(L.ghost, pw, ph); fit(L.sense, pw, ph);
+    fit(L.world, pw, ph); fit(L.latent, pw, ph); fit(L.periph, pw, ph); fit(L.sharp, pw, ph); fit(L.fog, pw, ph); fit(L.ghost, pw, ph); fit(L.sense, pw, ph); fit(L.hear, pw, ph);
     L.mw = Math.max(1, Math.round(w * 0.5)); L.mh = Math.max(1, Math.round(h * 0.5));
     fit(L.core, L.mw, L.mh); fit(L.outer, L.mw, L.mh);
     return L;
@@ -772,7 +913,10 @@ class Component extends DCLogic {
     const x0 = Math.floor((this.cam.x - w / 2 / S) / step) * step, x1 = this.cam.x + w / 2 / S;
     const y0 = Math.floor((this.cam.y - h / 2 / S) / step) * step, y1 = this.cam.y + h / 2 / S;
     gl.fillStyle = 'rgba(20,20,15,0.34)';
-    for (let x = x0; x < x1; x += step) for (let y = y0; y < y1; y += step) { gl.beginPath(); gl.arc(x, y, 1.15 / S, 0, 6.284); gl.fill(); }
+    for (let x = x0; x < x1; x += step) for (let y = y0; y < y1; y += step) {
+      const [px, py, sw] = this.gridPush(x, y);
+      gl.beginPath(); gl.arc(x + px, y + py, (1.15 + sw * 1.5) / S, 0, 6.284); gl.fill();
+    }
     gl.restore();
 
     const gw = L.world.ctx;
@@ -781,7 +925,10 @@ class Component extends DCLogic {
     gw.save();
     gw.translate(w / 2, h / 2); gw.scale(S, S); gw.translate(-this.cam.x, -this.cam.y);
     gw.fillStyle = 'rgba(20,20,15,0.15)';
-    for (let x = x0; x < x1; x += step) for (let y = y0; y < y1; y += step) { gw.beginPath(); gw.arc(x, y, 1 / S, 0, 6.284); gw.fill(); }
+    for (let x = x0; x < x1; x += step) for (let y = y0; y < y1; y += step) {
+      const [px, py, sw] = this.gridPush(x, y);
+      gw.beginPath(); gw.arc(x + px, y + py, (1 + sw * 1.3) / S, 0, 6.284); gw.fill();
+    }
     gw.restore();
     gw.save();
     gw.translate(w / 2, h / 2); gw.scale(S, S); gw.translate(-this.cam.x, -this.cam.y);
@@ -792,6 +939,17 @@ class Component extends DCLogic {
       gw.strokeStyle = 'rgba(20,20,15,0.26)'; gw.lineWidth = 1 / S; gw.stroke();
       gw.beginPath(); gw.arc(p.x, p.y, 2.6, 0, 6.284); gw.fillStyle = '#14140F'; gw.fill();
     }
+    for (const b of this.balls) {
+      const lift = b.z * 0.42;
+      gw.beginPath();
+      gw.ellipse(b.x, b.y, b.r * (1.05 + b.z / 420), b.r * (0.66 + b.z / 620), 0, 0, 6.284);
+      gw.fillStyle = 'rgba(20,20,15,' + Math.max(0.05, 0.2 - b.z * 0.0007).toFixed(3) + ')';
+      gw.fill();
+      gw.beginPath(); gw.arc(b.x, b.y - lift, b.r, 0, 6.284);
+      gw.fillStyle = '#14140F'; gw.fill();
+      gw.beginPath(); gw.arc(b.x - b.r * 0.3, b.y - lift - b.r * 0.34, b.r * 0.22, 0, 6.284);
+      gw.fillStyle = '#F3F1EC'; gw.fill();
+    }
     for (const c of this.carrion) {
       gw.fillStyle = 'rgba(20,20,15,0.34)';
       for (const lo of c.lobes) { gw.beginPath(); gw.arc(c.x + lo.dx, c.y + lo.dy, lo.r, 0, 6.284); gw.fill(); }
@@ -801,6 +959,15 @@ class Component extends DCLogic {
     gw.restore();
 
     this.compositeVision(g, L, w, h, S);
+
+    // Hearing bypasses sight entirely: ripples print onto the paper wherever they
+    // travel, unaffected by what is or isn't resolved by the eye.
+    this.paintHearing(L, w, h, S, dpr);
+    g.save();
+    g.globalCompositeOperation = 'multiply';
+    g.globalAlpha = 0.9;
+    g.drawImage(L.hear.el, 0, 0, w, h);
+    g.restore();
 
     // The sensory layer sits over the habitat as annotation, not atmosphere:
     // multiplied in so marks read as pigment on the same paper, never as light.

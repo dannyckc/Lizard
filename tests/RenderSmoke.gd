@@ -1,8 +1,9 @@
 ## Boots the real Main scene headless and walks the creature for a few seconds
 ## with the debug overlay on, so every _draw() path (body fill, tissue grain,
-## limbs, planted + stepping feet, Bite cue, HUD, grid and screen-space Sight)
-## actually executes. Catches bad draw arguments, shader compilation failures
-## and scene wiring mistakes that a pure-simulation test cannot.
+## limbs, planted + stepping feet, Bite cue, HUD, grid, screen-space Sight,
+## Hearing wavefronts and the Smell marks) actually executes. Catches bad draw arguments, shader
+## compilation failures and scene wiring mistakes that a pure-simulation test
+## cannot.
 ##
 ##   /Applications/Godot.app/Contents/MacOS/Godot --headless \
 ##       --path . --script tests/RenderSmoke.gd
@@ -59,10 +60,21 @@ func _physics_process(_delta: float) -> bool:
 		for limb in c.gait.limbs:
 			stepped = stepped or limb.planted != limb.ideal
 		var target: Creature = main.get_node("TargetCreature")
-		print("render smoke OK — %d draws / %d ticks | speed %.0f px/s | travelled %.0f px | outline %d verts | feet moved: %s | gripped: %s | target integrity %.2f | %d scraps"
+		# The mark count is the only proof the smell layer had anything to draw:
+		# an empty read draws nothing at all and would smoke-test clean.
+		var smell: SmellSense = (main.get_node("Creature/Senses") as CreatureSenses).smell
+		var sounds: Array[SoundField.SoundWave] = (main.get_node("SoundField") as SoundField).waves
+		print("render smoke OK — %d draws / %d ticks | speed %.0f px/s | travelled %.0f px | outline %d verts | feet moved: %s | gripped: %s | target integrity %.2f | %d scraps | %d scent / %d marks"
 			% [draws, ticks, c.speed, c.head_pos.length(), c.body.outline.size(),
 				str(stepped), str(gripped), target.anatomy.tissue.integrity(),
-				main.get_node("ScrapField").scraps.size()])
+				main.get_node("ScrapField").scraps.size(),
+				(main.get_node("ScentField") as ScentField).traces.size(), smell.marks.size()])
+		if smell.marks.is_empty():
+			print("RENDER SMOKE FAIL — the smell layer drew nothing")
+			quit(1)
+		if sounds.is_empty():
+			print("RENDER SMOKE FAIL — the hearing layer had no wavefront to draw")
+			quit(1)
 		quit()
 	return false
 

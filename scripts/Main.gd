@@ -14,6 +14,8 @@ const COL_GRID := Color(INK, 0.13)
 
 @onready var food_field: FoodField = $FoodField
 @onready var scrap_field: ScrapField = $ScrapField
+@onready var scent_field: ScentField = $ScentField
+@onready var sound_field: SoundField = $SoundField
 @onready var creature: Creature = $Creature
 @onready var senses: CreatureSenses = $Creature/Senses
 @onready var view: CreatureView = $Creature/View
@@ -22,10 +24,15 @@ const COL_GRID := Color(INK, 0.13)
 @onready var bite_cue: BiteCue = $BiteCue
 @onready var camera: Camera2D = $Camera2D
 @onready var sight_renderer: SightRenderer = $SightRenderer
+@onready var smell_renderer: SmellRenderer = $SmellRenderer
+@onready var hearing_renderer: HearingRenderer = $HearingRenderer
 
 var input := MovementInput.new()
 var panel: TuningPanel
 var hud: EvolutionHUD
+## Paired feet often land on the same gait beat. Register every other contact so
+## locomotion stays quiet and rhythmic rather than becoming a constant ripple.
+var _footfall_counts: Dictionary = {}
 
 
 func _ready() -> void:
@@ -40,6 +47,7 @@ func _ready() -> void:
 		var each := node as Creature
 		each.bite_started.connect(_on_creature_bite_started.bind(each))
 		each.tissue_shed.connect(_on_tissue_shed.bind(node))
+		each.foot_landed.connect(_on_foot_landed.bind(each))
 	food_field.refresh(creature.head_pos)
 	_build_ui()
 
@@ -105,6 +113,8 @@ func _physics_process(_delta: float) -> void:
 	var eaten: int = food_field.consume(creature.body.head.pos, creature.mouth_radius())
 	if eaten > 0:
 		creature.feed(eaten)
+		sound_field.emit_sound(creature.body.head.pos, 0.42 * creature.size_scale,
+			SoundField.Kind.FEED, creature)
 
 	# Torn-off tissue is meat, and meat belongs to whoever's jaws reach it — so
 	# this is resolved over every creature rather than only the player's.
@@ -118,6 +128,8 @@ func _physics_process(_delta: float) -> void:
 			scavenger.body.head.pos, scavenger.mouth_radius(), scavenger)
 		if scavenged > 0:
 			scavenger.feed(scavenged)
+			sound_field.emit_sound(scavenger.body.head.pos,
+				0.42 * scavenger.size_scale, SoundField.Kind.FEED, scavenger)
 
 
 func _process(delta: float) -> void:
@@ -176,6 +188,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				food_field.pellets.clear()
 				food_field.refresh(creature.head_pos)
 				scrap_field.clear()
+				scent_field.clear()
+				sound_field.clear()
+				_footfall_counts.clear()
 				camera.global_position = creature.head_pos
 				hud.reset_hint()
 	elif event is InputEventMouseButton:
@@ -215,6 +230,8 @@ func _on_species_selected(preset_name: String) -> void:
 	creature.rebuild()
 	senses.reset_for_species(preset_name)
 	sight_renderer.refresh_profile()
+	smell_renderer.refresh_profile()
+	hearing_renderer.refresh_profile()
 
 
 ## Resolves one closing of a set of jaws: the apex of a lunge, a chew from jaws
@@ -247,7 +264,22 @@ func _on_creature_bite_started(center: Vector2, radius: float, biter: Creature) 
 	if best_target != null:
 		var removed: float = best_target.apply_bite(center, radius, biter.bite_depth())
 		connected = removed > 0.0
+	if connected:
+		# Spilled blood is left at the place it was spilled and belongs to nobody
+		# after that — including the creature it came out of, which is why it is
+		# deposited unowned while a wound's slow drip is not.
+		scent_field.deposit(center, ScentField.Kind.BLOOD)
+	sound_field.emit_sound(center, (0.52 if connected else 0.34) * biter.size_scale,
+		SoundField.Kind.BITE, biter)
 	biter.resolve_bite(connected, best_target if connected else null, best_hit)
+
+
+func _on_foot_landed(at: Vector2, intensity: float, source: Creature) -> void:
+	var source_id: int = source.get_instance_id()
+	var count: int = int(_footfall_counts.get(source_id, 0)) + 1
+	_footfall_counts[source_id] = count
+	if count % 2 == 0:
+		sound_field.emit_sound(at, intensity, SoundField.Kind.STEP, source)
 
 
 func _on_tissue_shed(chunks: Array, origin: Vector2, source: Creature) -> void:
