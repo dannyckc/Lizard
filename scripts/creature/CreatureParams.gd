@@ -115,9 +115,14 @@ extends Resource
 
 # --------------------------------------------------------------- combat ----
 @export_group("Combat")
-## How far the centre of the bite reaches beyond the front of the head.
-@export_range(2.0, 60.0, 1.0) var bite_reach: float = 22.0
-## Radius of the circular anatomical query at the end of the jaws.
+## How far the head itself is thrown forward by a lunge. The mouth is on the
+## head and a bite lands where the mouth is, so this is the whole of a
+## creature's reach beyond standing still: the jaws have to genuinely arrive.
+@export_range(2.0, 60.0, 1.0) var bite_reach: float = 28.0
+## The gape: radius of the arc the teeth are set in, around the head. It is both
+## the span the jaws can close on and the footprint they cover, and it is capped
+## against the head — jaws are set in a skull, so a mouth cannot be much wider
+## than the animal wearing it.
 @export_range(2.0, 50.0, 1.0) var bite_radius: float = 18.0
 ## Minimum time between accepted bite clicks.
 @export_range(0.05, 2.0, 0.01) var bite_cooldown: float = 0.45
@@ -142,6 +147,33 @@ extends Resource
 ## they stay shut on their bind. `bite_cooldown` governs fresh strikes, which
 ## have to be thrown as well as closed and are correspondingly slower.
 @export_range(0.1, 2.0, 0.01) var chew_interval: float = 0.55
+
+# ------------------------------------------------------------- dentition ----
+# What the jaws are actually armed with — see Dentition. These four decide the
+# shape of every wound this creature makes, and none of them is a damage number:
+# `bite_damage` says how hard the jaws close, and the teeth decide what that is
+# spent on. Fewer, keener teeth concentrate one bite into deep punctures; a
+# crowded mouth of blunt cusps spreads the same bite into a shallow crush over
+# twice the area. Tooth *type* is not listed at all — it is read off where a
+# tooth sits and how keen the mouth is.
+@export_group("Dentition")
+## Teeth per arch. There are two arches, upper and lower, so a mouth carries
+## twice this — and the lower row meshes into the gaps of the upper.
+@export_range(1, 24, 1) var tooth_count: int = 9
+## Length of a canine, as a fraction of the gape radius. Every other type is
+## sized against it, so this is "how toothy", not "how big is one tooth".
+@export_range(0.04, 0.6, 0.01) var tooth_size: float = 0.22
+## 0 is blunt crushing cusps, 1 is needles. Keenness shrinks the patch a tooth
+## meets flesh over, which is what drives it deeper for the same jaw force, and
+## it is also what decides how far back the mouth carries fangs and blades.
+@export_range(0.0, 1.0, 0.01) var tooth_sharpness: float = 0.72
+## Half-angle of the arc the teeth are set in, measured from the snout's
+## midline. A wide gape is a mouthful that reaches around a flank; a narrow one
+## is a snapping bird's beak of a bite.
+@export_range(15.0, 120.0, 1.0) var jaw_gape_deg: float = 70.0
+## Per-tooth spread in length and width. Zero is a machined comb; the default is
+## a mouth that has been used.
+@export_range(0.0, 0.6, 0.01) var tooth_variation: float = 0.18
 
 
 ## Drives the runtime tuning panel. Rows with "group" are section headers.
@@ -206,6 +238,13 @@ const SCHEMA: Array = [
 	{"prop": "bite_damage", "label": "Bite depth", "min": 0.2, "max": 8.0, "step": 0.05},
 	{"prop": "jaw_power", "label": "Jaw power", "min": 0.1, "max": 12.0, "step": 0.05},
 	{"prop": "chew_interval", "label": "Chew interval", "min": 0.1, "max": 2.0, "step": 0.01},
+
+	{"group": "Dentition"},
+	{"prop": "tooth_count", "label": "Teeth per arch", "min": 1.0, "max": 24.0, "step": 1.0},
+	{"prop": "tooth_size", "label": "Tooth length", "min": 0.04, "max": 0.6, "step": 0.01},
+	{"prop": "tooth_sharpness", "label": "Sharpness", "min": 0.0, "max": 1.0, "step": 0.01},
+	{"prop": "jaw_gape_deg", "label": "Gape (deg)", "min": 15.0, "max": 120.0, "step": 1.0},
+	{"prop": "tooth_variation", "label": "Tooth variation", "min": 0.0, "max": 0.6, "step": 0.01},
 ]
 
 
@@ -228,8 +267,13 @@ const PRESETS: Dictionary = {
 		"stride_distance": 20.0, "step_duration": 0.18, "step_height": 7.0,
 		"move_speed": 230.0, "turn_speed_deg": 260.0,
 		"density": 0.85, "muscle_power": 1.25, "jaw_power": 0.55,
-		"bite_damage": 1.8, "bite_reach": 16.0, "bite_radius": 12.0,
+		"bite_damage": 1.8, "bite_reach": 26.0, "bite_radius": 12.0,
 		"bite_cooldown": 0.3, "chew_interval": 0.4,
+		# A crowded comb of small pegs. Nothing in it concentrates, so it grazes
+		# broadly and cannot open anything — which is the mouth that goes with
+		# jaws too weak to hold what they bite.
+		"tooth_count": 14, "tooth_size": 0.13, "tooth_sharpness": 0.5,
+		"jaw_gape_deg": 62.0, "tooth_variation": 0.12,
 	},
 	"Salamander": {
 		"segment_count": 22, "segment_length": 14.0, "max_bend_deg": 34.0,
@@ -242,6 +286,10 @@ const PRESETS: Dictionary = {
 		"move_speed": 150.0, "turn_speed_deg": 150.0, "turn_pivot": 70.0,
 		"density": 0.8, "muscle_power": 0.8, "jaw_power": 0.5,
 		"bite_damage": 1.6, "bite_radius": 14.0,
+		# Rows of fine hooks over a wide mouth: it holds soft prey and strips
+		# nothing off anything solid.
+		"tooth_count": 16, "tooth_size": 0.11, "tooth_sharpness": 0.62,
+		"jaw_gape_deg": 58.0, "tooth_variation": 0.10,
 	},
 	"Komodo": {
 		"segment_count": 18, "segment_length": 22.0, "max_bend_deg": 16.0,
@@ -253,8 +301,15 @@ const PRESETS: Dictionary = {
 		"move_speed": 130.0, "acceleration": 400.0,
 		"turn_speed_deg": 110.0, "turn_responsiveness": 7.0, "turn_pivot": 80.0,
 		"density": 1.15, "muscle_power": 1.1, "jaw_power": 2.4,
-		"bite_damage": 3.2, "bite_reach": 28.0, "bite_radius": 20.0,
+		"bite_damage": 3.2, "bite_reach": 36.0, "bite_radius": 20.0,
 		"chew_interval": 0.5,
+		# The other extreme from the Crocodile's, at nearly the same jaw size.
+		# Few, and every one of them a blade set edge-on: almost no contact area,
+		# so the whole bite goes into slitting rather than crushing. It opens
+		# flesh a Crocodile would only bruise, and it does it by having *less*
+		# tooth rather than more.
+		"tooth_count": 10, "tooth_size": 0.25, "tooth_sharpness": 0.95,
+		"jaw_gape_deg": 66.0, "tooth_variation": 0.16,
 	},
 	# The case the whole grip system is shaped around: heavy, unhurried, and
 	# carrying a head out of all proportion to its legs. Its `jaw_power` is an
@@ -272,8 +327,13 @@ const PRESETS: Dictionary = {
 		"move_speed": 120.0, "acceleration": 340.0,
 		"turn_speed_deg": 95.0, "turn_responsiveness": 6.5, "turn_pivot": 90.0,
 		"density": 1.45, "muscle_power": 1.15, "jaw_power": 7.5,
-		"bite_damage": 3.6, "bite_reach": 32.0, "bite_radius": 21.0,
+		"bite_damage": 3.6, "bite_reach": 41.0, "bite_radius": 21.0,
 		"bite_cooldown": 0.6, "chew_interval": 0.45,
+		# Big irregular cones on a mouth that opens wide. Conical means stout —
+		# these puncture and hold rather than shear, which is the dentition that
+		# belongs on jaws whose whole purpose is not letting go.
+		"tooth_count": 8, "tooth_size": 0.33, "tooth_sharpness": 0.72,
+		"jaw_gape_deg": 76.0, "tooth_variation": 0.30,
 	},
 }
 

@@ -22,7 +22,9 @@ extends Node2D
 
 signal ate_food(total: int)
 ## Emitted at the apex of the lunge, not on the click — see _physics_process.
-signal bite_started(center: Vector2, radius: float)
+## Carries the whole footprint of the closing: where every tooth landed and how
+## deep it drove. The world resolves damage from that and nothing else.
+signal bite_started(mark: BiteMark)
 signal tissue_damaged(integrity: float)
 ## Chunks of skin and muscle a bite tore off, for the world to scatter.
 signal tissue_shed(chunks: Array, origin: Vector2)
@@ -55,6 +57,10 @@ var gait: Gait
 ## true. Null on a living creature.
 var ragdoll: Ragdoll = null
 var anatomy: AnatomyState = AnatomyState.new()
+## What the jaws are armed with. Grown from the species' dentition parameters
+## and regrown whenever they change, the same way the spine is rebuilt when the
+## segment count does.
+var dentition: Dentition = null
 ## Mass, strength and bite force, read off the solved body and the lattice each
 ## tick. Not settings — see Physique. Refreshed at the end of the tick with the
 ## rest of the derived state, so the contact and grip passes read the physique of
@@ -136,6 +142,9 @@ const LUNGE_RECOVER: float = 0.18
 const LUNGE_TOTAL: float = LUNGE_WINDUP + LUNGE_STRIKE + LUNGE_RECOVER
 ## How far the head rocks back during the wind-up, as a fraction of the throw.
 const LUNGE_SETBACK: float = -0.22
+## How much further ahead of the head than the skull is wide the mouth may
+## reach — see `jaw_axes`.
+const MAX_GAPE_RATIO: float = 2.6
 
 # --- grip -------------------------------------------------------------------
 ## Play in the jaws, in pixels. The tether takes up nothing inside this, which is
@@ -158,11 +167,14 @@ const HAUL_FLOOR: float = 0.05
 const CHEW_STRAIN_COST: float = 0.75
 ## Floor under that, so jaws at the edge of losing their grip still do damage.
 const CHEW_MIN_DEPTH: float = 0.30
-## How much wider than the footprint it crushes a set of jaws can find a new hold
-## in. `bite_radius` is the volume a bite destroys; the gape is the span the jaws
-## can close on, and it has to be the larger of the two or a bite that eats a
-## clean hole would then be unable to reach the flesh around the hole it made.
-const GRIP_GAPE: float = 1.75
+## How far a set of jaws can reach for a new hold, as a multiple of its own
+## gape. Derived rather than chosen, because there is only one thing it has to
+## be able to do: clear the crater it has just made. A mouthful comes away
+## centred on the bind — MOUTHFUL_SPAN of a gape in radius — so the far rim of
+## the hole is two of those past where the jaws were holding, and the jaws
+## themselves reach a gape beyond wherever they are. Anything less and a set of
+## jaws would lose its hold *because* it chewed well.
+const GRIP_GAPE: float = 1.0 + 2.0 * MOUTHFUL_SPAN
 ## Resolution of the search for somewhere new to hold. Only ever runs on the tick
 ## a mouthful comes away, so it is priced like the bite it follows rather than
 ## like anything per-frame.
@@ -199,6 +211,10 @@ const TEAR_RELAX: float = 0.45
 ## was bound to genuinely empty afterwards rather than left with a sliver, which
 ## the hold would otherwise go on pulling against at almost no strength at all.
 const TEAR_DEPTH: float = (TissueGrid.SKIN_HP + TissueGrid.MUSCLE_HP) * 1.15
+## How much of the gape a torn-away mouthful measures. What parts is the meat
+## the jaws enclosed, so unlike a bite it is one piece the width of the whole
+## mouth rather than the pattern of the teeth in it.
+const MOUTHFUL_SPAN: float = 0.7
 
 # --- chewing ------------------------------------------------------------------
 ## How long the jaws stay shut on their bind after the button comes up. A press
@@ -249,9 +265,6 @@ var _regrasp_remaining: float = 0.0
 var _chew_cooldown: float = 0.0
 ## A chew taken this tick, queued for the solved pose exactly as a strike is.
 var _chew_requested: bool = false
-## Set only for the synchronous emit a tear resolves through, so the world's one
-## bite path prices the mouthful being pulled out rather than a closing of jaws.
-var _tearing: bool = false
 ## Seconds into the current strike, or -1 while not striking.
 var bite_time: float = -1.0
 ## How far ahead of its resting position the lunge is currently holding the
@@ -348,7 +361,6 @@ func reset(at: Vector2 = Vector2.ZERO, facing: float = 0.0) -> void:
 	_regrasp_remaining = 0.0
 	_chew_cooldown = 0.0
 	_chew_requested = false
-	_tearing = false
 	grip = null
 	_held_by = null
 	# Reset is an authority from outside the simulation, not a move inside it, so
@@ -371,6 +383,11 @@ func _physics_process(delta: float) -> void:
 	# branch because it is the one thing both kinds of body need.
 	if spine == null or spine.size() != params.segment_count:
 		rebuild()
+	# Teeth are structural in exactly the way the spine's segment count is, so
+	# they are regrown on the same terms: only when the parameters they are a
+	# function of have actually changed, and immediately when they have.
+	if dentition == null or dentition.signature != Dentition.signature_of(params):
+		dentition = Dentition.grow(params)
 	if not alive:
 		_dead_process(delta)
 		return
@@ -509,7 +526,7 @@ func _advance_lunge(delta: float) -> void:
 	# do to the flesh in them is the grip's business, not the animation's.
 	if is_bite_latched():
 		bite_time = LUNGE_WINDUP + LUNGE_STRIKE
-		lunge_offset = params.bite_reach * size_scale * 0.85
+		lunge_offset = params.bite_reach * size_scale
 		return
 	# The clock never advances past the hit frame in a single step. A tick large
 	# enough to span the whole animation would otherwise leave the head already
@@ -520,7 +537,10 @@ func _advance_lunge(delta: float) -> void:
 	var limit: float = LUNGE_TOTAL if _impact_done else LUNGE_WINDUP + LUNGE_STRIKE
 	bite_time = minf(bite_time + delta, limit)
 
-	var throw_distance: float = params.bite_reach * size_scale * 0.85
+	# The whole of `bite_reach`, because the mouth is now on the head: what the
+	# throw covers is exactly what the creature gains by lunging rather than by
+	# standing there, and nothing is added to it after the fact.
+	var throw_distance: float = params.bite_reach * size_scale
 	var e: float
 	if bite_time < LUNGE_WINDUP:
 		e = LUNGE_SETBACK * smoothstep(0.0, 1.0, bite_time / LUNGE_WINDUP)
@@ -536,6 +556,29 @@ func _advance_lunge(delta: float) -> void:
 ## True while a strike is playing, at any phase.
 func is_lunging() -> bool:
 	return bite_time >= 0.0
+
+
+## How far the jaws are open, 0 shut to 1 at full gape.
+##
+## Read off the strike rather than tracked: the mouth opens through the wind-up,
+## is carried open through the throw, and shuts on the hit frame — so the jaws
+## closing and the damage resolving are the same event rather than two things
+## timed to agree.
+##
+## Closing is keyed to the strike having *resolved*, not to the clock reaching
+## the apex, and the difference is load-bearing rather than cosmetic. The bite
+## resolves at the end of the tick, after contacts; a mouth that shut when the
+## clock said so would therefore go solid one phase before it bit, and the lunge
+## would shoulder its target out of reach with its own face and then close on
+## the gap it had just made.
+##
+## Jaws already holding something are shut on it, however the animation reads.
+func mouth_gape() -> float:
+	if bite_time < 0.0 or _impact_done or is_bite_latched():
+		return 0.0
+	if bite_time < LUNGE_WINDUP:
+		return smoothstep(0.0, 1.0, bite_time / LUNGE_WINDUP)
+	return 1.0
 
 
 ## Smooth, anatomically bounded cursor look. Only this derived head direction
@@ -794,7 +837,21 @@ func _translate_contact(offset: Vector2) -> void:
 ## side-specific torso lattice.
 func _contact_solid(segment: int, u: float, side: float, last: int) -> float:
 	if segment == 0 and u <= 0.5:
-		return anatomy.tissue.head_solid()
+		# An open mouth is not a solid. Jaws part *around* what they close on,
+		# so now that a bite lands where the mouth is, the head has to be able to
+		# arrive over the flesh — and the contact pass, whose whole job is
+		# pushing bodies out of each other, is precisely what would stop it. A
+		# lunging creature would shove its prey away with its own face and then
+		# bite the gap it had just opened.
+		#
+		# This is the rule a grip already imposes on a joined pair, applied to
+		# the moment before there is a grip, and through the same channel every
+		# other hole in a body uses: the gape simply reads as tissue that is not
+		# there. It lasts exactly as long as the jaws are open — the head is
+		# solid again on the frame they shut, which is the frame the bite
+		# resolves — so a strike that misses is shouldered apart immediately and
+		# one that connects is held by the tether instead.
+		return anatomy.tissue.head_solid() * (1.0 - mouth_gape())
 	var t: float = (float(segment) + u) / float(maxi(last, 1))
 	# At an end cap the contact direction can be parallel to the spine, with no
 	# meaningful flank sign. The circular cap reaches as far as its wider side.
@@ -1147,8 +1204,34 @@ func _width_at(t: float) -> float:
 	return lerpf(body.widths[i], body.widths[i + 1], s - float(i))
 
 
-## The centre of the jaw volume, in world space — where a bite is tested from and
-## where a grip holds from.
+## The two semi-axes of the arc the teeth are set in: how far the mouth reaches
+## ahead of the head, and how wide it is across it.
+##
+## They differ because a mouth is a snout, not a hole: it projects forward past
+## the skull while its corners stay inside the head they are cut into. The
+## forward reach is `bite_radius`, capped against the skull — a mouth may be
+## considerably longer than the animal is wide, but past that it stops being a
+## mouth and becomes a bite volume floating in front of a face, which is exactly
+## what this replaced.
+func jaw_axes() -> Vector2:
+	var skull: float = body.head_radius if body != null else 10.0
+	return Vector2(minf(params.bite_radius * size_scale, skull * MAX_GAPE_RATIO), skull)
+
+
+## One representative size for the mouth, where a single radius is wanted — how
+## much flesh the jaws have hold of, how far they can reach for a new hold.
+func gape_radius() -> float:
+	var axes: Vector2 = jaw_axes()
+	return Dentition.arc_scale(axes.x, axes.y)
+
+
+## The mouth, in world space — where a bite lands, and where a grip holds from.
+##
+## This is the centre of the mouthful the teeth take, not a point projected
+## ahead of the snout: the head is *on* what it bites. That is the whole reason
+## a strike now reads as the head arriving over the flesh it opens, and the
+## reason `bite_reach` is the distance the head is thrown rather than a distance
+## the damage is thrown for it.
 ##
 ## Built from the live spine rather than the cached head frame for the same
 ## reason `body_point` is: a contact or a grip may already have translated the
@@ -1157,8 +1240,8 @@ func _width_at(t: float) -> float:
 func jaw_point() -> Vector2:
 	if spine == null or body == null or body.widths.is_empty():
 		return head_pos
-	return spine.points[0] \
-		+ spine.forwards[0] * (body.widths[0] + params.bite_radius * size_scale * 0.35)
+	var bias: float = dentition.centroid if dentition != null else 0.6
+	return spine.points[0] + spine.forwards[0] * (jaw_axes().x * bias)
 
 
 ## Head-first collision test used by the food field.
@@ -1410,7 +1493,7 @@ func _advance_grip(delta: float) -> void:
 		_chew_requested = false
 		if _chew_cooldown <= 0.0:
 			_chew_cooldown = maxf(params.chew_interval, 0.05)
-			bite_started.emit(jaw_point(), params.bite_radius * size_scale)
+			bite_started.emit(bite_mark(jaw_point(), bite_depth()))
 
 	# The flesh's own half of the contest — see the tearing constants above. The
 	# pull either sits inside what the tissue will take, in which case it holds
@@ -1427,21 +1510,34 @@ func _advance_grip(delta: float) -> void:
 		_tear_out()
 
 
-## How deep one closing of these jaws drives, in the tissue lattice's hit points.
+## How hard one closing of these jaws drives, in the tissue lattice's hit points.
 ##
 ## Full `bite_damage` for a free strike, which is what every bite in the game was
 ## until now. A latched one spends part of its force simply staying shut, so what
 ## is left to cut with falls away as the load rises.
 ##
-## A tear is not a closing of the jaws at all and is not priced as one: what
-## comes away is however much meat parted from the body, not however much these
-## jaws could cut.
+## This is force at the jaws, not depth in the flesh. What it becomes once it
+## reaches tissue is the dentition's business: the same number spread over a
+## crowded mouth of blunt cusps barely breaks skin, and concentrated into a few
+## keen points goes to the bone.
 func bite_depth() -> float:
-	if _tearing:
-		return TEAR_DEPTH
 	var strain: float = grip.strain() if grip != null and grip.is_alive() else 0.0
 	return params.bite_damage \
 		* clampf(1.0 - strain * CHEW_STRAIN_COST, CHEW_MIN_DEPTH, 1.0)
+
+
+## The mark these jaws leave closing on a place, with the mouthful landing on
+## `at`. The arc of teeth is placed *around* that point rather than starting
+## from it, which is what puts the head over the damage instead of behind it.
+func bite_mark(at: Vector2, depth: float) -> BiteMark:
+	if dentition == null:
+		dentition = Dentition.grow(params)
+	var fwd: Vector2 = spine.forwards[0] if spine != null and spine.size() > 0 \
+		else head_look_dir
+	var perp := Vector2(-fwd.y, fwd.x)
+	var axes: Vector2 = jaw_axes()
+	return dentition.stamp(
+		at - fwd * (dentition.centroid * axes.x), fwd, perp, axes.x, axes.y, depth)
 
 
 ## Re-seats jaws whose mouthful has come away, on the surviving flesh inside
@@ -1454,14 +1550,24 @@ func bite_depth() -> float:
 ## shut, rather than the hold ending the moment it works. It is routed through
 ## the same anatomy query the world bites with, so what the jaws can find hold of
 ## is exactly what they could find to bite.
+##
+## The nearest sound flesh, and nearest is the operative word: the new hold
+## becomes the tether's rest length, so jaws that reached for the *best* flesh
+## within their gape rather than the closest would leave themselves holding
+## something an entire gape away — a leash rather than a bite, which the next
+## mouthful would then be taken at the far end of.
 func _regrip() -> bool:
 	if grip == null or not grip.is_alive():
 		return false
 	var jaw: Vector2 = jaw_point()
-	var reach: float = params.bite_radius * size_scale * GRIP_GAPE
+	# The crater the last mouthful left, plus however far the flesh had drawn out
+	# of the body before it parted — the jaws finished that tear at the far end of
+	# their own stretch, so that is where they are searching from.
+	var reach: float = gape_radius() * GRIP_GAPE + Grip.MAX_STRETCH
 	var victim: Creature = grip.victim
 	var best := Vector2.ZERO
 	var best_distance: float = INF
+	var best_hold: float = 0.0
 	for k in REGRIP_STATIONS + 1:
 		var t: float = float(k) / float(REGRIP_STATIONS)
 		for lateral in REGRIP_LATERALS:
@@ -1469,16 +1575,27 @@ func _regrip() -> bool:
 			# The same two questions the hold itself asks — does the body still
 			# reach here, and is there anything in the cell — so jaws can never
 			# re-seat onto a place they would immediately report as empty.
-			if victim.bind_solid(candidate) <= 0.0 or victim.bind_hp(candidate) <= 0.0:
+			if victim.bind_solid(candidate) <= 0.0:
+				continue
+			var hold: float = victim.bind_hp(candidate)
+			if hold <= 0.0:
 				continue
 			var d: float = jaw.distance_to(victim.body_point(candidate))
 			if d < best_distance:
+				best_hold = hold
 				best_distance = d
 				best = candidate
-	if best_distance > reach:
+	if best_hold <= 0.0 or best_distance > reach:
 		return false
 	grip.bind_body(best)
-	grip.rest_length = best_distance + GRIP_SLACK
+	# The tether's rest length is the jaws, not the search. A fresh grip records
+	# the gap it actually closed at because there is nothing else it could mean;
+	# a re-seat cannot, because the flesh it reached for may be most of a gape
+	# out and recording *that* would leave the hold a leash — one the next
+	# mouthful would then be taken at the far end of, and the one after that
+	# further out again. Jaws hold what is in them, so anything further away is
+	# hauled in rather than accepted where it lies.
+	grip.rest_length = minf(best_distance, gape_radius()) + GRIP_SLACK
 	return true
 
 
@@ -1487,8 +1604,11 @@ func _regrip() -> bool:
 ## bite so a tear sheds meat and opens tissue like one.
 func _tear_free() -> void:
 	var at: Vector2 = grip.anchor()
+	# Released first, so what these jaws close on the way off is priced as the
+	# free strike it now is rather than as a chew still spending force on a hold
+	# that no longer exists.
 	_release_grip(true)
-	bite_started.emit(at, params.bite_radius * size_scale)
+	bite_started.emit(bite_mark(at, bite_depth()))
 
 
 ## The flesh gave before the jaws did: the piece they were holding parts from the
@@ -1498,18 +1618,23 @@ func _tear_free() -> void:
 ## the meat that tore and not the volume the teeth occupy — under load the two
 ## have visibly drawn apart, which is the whole point of the stretch. Resolved
 ## through the same world path as every other closing of these jaws so a tear
-## sheds, damages and reports identically; only its depth differs, and only
-## because it is measured in flesh rather than in bite force.
+## sheds, damages and reports identically.
+##
+## Its mark is the one that is not a set of teeth. Nothing is being cut here —
+## meat the jaws already had hold of is parting from the body — so it comes away
+## as one piece the width of the mouth, at a depth measured in flesh rather than
+## in bite force, and the dentition has no say in either.
 ##
 ## The jaws stay shut afterwards. They are re-seated on whatever is left inside
 ## them, exactly as they are when a mouthful is chewed away, so tearing deepens a
 ## wound instead of ending the hold that made it.
 func _tear_out() -> void:
 	grip.stress = 0.0
+	var fwd: Vector2 = spine.forwards[0] if spine != null and spine.size() > 0 \
+		else head_look_dir
 	var at: Vector2 = grip.anchor()
-	_tearing = true
-	bite_started.emit(at, params.bite_radius * size_scale)
-	_tearing = false
+	bite_started.emit(BiteMark.mouthful(
+		at, fwd, gape_radius() * MOUTHFUL_SPAN, TEAR_DEPTH))
 	if grip != null and grip.bind_is_hollow() and not _regrip():
 		_release_grip(true)
 
@@ -1573,16 +1698,16 @@ func query_bite(center: Vector2, radius: float) -> AnatomyState.Hit:
 	return anatomy.hit_test(self, center, radius)
 
 
-## Erodes this creature's tissue lattice wherever the bite circle covers it,
-## and hands whatever came loose to the world.
-func apply_bite(center: Vector2, radius: float, depth: float) -> float:
+## Erodes this creature's tissue lattice wherever the bite mark covers it, and
+## hands whatever came loose to the world.
+func apply_bite(mark: BiteMark) -> float:
 	var shed: Array = []
-	var removed: float = anatomy.apply_bite(center, radius, depth, shed)
+	var removed: float = anatomy.apply_bite(mark, shed)
 	if removed <= 0.0:
 		return 0.0
 	tissue_damaged.emit(anatomy.tissue.integrity())
 	if not shed.is_empty():
-		tissue_shed.emit(shed, center)
+		tissue_shed.emit(shed, mark.center)
 	return removed
 
 
@@ -1646,4 +1771,4 @@ func _strike() -> void:
 	# The body is head-driven, so the truthful jaw direction is the solved head
 	# frame; allowing the click vector to bypass it would make the creature bite
 	# sideways before its visible head has reached the cursor.
-	bite_started.emit(jaw_point(), params.bite_radius * size_scale)
+	bite_started.emit(bite_mark(jaw_point(), bite_depth()))

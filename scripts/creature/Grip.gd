@@ -129,7 +129,7 @@ func strain() -> float:
 ## to the body.
 func tissue_strength() -> float:
 	var footprint: float = victim.anatomy.tissue.flesh_within(
-		anchor(), biter.params.bite_radius * biter.size_scale)
+		anchor(), biter.gape_radius())
 	return FLESH_TENSILE * (footprint / FLESH_REFERENCE_HP) \
 		* pow(maxf(victim.physique.mass, 0.0001), Physique.AREA_EXPONENT)
 

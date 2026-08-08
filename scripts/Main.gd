@@ -204,6 +204,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				food_field.pellets.clear()
 				food_field.refresh(creature.head_pos)
 				scrap_field.clear()
+				bite_cue.clear()
 				scent_field.clear()
 				sound_field.clear()
 				_footfall_counts.clear()
@@ -254,38 +255,39 @@ func _on_species_selected(preset_name: String) -> void:
 ## already latched, or the mouthful a grip takes with it when it is torn off.
 ##
 ## The hit test picks a single victim — the body overlapped most deeply — and
-## only then does the bite erode that creature's tissue, by position, across
+## only then does the mark erode that creature's tissue, by position, across
 ## whatever structures of it the jaws actually cover. Owned by the world rather
 ## than by either participant so creature update order cannot turn one strike
 ## into several hits as more creatures are introduced, and so all three cases go
 ## down exactly one path.
 ##
-## Depth is asked of the biter rather than read off its params: a set of jaws
-## already holding something spends part of its force staying shut, and only what
-## is left over cuts.
-func _on_creature_bite_started(center: Vector2, radius: float, biter: Creature) -> void:
-	bite_cue.show_at(center)
+## The mark carries its own penetration, tooth by tooth, because how a bite is
+## spent is a property of the mouth that made it — a set of jaws already holding
+## something has less force to cut with, and a keen dentition concentrates what
+## it does have. Neither is anything the world needs to know: it is handed one
+## footprint and stamps it.
+func _on_creature_bite_started(mark: BiteMark, biter: Creature) -> void:
+	bite_cue.show_mark(mark)
 	var best_target: Creature = null
 	var best_hit: AnatomyState.Hit = null
 	for node in get_tree().get_nodes_in_group("creatures"):
 		var candidate := node as Creature
 		if candidate == null or candidate == biter:
 			continue
-		var hit: AnatomyState.Hit = candidate.query_bite(center, radius)
+		var hit: AnatomyState.Hit = candidate.query_bite(mark.center, mark.radius)
 		if hit != null and (best_hit == null or hit.score < best_hit.score):
 			best_target = candidate
 			best_hit = hit
 
 	var connected: bool = false
 	if best_target != null:
-		var removed: float = best_target.apply_bite(center, radius, biter.bite_depth())
-		connected = removed > 0.0
+		connected = best_target.apply_bite(mark) > 0.0
 	if connected:
 		# Spilled blood is left at the place it was spilled and belongs to nobody
 		# after that — including the creature it came out of, which is why it is
 		# deposited unowned while a wound's slow drip is not.
-		scent_field.deposit(center, ScentField.Kind.BLOOD)
-	sound_field.emit_sound(center, (0.52 if connected else 0.34) * biter.size_scale,
+		scent_field.deposit(mark.center, ScentField.Kind.BLOOD)
+	sound_field.emit_sound(mark.center, (0.52 if connected else 0.34) * biter.size_scale,
 		SoundField.Kind.BITE, biter)
 	biter.resolve_bite(connected, best_target if connected else null, best_hit)
 

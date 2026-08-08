@@ -51,6 +51,14 @@ const COL_MUSCLE_FIBRE := Color("3f160f", 0.62)
 ## torso's three.
 const COL_SHADOW_LIMB := Color(INK, 0.05)
 
+## The open mouth: teeth in paper against the ink head, over the flesh colour of
+## the gullet behind them. Nothing new is introduced to the palette — a mouth is
+## the one place the creature's own tissue is visible without a wound.
+const COL_TOOTH := PAPER
+const COL_GULLET := Color("4a1a10")
+## Quads across the gullet band. It is a shallow crescent, so this is plenty.
+const MOUTH_FACETS: int = 14
+
 const COL_DBG_SPINE := Color(INK, 0.55)
 const COL_DBG_RANGE := Color(INK, 0.07)
 const COL_DBG_BEND := Color(INK, 0.28)
@@ -75,6 +83,11 @@ var _mesh_indices := PackedInt32Array()
 ## the tissue instead of refilling several hundred vertex colours to say one
 ## thing.
 var _flat := PackedColorArray([Color.TRANSPARENT])
+## Separate buffers for the jaws, so opening a mouth for a sixth of a second
+## cannot make the cell mesh resize itself back and forth every frame.
+var _jaw_points := PackedVector2Array()
+var _jaw_colors := PackedColorArray()
+var _jaw_indices := PackedInt32Array()
 
 
 func _ready() -> void:
@@ -121,6 +134,9 @@ func _draw() -> void:
 		_flush_flat(lift, COL_SHADOW_NEAR)
 		_flush()
 	_draw_tissue_grain(torso, 0, TissueGrid.BODY_COLS)
+	# Under the eyes, so a lizard looking at you over its own open mouth still
+	# has eyes to look with.
+	_draw_jaws(body)
 	_draw_eyes(body, torso)
 
 	# Feet, over the torso — same reason the limb bones went under it.
@@ -185,6 +201,93 @@ func _cell_survives(patch: TissueGrid.Patch, at: Vector2, from_col: int, to_col:
 			best_d = d
 			best = cell
 	return best < 0 or patch.gone[best] == 0
+
+
+# ------------------------------------------------------------------ jaws ----
+
+## The teeth — but only while the jaws are open.
+##
+## A shut mouth seen from directly above is a head, which is why the silhouette
+## has never had one cut into it and why the old world cue refused to draw one.
+## An open mouth is a different object: the gullet shows between the two arches
+## and the teeth stand clear of the gum. That is the one moment a dentition is
+## worth looking at, and it is also the moment it is about to be used — the
+## mouth is shut again on the frame the bite resolves.
+##
+## What goes down here is the generated teeth themselves, at the seats the arc
+## puts them on. Counting them on screen counts what is about to bite, and a
+## blunt mouth of stubby cusps looks like one because that is what it is.
+func _draw_jaws(body: BodyShape) -> void:
+	var gape: float = creature.mouth_gape()
+	var dentition: Dentition = creature.dentition
+	if gape <= 0.02 or dentition == null or dentition.teeth.is_empty():
+		return
+	var axes: Vector2 = creature.jaw_axes()
+	var reach: float = axes.x
+	var width: float = axes.y
+	var scale: float = Dentition.arc_scale(reach, width)
+	var origin: Vector2 = body.head.pos
+	var fwd: Vector2 = body.head.fwd
+	var perp: Vector2 = body.head.perp
+	var span: float = dentition.span
+
+	var teeth: int = dentition.teeth.size()
+	var verts: int = MOUTH_FACETS * 4 + teeth * 3
+	if _jaw_points.size() != verts:
+		_jaw_points.resize(verts)
+		_jaw_colors.resize(verts)
+		_jaw_indices.resize(MOUTH_FACETS * 6 + teeth * 3)
+	var v: int = 0
+	var t: int = 0
+
+	# The gullet, as the crescent it actually is: the gap between the lower
+	# arch's tips and the upper arch's seats. Its geometry does not move as the
+	# jaws part — only how much of it there is to see — because a mouth irising
+	# open out of the middle of a face would swallow the eyes on its way.
+	var inner: float = maxf(Dentition.LOWER_SEAT - dentition.mean_crown, 0.25)
+	var gullet := Color(COL_GULLET, 0.88 * gape)
+	for k in MOUTH_FACETS:
+		var a0: float = lerpf(-span, span, float(k) / float(MOUTH_FACETS))
+		var a1: float = lerpf(-span, span, float(k + 1) / float(MOUTH_FACETS))
+		_jaw_points[v] = Dentition.arc_point(origin, fwd, perp, reach, width, a0, inner)
+		_jaw_points[v + 1] = Dentition.arc_point(origin, fwd, perp, reach, width, a0, Dentition.UPPER_SEAT)
+		_jaw_points[v + 2] = Dentition.arc_point(origin, fwd, perp, reach, width, a1, Dentition.UPPER_SEAT)
+		_jaw_points[v + 3] = Dentition.arc_point(origin, fwd, perp, reach, width, a1, inner)
+		for c in 4:
+			_jaw_colors[v + c] = gullet
+		_jaw_indices[t] = v
+		_jaw_indices[t + 1] = v + 1
+		_jaw_indices[t + 2] = v + 2
+		_jaw_indices[t + 3] = v
+		_jaw_indices[t + 4] = v + 2
+		_jaw_indices[t + 5] = v + 3
+		v += 4
+		t += 6
+
+	# One triangle per tooth: its base across the jaw line at its seat, its
+	# point where the crown ends. Crowns grow out of the gum with the gape, so
+	# the teeth emerge as the jaws part rather than snapping into existence.
+	var enamel := Color(COL_TOOTH, 0.94 * gape)
+	for tooth in dentition.teeth:
+		var seat: Vector2 = Dentition.arc_point(
+			origin, fwd, perp, reach, width, tooth.angle, tooth.seat)
+		var tip_seat: float = maxf(tooth.seat - tooth.crown * gape, 0.05)
+		var tangent: Vector2 = Dentition.arc_tangent(fwd, perp, reach, width, tooth.angle)
+		var half: float = tooth.half_base * scale
+		_jaw_points[v] = seat + tangent * half
+		_jaw_points[v + 1] = Dentition.arc_point(
+			origin, fwd, perp, reach, width, tooth.angle, tip_seat)
+		_jaw_points[v + 2] = seat - tangent * half
+		for c in 3:
+			_jaw_colors[v + c] = enamel
+		_jaw_indices[t] = v
+		_jaw_indices[t + 1] = v + 1
+		_jaw_indices[t + 2] = v + 2
+		v += 3
+		t += 3
+
+	RenderingServer.canvas_item_add_triangle_array(
+		get_canvas_item(), _jaw_indices, _jaw_points, _jaw_colors)
 
 
 # ------------------------------------------------------------------ limb ----

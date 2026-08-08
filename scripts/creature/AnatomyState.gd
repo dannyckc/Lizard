@@ -157,10 +157,10 @@ func hit_test(creature: Node, bite_center: Vector2, bite_radius: float) -> Hit:
 	return best
 
 
-## Erodes every cell the bite circle covers, outside-in. Returns the tissue
+## Erodes every cell the bite mark covers, outside-in. Returns the tissue
 ## actually removed, and appends whatever broke off to `shed`.
-func apply_bite(center: Vector2, radius: float, depth: float, shed: Array) -> float:
-	return tissue.bite(center, radius, depth, shed)
+func apply_bite(mark: BiteMark, shed: Array) -> float:
+	return tissue.bite(mark, shed)
 
 
 ## Where along `a`->`b` the closest point to `point` lies, clamped to the

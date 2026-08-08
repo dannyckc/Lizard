@@ -73,6 +73,8 @@ input ──▶ head position ──▶ contacts + grip ──▶ spine ──�
 | [Physique.gd](scripts/creature/Physique.gd) | mass, strength and bite force, read off the drawn body and the surviving tissue |
 | [Grip.gd](scripts/creature/Grip.gd) | one set of jaws holding onto another creature, as a tether in its body space |
 | [AnatomyState.gd](scripts/creature/AnatomyState.gd) | anatomical hit-testing — which creature, and which structure of it |
+| [Dentition.gd](scripts/creature/Dentition.gd) | the teeth: how many, how long, how keen, and what type each one turns out to be |
+| [BiteMark.gd](scripts/creature/BiteMark.gd) | the footprint one closing of the jaws leaves — the only description of a bite anything downstream gets |
 | [TissueGrid.gd](scripts/creature/TissueGrid.gd) | the body-space cell lattice: skin over muscle over bone, and what a bite does to it |
 | [ScrapField.gd](scripts/world/ScrapField.gd) | tissue knocked loose, as meat lying in the world |
 | [Fabrik.gd](scripts/creature/Fabrik.gd) | generic FABRIK chain solver |
@@ -408,11 +410,13 @@ The lattice is not an overlay on the creature — it *is* the creature. The body
 is drawn cell by cell rather than as a silhouette with the wounds painted over
 it, which is the whole reason a wound can be a hole (see below).
 
-Skin is a thin, stretchy rind and muscle is where the fight is: at the default `bite_damage`
-one bite strips skin across nearly the full width of the jaws, three tear
-through the muscle under the middle of them, and seven get through bone. So a
-bite always *opens* the body, and a kill is always either repeated bites or a
-deeper one.
+Skin is a thin, stretchy rind and muscle is where the fight is. How far into
+that stack one bite gets is not a property of the bite but of the mouth taking
+it — see **Teeth, and the mark they leave** below. At the default `bite_damage`
+and the default dentition, the jaw's own bearing strips skin across the whole
+mouthful while the teeth punch several times deeper wherever they land, so a
+bite always *opens* the body; grind the same mouth blunt and it stops breaking
+through at all.
 
 #### The skeleton is a frame
 
@@ -492,11 +496,12 @@ Two decisions carry the rest of it:
   the dimensions constants rather than functions of `segment_count` is what
   stops the tuning panel silently remapping existing damage when it restructures
   the spine underneath it.
-- **A bite selects cells by testing their solved world centres.** The body-space
-  mapping is curved, tapered and per-tick, and has no cheap inverse; the direct
-  test is exact, needs no special case at the snout cap or the elbow, and lets
-  one bite straddle several structures — jaws closing on a flank catch the leg
-  over it, which a query routed through a single hit region could not express.
+- **A bite selects cells by testing their solved world geometry against the
+  mark.** The body-space mapping is curved, tapered and per-tick, and has no
+  cheap inverse; the direct test is exact, needs no special case at the snout
+  cap or the elbow, and lets one bite straddle several structures — jaws closing
+  on a flank catch the leg over it, which a query routed through a single hit
+  region could not express.
 
 Destroyed skin and muscle come off as chunks. Adjacent destroyed cells from one
 tear are joined by layer and anatomical patch before they enter the world, so a
@@ -530,13 +535,88 @@ the scene from 120 to 72 fps. Drawn as cells the whole creature is about twenty
 commands, shadows included. Skin tension and muscle fibres are each one
 `draw_multiline` for the same reason.
 
+### Teeth, and the mark they leave
+
+A bite is not a circle of damage. It is a set of teeth closing, and what those
+teeth are decides everything about the wound.
+
+[`Dentition`](scripts/creature/Dentition.gd) grows a mouth from four numbers —
+how many teeth per arch, how long, how keen, and how wide the gape is. Two
+arches are set in an arc around the head, upper and lower. Seen from above they
+are *nested* rather than opposed: the upper arch is the wider of the two, so the
+lower row meshes into the gaps of the upper and a closing set of jaws prints two
+concentric rows of punctures. The arc is an ellipse rather than a circle,
+because a mouth reaches further forward than the skull is wide — that is what a
+snout is — while its corners can never be outside the head they are cut into.
+
+Everything else falls out of those four numbers:
+
+- **Type** is read off where a tooth sits and how keen the species is. The front
+  of the arc is incisors, the canine station carries a fang if the mouth is keen
+  enough to have one, blades run back from there as far as keenness reaches, and
+  the rest is crushing molars. A needle-mouthed animal is therefore fangs and
+  blades nearly to the corners and a blunt one is cusps and millstones, without
+  either being listed anywhere.
+- **Contact patch** is the slot a tooth has to itself, narrowed by its own
+  keenness and shaped by its type: a carnassial is a blade set edge-on and cuts
+  a slit, a canine is round and punches a hole, a molar is nearly as thick as it
+  is long and presses a bruise.
+- **Penetration is force over that patch**, so it is not a parameter at all.
+  `bite_damage` is what the jaws close with; the teeth decide what it is spent
+  on. Five needles have a fraction of the contact area of twenty cusps, so the
+  same jaws drive several times deeper into the flesh through them.
+
+A closing produces a [`BiteMark`](scripts/creature/BiteMark.gd): a list of
+contact patches with a world position, a size, an axis and a penetration apiece.
+That is the *whole* description of a bite anything downstream is given. The
+tissue lattice erodes cells by asking the mark how deep it is over each of them,
+and the red print in the world is drawn from the same list of patches — so the
+shape stamped on the flesh is the shape that ate it, and there is no way for the
+two to disagree.
+
+Both halves of what jaws do are in the mark. The teeth punch; the jaw then bears
+on everything the arch encloses, shallow and broad, because a bite is a closing
+rather than an impulse. Which half a species does its damage through is the same
+keenness number again — a blunt mouth is nearly all bearing, a keen one nearly
+all puncture. So a Komodo's ten blades slit open flesh a Crocodile's eight cones
+would only bruise, and it does it by having *less* tooth rather than more.
+
+One consequence worth stating: a tooth's contact patch is finer than a lattice
+cell, and that is not a rounding error to be smoothed away. A patch whose centre
+falls inside a cell marks it outright — the cell is the smallest piece of flesh
+there is, and a puncture cannot destroy less than one. Sampling cell centres
+alone would have made the finest points *least* likely to connect, which is
+exactly backwards.
+
 ### The lunge
 
 A click does not resolve a bite. It starts an animation with a hit frame: a
-0.07 s wind-up that rocks the head back, a 0.08 s forward throw, and a 0.18 s
-settle. The bite resolves at full extension, against the pose the snout actually
-reached. There is no sideways mouth wedge in the top-down silhouette; a brief
-world-space **Bite** cue marks the exact impact point instead.
+0.07 s wind-up that rocks the head back and opens the jaws, a 0.08 s forward
+throw, and a 0.18 s settle. The bite resolves at full extension, against the
+pose the snout actually reached, and the jaws shut on that same frame.
+
+**The bite lands where the mouth is.** There is no bite volume projected out in
+front of the face any more: the mark is stamped around the head's own tooth arc,
+so `bite_reach` is the distance the head is genuinely *thrown* and the whole of
+what a creature gains by lunging rather than standing still. The jaws have to
+arrive. The teeth are drawn while the mouth is open — the generated ones, at the
+seats the arc puts them on — so what you count on screen is what is about to
+bite; a shut mouth from directly above is still just a head.
+
+That change needed one thing the contact solver was not doing: **an open mouth
+is not a solid.** Jaws part *around* what they close on, so while the gape is
+open the head cap reports itself as tissue that is not there, through the same
+channel every bitten-out hole already uses. Without it a lunging creature would
+shove its prey away with its own face and then bite the gap it had just opened.
+The head is solid again on the frame the jaws shut, which is the frame the bite
+resolves — so a miss is shouldered apart immediately, and a hit is held by the
+tether instead.
+
+Where the old world cue printed the word **Bite**, the impact now leaves the
+mark itself: each tooth's contact patch in red, sized as it was sized and
+darkened by how deep it drove, over the faint broad bruise of the jaw behind
+them. A print over unbroken ground is a tooth that missed, and it should be —
+that is the mouth being read, not the damage being illustrated.
 
 If that hit connects while the button is still held, the strike clock stays on
 its apex and the jaws stay shut — and the two creatures are now physically joined
@@ -695,9 +775,18 @@ skeleton. That is why a limb can be stripped but a ribcage only bared.
 
 Jaws that empty the flesh they were holding — by chewing it away or by tearing it
 off — **take hold of the next** rather than opening, searching the victim's body
-for the nearest surviving tissue within their gape. Without that a strong bite
-would lose its grip *faster* than a weak one, since the better it works the
-sooner the cell it was bound to is gone. Re-seating is what turns a latch into
+for the nearest surviving tissue. How far they can search is derived rather than
+chosen: they have to clear the crater the last mouthful left, which is a gape
+across either side of the bind, plus their own gape beyond that. Without the
+re-seat a strong bite would lose its grip *faster* than a weak one, since the
+better it works the sooner the cell it was bound to is gone; without the reach
+being tied to the crater it would lose its grip *because* it chewed well.
+
+The new hold is the nearest sound flesh, and the tether's rest length is capped
+at the jaws' own gape rather than at however far the search went. A re-seat that
+recorded the search distance would leave the hold a leash — one the next
+mouthful would then be taken at the far end of, and the one after that further
+out again. Re-seating is what turns a latch into
 chewing *in*: the wound deepens under jaws that stay shut, and the hold ends only
 when the load pulls them off, the jaws are given long enough to open, or there is
 nothing left within them to hold.
@@ -759,8 +848,12 @@ The parameters worth reaching for first:
 | Sprawling vs. tucked legs | `stance_width`, `stance_reach`, `arm/leg_length` |
 | Marching vs. loose legs | `diagonal_coupling` (1 = strict trot, 0 = independent) |
 | Wider / tighter leg sweep | `limb_swing_deg`, `limb_max_reach` |
-| Bites that bite deeper | `bite_damage` up (hit points of penetration: skin is 0.4, muscle 5.5, bone 6.0 at half rate) |
-| Crisper, more legible wounds | `bite_radius` down |
+| Jaws that close harder | `bite_damage` up — force at the jaws, not depth in the flesh; the teeth decide what it becomes |
+| Punctures instead of bruising | `tooth_sharpness` up and `tooth_count` down — less tooth on the flesh is more pressure through it |
+| Crushing instead of cutting | `tooth_sharpness` down — a blunt mouth does its damage through the jaw's broad bearing rather than through its points |
+| Fangs and blades further back | `tooth_sharpness` up; tooth *type* is read off it and off position, never set |
+| A longer reach | `bite_reach` up — this is how far the head is thrown, and it has to arrive |
+| A wider mouthful | `bite_radius` up (the gape's forward reach, capped against the skull) and `jaw_gape_deg` up |
 | Heavier for the same silhouette | `density` up — and remember the width sliders already move mass |
 | Strong for its size (drags more, is dragged less) | `muscle_power` up |
 | Jaws that will not be shaken off | `jaw_power` up — this is grip, not penetration |
@@ -1089,9 +1182,10 @@ Deliberate, in the interest of a stable and readable prototype:
 - A bite's penetration budget is spent per cell and any remainder is discarded;
   it does not spill into neighbours. Bone therefore blocks depth but never
   deflects it sideways.
-- The default `bite_radius` is comparable to the body's half-width, so a bite
-  near the midline tends to take the full width of the body and wounds read as
-  bands. Narrower bites produce more localised wounds.
+- The default gape is comparable to the body's half-width, so a mouthful near
+  the midline tends to take the full width of the body and the jaw's bearing
+  patch reads as a band. The teeth themselves stay localised on it whatever the
+  gape is.
 - The body fill is drawn as a strip of quads between spine cross-sections, so a
   very sharp bend can overlap slightly on the inside of the curve. It is
   invisible at opaque fill and avoids depending on concave polygon

@@ -188,7 +188,9 @@ func _events_and_reset(senses: CreatureSenses, field: SoundField) -> void:
 	main._on_foot_landed(main.creature.body.head.pos, 0.12, main.creature)
 	_check(not field.waves.is_empty() and field.waves[-1].kind == SoundField.Kind.STEP,
 		"movement footfalls are not connected to hearing")
-	main._on_creature_bite_started(main.creature.jaw_point(), 1.0, main.creature)
+	main._on_creature_bite_started(
+		BiteMark.mouthful(main.creature.jaw_point(), Vector2.RIGHT, 1.0, 1.0),
+		main.creature)
 	_check(field.waves[-1].kind == SoundField.Kind.BITE,
 		"combat bites are not connected to hearing")
 	main.food_field.pellets = PackedVector2Array([main.creature.body.head.pos])

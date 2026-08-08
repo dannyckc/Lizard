@@ -99,7 +99,8 @@ func _take_hold() -> void:
 ## enough tissue to exercise the scrap field's spawn, settle and draw paths.
 func _scar_target() -> void:
 	var target: Creature = main.get_node("TargetCreature")
-	main.get_node("BiteCue").show_at(target.body.head.pos)
+	main.get_node("BiteCue").show_mark(
+		target.bite_mark(target.jaw_point(), target.params.bite_damage))
 	var points: Array[Vector2] = [target.body.head.pos]
 	var torso_i: int = mini(4, target.body.last_index - 1)
 	points.append(target.spine.points[torso_i]
@@ -109,4 +110,4 @@ func _scar_target() -> void:
 	points.append(limb.joints[2])
 	for point in points:
 		for _repeat in 6:
-			target.apply_bite(point, 9.0, 3.0)
+			target.apply_bite(BiteMark.mouthful(point, Vector2.RIGHT, 9.0, 3.0))

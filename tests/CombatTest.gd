@@ -80,6 +80,7 @@ func _run_checks() -> void:
 	_check(aimed.aim_active and aimed.aim_world.is_equal_approx(Vector2(0.0, 100.0)),
 		"enabled mouse look did not carry its aim target into the command")
 
+	_check_dentition(player, target)
 	_check_bite_contract(player, target)
 
 	_check_contacts(player, target)
@@ -142,7 +143,7 @@ func _check_physique(player: Creature, target: Creature) -> void:
 	for i in 12:
 		var station: int = clampi(2 + i, 2, player.body.last_index - 1)
 		for _repeat in 8:
-			player.anatomy.tissue.bite(player.spine.points[station], 12.0, 3.0, scraps)
+			player.anatomy.tissue.bite(_disc(player.spine.points[station], 12.0, 3.0), scraps)
 	player._physics_process(TICK)
 	_check(player.physique.mass < whole.mass * 0.9,
 		"chewing a creature open did not make it lighter (%.2f -> %.2f)"
@@ -309,7 +310,11 @@ func _hold(biter: Creature, victim: Creature, biter_name: String, victim_name: S
 	biter.params.apply_preset(biter_name)
 	victim.params.apply_preset(victim_name)
 	biter.reset(Vector2.ZERO, 0.0)
-	victim.reset(Vector2(60.0, 0.0), PI)
+	# A bite lands where the mouth is, so engagement distance is a lunge plus a
+	# snout rather than a bite volume thrown out in front of one. This is inside
+	# every pair's reach and outside every pair's silhouette, which is what a
+	# grip fixture has to be.
+	victim.reset(Vector2(52.0, 0.0), PI)
 	for _i in 20:
 		biter._physics_process(TICK)
 		victim._physics_process(TICK)
@@ -598,6 +603,173 @@ func _check_skeleton(target: Creature) -> void:
 ## So three things have to agree that a hole is a hole: the lattice retires the
 ## cell, the body stops colliding where it used to be, and the bite query stops
 ## finding anything to bite there.
+## The teeth, and the mark they leave.
+##
+## The point of generating a dentition rather than drawing one is that nothing
+## about a wound is authored after it: the mouth decides the shape, the depth
+## and the place, one description carries all three, and the same description is
+## what erodes the tissue and what is printed on it. So these checks are about
+## consequences — that a keener mouth cuts deeper because it has less tooth
+## touching the flesh, that a crowded blunt one spreads the same jaws over more
+## of it, and that neither of those was written down anywhere.
+func _check_dentition(player: Creature, target: Creature) -> void:
+	player.params.apply_preset("Lizard")
+	player.reset(Vector2.ZERO, 0.0)
+	player._physics_process(TICK)
+	var mouth: Dentition = player.dentition
+	_check(mouth != null and mouth.teeth.size() == player.params.tooth_count * 2,
+		"a mouth did not come out with a tooth in every slot of both arches")
+
+	# Both arches, with the lower nested inside the upper — which is the whole
+	# reason a bite mark is two rows of punctures rather than one, and why the
+	# rows mesh instead of meeting point to point.
+	var upper_seat: float = 0.0
+	var lower_seat: float = 0.0
+	var facing: int = 0
+	for tooth in mouth.teeth:
+		if tooth.jaw != Dentition.UPPER:
+			lower_seat = maxf(lower_seat, tooth.seat)
+			continue
+		upper_seat = maxf(upper_seat, tooth.seat)
+		for other in mouth.teeth:
+			if other.jaw == Dentition.LOWER and absf(tooth.angle - other.angle) < 0.0001:
+				facing += 1
+	_check(lower_seat < upper_seat,
+		"the lower arch was not set inside the upper one (%.2f vs %.2f)"
+			% [lower_seat, upper_seat])
+	# Both arches are symmetric about the snout, so an odd count leaves one pair
+	# meeting at the midline exactly as a mouthful of incisors does. Every other
+	# tooth has to fall in the gap opposite it.
+	_check(facing <= 1,
+		"%d teeth met their opposite number head on instead of meshing" % facing)
+
+	# Type is read off position and keenness, never listed. A keen mouth carries
+	# fangs and blades; a blunt one is cusps and crushers and has no canines at
+	# all, because nothing here should invent a fang for a mouth without one.
+	_check(mouth.count_of(Dentition.CANINE) > 0 and mouth.count_of(Dentition.CARNASSIAL) > 0,
+		"a keen dentition grew neither canines nor blades")
+	var blunt_params := CreatureParams.new()
+	blunt_params.tooth_sharpness = 0.0
+	var blunt: Dentition = Dentition.grow(blunt_params)
+	_check(blunt.count_of(Dentition.CANINE) == 0,
+		"a mouth of blunt cusps was given fangs anyway")
+	_check(blunt.count_of(Dentition.MOLAR) > mouth.count_of(Dentition.MOLAR),
+		"blunting a mouth did not push its crushing teeth further forward")
+
+	# Teeth are structural the way the spine's segment count is: a slider regrows
+	# them, and only a slider that actually changed anything.
+	var same: Dentition = player.dentition
+	player._physics_process(TICK)
+	_check(player.dentition == same, "an unchanged mouth was regrown anyway")
+	player.params.tooth_count += 3
+	player._physics_process(TICK)
+	_check(player.dentition != same
+			and player.dentition.teeth.size() == player.params.tooth_count * 2,
+		"changing the tooth count did not regrow the mouth")
+	player.params.apply_preset("Lizard")
+	player._physics_process(TICK)
+
+	# Force over area, and nothing else. Fewer, keener teeth have less touching
+	# the flesh, so the same jaws drive further into it.
+	var few := CreatureParams.new()
+	few.tooth_count = 5
+	few.tooth_sharpness = 1.0
+	var many := CreatureParams.new()
+	many.tooth_count = 20
+	many.tooth_sharpness = 0.0
+	var keen: Dentition = Dentition.grow(few)
+	var crowded: Dentition = Dentition.grow(many)
+	_check(keen.contact_area < crowded.contact_area,
+		"five needles met more flesh than twenty cusps (%.3f vs %.3f)"
+			% [keen.contact_area, crowded.contact_area])
+	_check(keen.pressure() > crowded.pressure(),
+		"concentrating a bite into fewer keener teeth did not raise its pressure")
+
+	_check_mark_is_the_damage(player, target)
+
+
+## The mark is the damage: what the teeth cover is what is eaten, and a bite is
+## a row of punctures rather than a stamped disc.
+func _check_mark_is_the_damage(player: Creature, target: Creature) -> void:
+	player.params.apply_preset("Lizard")
+	player.reset(Vector2.ZERO, 0.0)
+	player._physics_process(TICK)
+	target.params.apply_preset("Lizard")
+	target.reset(Vector2(400.0, 0.0), 0.0)
+	target._physics_process(TICK)
+
+	# The jaws are on the head. Nothing about a bite may sit out in front of the
+	# snout any more, which is the whole of what "the mouth is where the damage
+	# is" means — so every tooth has to land inside the creature's own gape.
+	var mark: BiteMark = player.bite_mark(player.jaw_point(), player.params.bite_damage)
+	var mouth_reach: float = player.jaw_axes().x
+	var furthest: float = 0.0
+	for imp in mark.impressions:
+		furthest = maxf(furthest, imp.pos.distance_to(player.body.head.pos))
+	_check(furthest <= mouth_reach + 0.001,
+		"a tooth landed %.1f px from the head, past its own %.1f px gape"
+			% [furthest, mouth_reach])
+	_check(player.jaw_point().distance_to(player.body.head.pos) < mouth_reach,
+		"the jaws still hold from a point out in front of the face")
+
+	# Damage lands where the teeth are and nowhere else. Sampled against the
+	# mark itself, so this is not "a bite damages things" but "the print and the
+	# wound are one description read twice".
+	var flank_station: int = mini(6, target.body.last_index - 1)
+	var flank: Vector2 = target.spine.points[flank_station] \
+		+ target.spine.perps[flank_station] * (target.body.widths[flank_station] * 0.5)
+	var lattice := TissueGrid.new()
+	lattice.update(target)
+	var stamp: BiteMark = player.bite_mark(flank, player.params.bite_damage)
+	var shed: Array = []
+	_check(lattice.bite(stamp, shed) > 0.0, "a mouthful of flank removed nothing at all")
+	var patch: TissueGrid.Patch = lattice.patch(TissueGrid.BODY_KEY)
+	var covered: int = 0
+	var stray: int = 0
+	for cell in patch.damaged:
+		var at: Vector2 = patch.centre_of(cell)
+		if stamp.depth_at(at) > 0.0 or at.distance_to(stamp.center) <= stamp.radius:
+			covered += 1
+		else:
+			stray += 1
+	_check(covered > 0 and stray == 0,
+		"%d cells were eaten outside the mark that supposedly ate them" % stray)
+
+	# ...and a keen mouth reaches through the hide where a crowded blunt one only
+	# grazes a wider patch of it, at exactly the same jaw force. Neither result
+	# is written anywhere: both are the same bite spread differently.
+	var deep: Array = _stamp_with(player, target, flank, 5, 1.0)
+	var broad: Array = _stamp_with(player, target, flank, 20, 0.0)
+	_check(deep[1] > broad[1],
+		"five needles did not go deeper than twenty cusps (%.2f vs %.2f hp)"
+			% [deep[1], broad[1]])
+	_check(broad[0] > deep[0],
+		"twenty cusps did not cover more flesh than five needles (%d vs %d cells)"
+			% [broad[0], deep[0]])
+	player.params.apply_preset("Lizard")
+	player.reset(Vector2.ZERO, 0.0)
+	target.reset(Vector2(900.0, 0.0), 0.0)
+
+
+## Bites `target` at `at` with a mouth of `count` teeth of the given keenness,
+## on a fresh lattice. Returns [cells damaged, deepest single cell].
+func _stamp_with(player: Creature, target: Creature, at: Vector2,
+		count: int, keenness: float) -> Array:
+	player.params.tooth_count = count
+	player.params.tooth_sharpness = keenness
+	player._physics_process(TICK)
+	var lattice := TissueGrid.new()
+	lattice.update(target)
+	lattice.bite(player.bite_mark(at, player.params.bite_damage), [])
+	var patch: TissueGrid.Patch = lattice.patch(TissueGrid.BODY_KEY)
+	var deepest: float = 0.0
+	for cell in patch.damaged:
+		var base: int = cell * TissueGrid.LAYERS
+		deepest = maxf(deepest, TissueGrid.SKIN_HP + TissueGrid.MUSCLE_HP
+			- patch.hp[base + TissueGrid.SKIN] - patch.hp[base + TissueGrid.MUSCLE])
+	return [patch.damaged.size(), deepest]
+
+
 func _check_voids(target: Creature) -> void:
 	target.anatomy.reset()
 	target._physics_process(TICK)
@@ -623,7 +795,7 @@ func _check_voids(target: Creature) -> void:
 	# One flank first: eating into a body from one side must not thin the other.
 	var shed: Array = []
 	for _i in 10:
-		tissue.bite(flank, 7.0, 3.0, shed)
+		tissue.bite(_disc(flank, 7.0, 3.0), shed)
 	_check(body.gone_count > 0, "cells stripped of every layer were never retired")
 	_check(body.gone[_nearest_cell(body, flank)] == 1,
 		"the cell under a bite that ate skin, muscle and all was still reported as tissue")
@@ -636,7 +808,7 @@ func _check_voids(target: Creature) -> void:
 	# capsules cannot reach the probe and answer for the piece that is gone.
 	for s in range(station - 1, station + 2):
 		for _i in 16:
-			tissue.bite(target.spine.points[s], 13.0, 3.0, shed)
+			tissue.bite(_disc(target.spine.points[s], 13.0, 3.0), shed)
 	_check(is_equal_approx(tissue.body_solid(t, 1.0), 0.0)
 			and is_equal_approx(tissue.body_solid(t, -1.0), 0.0),
 		"a station eaten clean through still reported tissue standing on it")
@@ -687,7 +859,7 @@ func _check_tissue(target: Creature) -> void:
 	var cohort := TissueGrid.new()
 	cohort.update(target)
 	var cohort_shed: Array = []
-	cohort.bite(flank, 12.0, 8.0, cohort_shed)
+	cohort.bite(_disc(flank, 12.0, 8.0), cohort_shed)
 	var cohort_body: TissueGrid.Patch = cohort.patch(TissueGrid.BODY_KEY)
 	var destroyed_layers: int = 0
 	for cohort_cell in cohort_body.cells:
@@ -707,7 +879,7 @@ func _check_tissue(target: Creature) -> void:
 	var elsewhere_before: float = body.hp[elsewhere * TissueGrid.LAYERS]
 
 	var shed: Array = []
-	var removed: float = tissue.bite(flank, 10.0, TissueGrid.SKIN_HP * 0.5, shed)
+	var removed: float = tissue.bite(_disc(flank, 10.0, TissueGrid.SKIN_HP * 0.5), shed)
 	_check(removed > 0.0, "a bite on the flank removed no tissue")
 	_check(not body.damaged.is_empty(), "damaged cells were not recorded for drawing")
 	_check(body.hp[base + TissueGrid.SKIN] < TissueGrid.SKIN_HP,
@@ -719,7 +891,7 @@ func _check_tissue(target: Creature) -> void:
 		"a bite damaged cells nowhere near where it landed")
 
 	for _i in 6:
-		tissue.bite(flank, 10.0, 2.0, shed)
+		tissue.bite(_disc(flank, 10.0, 2.0), shed)
 	_check(body.hp[base + TissueGrid.MUSCLE] <= 0.0,
 		"repeated bites never ate through skin and muscle")
 	_check(shed.size() >= 2, "destroyed skin and muscle shed no edible chunks")
@@ -740,7 +912,7 @@ func _check_tissue(target: Creature) -> void:
 	var bone_hp: int = bone_cell * TissueGrid.LAYERS + TissueGrid.BONE
 	var bites: int = 0
 	while body.hp[bone_hp] > 0.0 and bites < 40:
-		tissue.bite(midline, 6.0, 2.6, shed)
+		tissue.bite(_disc(midline, 6.0, 2.6), shed)
 		bites += 1
 	_check(bites > 4, "bone broke in %d bites — no harder to get through than flesh" % bites)
 
@@ -950,6 +1122,12 @@ func _nearest_cell(patch: TissueGrid.Patch, at: Vector2) -> int:
 			best_distance = d
 			best = cell
 	return best
+
+
+## A plain disc of damage, for the checks below that are about the lattice
+## rather than about any particular mouth. The teeth get their own section.
+func _disc(at: Vector2, radius: float, depth: float) -> BiteMark:
+	return BiteMark.mouthful(at, Vector2.RIGHT, radius, depth)
 
 
 func _check(condition: bool, message: String) -> void:

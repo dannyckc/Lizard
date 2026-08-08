@@ -305,6 +305,9 @@ class Patch extends RefCounted:
 
 var patches: Dictionary = {}
 
+## Reused corner buffer, so a bite allocates nothing per cell it tests.
+var _quad := PackedVector2Array([Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO])
+
 
 func _init() -> void:
 	var body := Patch.new()
@@ -472,21 +475,27 @@ func _update_limb(p: Patch, limb: Limb, scale: float) -> void:
 
 # ----------------------------------------------------------------- damage ----
 
-## Erodes every cell whose centre falls inside the bite circle, outside-in, and
-## returns the total tissue removed.
+## Erodes every cell the bite mark covers, outside-in, and returns the total
+## tissue removed.
 ##
-## Cells are selected by testing their solved world centres rather than by
+## The mark is the whole of what a bite is here — a list of tooth contact
+## patches with a penetration apiece — so damage lands in the shape of the
+## mouth that made it rather than as a disc. A keen mouth leaves a row of deep
+## punctures with intact skin between them; a blunt one leaves a broad shallow
+## crush. Neither case is written anywhere: both are the same loop over the same
+## patches, asked how deep they are over each cell.
+##
+## Cells are selected by testing their solved world geometry rather than by
 ## inverting the body-space mapping. That mapping is a curved, tapered, per-tick
 ## thing with no cheap inverse, whereas the direct test is exact, needs no
 ## special case at the caps or the elbow bisector, and costs a few hundred
-## squared distances on the rare ticks a bite actually lands. Bites also cross
+## comparisons on the rare ticks a bite actually lands. Bites also cross
 ## structures — jaws closing on a flank catch the leg over it — which a query
 ## routed through a single hit region could not express.
 ##
 ## `shed` collects the chunks that broke off, for the world to scatter.
-func bite(center: Vector2, radius: float, depth: float, shed: Array) -> float:
-	var r2: float = radius * radius
-	if r2 <= 0.0 or depth <= 0.0:
+func bite(mark: BiteMark, shed: Array) -> float:
+	if mark == null or mark.is_empty():
 		return 0.0
 	var removed: float = 0.0
 	# Destruction is still resolved at cell precision, but loose tissue is not.
@@ -497,18 +506,23 @@ func bite(center: Vector2, radius: float, depth: float, shed: Array) -> float:
 		var p: Patch = patches[key]
 		if not p.live:
 			continue
-		if center.x + radius < p.lo.x or center.x - radius > p.hi.x \
-				or center.y + radius < p.lo.y or center.y - radius > p.hi.y:
+		if mark.hi.x < p.lo.x or mark.lo.x > p.hi.x \
+				or mark.hi.y < p.lo.y or mark.lo.y > p.hi.y:
 			continue
 		for cell in p.cells:
 			var at: Vector2 = p.centre_of(cell)
-			var d2: float = center.distance_squared_to(at)
-			if d2 >= r2:
+			# Expanded by the cell's own size, because a tooth finer than the
+			# flesh's grain still marks the cell it landed in — see
+			# BiteMark.depth_over, which is what actually resolves that case.
+			var grain: float = p.extent_of(cell)
+			if at.x + grain < mark.lo.x or at.x - grain > mark.hi.x \
+					or at.y + grain < mark.lo.y or at.y - grain > mark.hi.y:
 				continue
-			# Rounded falloff: full depth at the centre of the jaws tapering to
-			# a graze at the rim, which is what makes damage read as landing
-			# where the bite landed rather than as a uniform stamp.
-			removed += _erode(p, cell, depth * (1.0 - d2 / r2), at, loose)
+			p.corners_of(cell, _quad)
+			var depth: float = mark.depth_over(at, _quad)
+			if depth <= 0.0:
+				continue
+			removed += _erode(p, cell, depth, at, loose)
 	_coalesce_shed(loose, shed)
 	return removed
 
