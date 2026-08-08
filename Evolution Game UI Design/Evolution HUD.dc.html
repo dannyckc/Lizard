@@ -310,6 +310,11 @@ class Component extends DCLogic {
     this.feet = [0, 1, 2, 3].map(i => ({ x: 0, y: 0, planted: true, t: 0, from: { x: 0, y: 0 }, to: { x: 0, y: 0 }, air: 0 }));
     this.pellets = [];
     for (let i = 0; i < 6; i++) this.pellets.push(this.spawnPellet());
+    this.carrion = [];
+    for (let i = 0; i < 3; i++) this.carrion.push(this.spawnCarrion());
+    this.sense = [];
+    this.senseT = 0;
+    this.beat = 0;
     this.cam = { x: 0, y: 0 };
     this.time = 0;
     if (!silent) this.setState({ food: 0, size: 1 });
@@ -320,6 +325,161 @@ class Component extends DCLogic {
   spawnPellet() {
     const a = Math.random() * Math.PI * 2, r = 220 + Math.random() * 460;
     return { x: (this.head ? this.head.x : 0) + Math.cos(a) * r, y: (this.head ? this.head.y : 0) + Math.sin(a) * r, ph: Math.random() * 6 };
+  }
+
+  spawnCarrion() {
+    const a = Math.random() * Math.PI * 2, r = 340 + Math.random() * 520;
+    const cx = (this.head ? this.head.x : 0) + Math.cos(a) * r;
+    const cy = (this.head ? this.head.y : 0) + Math.sin(a) * r;
+    const lobes = [];
+    for (let i = 0; i < 4; i++) {
+      const la = Math.random() * 6.284, ld = Math.random() * 9;
+      lobes.push({ dx: Math.cos(la) * ld, dy: Math.sin(la) * ld, r: 3.4 + Math.random() * 4.2 });
+    }
+    return { x: cx, y: cy, ph: Math.random() * 6, lobes };
+  }
+
+  // ── Perception, not emission ────────────────────────────────────────────────
+  // Nothing leaves the food. The creature's sense resolves marks in the air around
+  // whatever it has already detected: they appear on a beat, tighten while the read
+  // holds, and dissolve when it lapses. Weak reads are sparse, cool and scattered;
+  // sure reads cluster, warm toward the source's own hue, and occasionally resolve
+  // far enough to become legible.
+  G_FAR = ['·', '.', '˙', '·', ',', '·'];
+  G_MID = ['·', ':', '˙', '∶', '-', '/', '\\', '·', '·', '⁚'];
+  G_NEAR = [':', '⁚', '∷', '×', '+', '·', '≡', '//', '·', ':', '~', '='];
+  COOLS = [[126, 152, 204], [168, 150, 216], [111, 190, 190]];
+  WORDS_SEED = ['SEED', 'STARCH', 'TRACE', 'SWEET', 'FAINT'];
+  WORDS_CARRION = ['DECAY', 'IRON', 'WARM', 'MASS', 'CLOSE'];
+
+  spawnMark(o) {
+    if (this.sense.length > 400) this.sense.splice(0, 30);
+    o.cool = (Math.random() * 3) | 0;
+    this.sense.push(o);
+  }
+
+  pickGlyph(conf) {
+    const set = conf > 0.55 ? this.G_NEAR : conf > 0.24 ? this.G_MID : this.G_FAR;
+    return set[(Math.random() * set.length) | 0];
+  }
+
+  stepSense(dt) {
+    const R = 560 * this.sizeScale;
+    this.senseT += dt;
+    let burst = false;
+    if (this.senseT >= 0.58) { this.senseT -= 0.58; this.beat++; burst = true; }
+
+    if (burst) {
+      const srcs = [];
+      for (const p of this.pellets) srcs.push({ x: p.x, y: p.y, kind: 0, ph: p.ph });
+      for (const c of this.carrion) srcs.push({ x: c.x, y: c.y, kind: 1, ph: c.ph });
+
+      for (const s of srcs) {
+        const dx = s.x - this.head.x, dy = s.y - this.head.y;
+        const d = Math.hypot(dx, dy);
+        if (d > R) continue;
+        // Confidence is the creature's, not the object's: distance, plus a little
+        // for whatever it happens to be facing.
+        const rel = Math.cos(Math.atan2(dy, dx) - this.head.a);
+        let conf = (1 - d / R) * (0.74 + 0.26 * (0.5 + 0.5 * rel));
+        conf = Math.max(0, Math.min(1, Math.pow(conf, 1.3)));
+        if (conf < 0.05) continue;
+
+        // Each beat only samples part of the field, so density breathes rather than pours.
+        const wave = 0.5 + 0.5 * Math.sin(this.beat * 1.1 + s.ph);
+        const n = Math.round((1 + conf * (s.kind ? 8 : 6)) * (0.45 + wave));
+        const spread = 22 + (1 - conf) * 100;
+        for (let i = 0; i < n; i++) {
+          const a = Math.random() * 6.284;
+          const rr = spread * (0.3 + 0.7 * Math.sqrt(Math.random()));
+          this.spawnMark({
+            sx: s.x, sy: s.y, kind: s.kind, conf,
+            x: s.x + Math.cos(a) * rr, y: s.y + Math.sin(a) * rr,
+            age: 0, life: 0.8 + Math.random() * 1.4 + conf * 0.9,
+            seed: Math.random() * 6.284,
+            g: this.pickGlyph(conf),
+            sz: 6.4 + Math.random() * 3 + conf * 2.4,
+            pull: (conf > 0.48 ? 1 : -1) * (0.22 + Math.random() * 0.5),
+            txt: 0
+          });
+        }
+
+        // Rarely, and only when sure, the read resolves into something legible.
+        if (conf > 0.6 && this.beat % 3 === 0 && Math.random() < 0.45) {
+          const set = s.kind ? this.WORDS_CARRION : this.WORDS_SEED;
+          const a = Math.random() * 6.284, rr = spread * 0.8 + 24;
+          this.spawnMark({
+            sx: s.x, sy: s.y, kind: s.kind, conf,
+            x: s.x + Math.cos(a) * rr, y: s.y + Math.sin(a) * rr,
+            age: 0, life: 2 + Math.random(), seed: Math.random() * 6.284,
+            g: Math.random() < 0.35 ? conf.toFixed(2) : set[(Math.random() * set.length) | 0],
+            sz: 8, pull: 0.08, txt: 1
+          });
+        }
+      }
+
+      // The sense runs whether or not it finds anything: a thin grain of nothing-yet.
+      for (let i = 0; i < 3; i++) {
+        const a = Math.random() * 6.284, rr = 140 + Math.random() * R * 0.75;
+        this.spawnMark({
+          sx: this.head.x, sy: this.head.y, kind: 2, conf: 0.05,
+          x: this.head.x + Math.cos(a) * rr, y: this.head.y + Math.sin(a) * rr,
+          age: 0, life: 1.3 + Math.random() * 1.6, seed: Math.random() * 6.284,
+          g: '·', sz: 6 + Math.random() * 2, pull: -0.3, txt: 0
+        });
+      }
+    }
+
+    for (let i = this.sense.length - 1; i >= 0; i--) {
+      const m = this.sense[i];
+      m.age += dt;
+      if (m.age >= m.life) { this.sense.splice(i, 1); continue; }
+      // Drift is field-like, never a plume: a lazy curl plus a pull toward the thing
+      // being read (clustering) or away from it (a read losing its grip).
+      const cx = Math.sin(m.y * 0.006 + this.time * 0.28 + m.seed) * 7;
+      const cy = Math.cos(m.x * 0.006 - this.time * 0.24 + m.seed) * 7;
+      const dx = m.sx - m.x, dy = m.sy - m.y, d = Math.max(1, Math.hypot(dx, dy));
+      m.x += (cx + (dx / d) * 11 * m.pull) * dt;
+      m.y += (cy + (dy / d) * 11 * m.pull) * dt;
+    }
+  }
+
+  senseColor(m) {
+    const cool = m.kind === 2 ? [154, 160, 176] : this.COOLS[m.cool];
+    const warm = m.kind === 1 ? [226, 96, 158] : [236, 162, 44];
+    const t = Math.min(1, m.conf * 1.3);
+    return Math.round(cool[0] + (warm[0] - cool[0]) * t) + ',' +
+      Math.round(cool[1] + (warm[1] - cool[1]) * t) + ',' +
+      Math.round(cool[2] + (warm[2] - cool[2]) * t);
+  }
+
+  // Painted in screen space on a fixed reading lattice, so the marks never behave
+  // like objects in the habitat — they belong to the observer, not the world.
+  paintSense(L, w, h, S, dpr) {
+    const c = L.sense.ctx;
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, w, h);
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    const CELL = 9;
+    for (const m of this.sense) {
+      const t = m.age / m.life;
+      const env = Math.min(1, t / 0.22) * Math.min(1, (1 - t) / 0.4);
+      const fl = 0.74 + 0.26 * Math.sin(this.time * 6.5 + m.seed * 4);
+      let a = env * fl * (0.14 + m.conf * 0.74) * (m.txt ? 0.85 : 1);
+      a = Math.round(a * 6) / 6;
+      if (a <= 0.02) continue;
+      let sx = w / 2 + (m.x - this.cam.x) * S;
+      let sy = h / 2 + (m.y - this.cam.y) * S;
+      if (sx < -70 || sy < -70 || sx > w + 70 || sy > h + 70) continue;
+      sx = Math.round(sx / CELL) * CELL;
+      sy = Math.round(sy / CELL) * CELL;
+      c.fillStyle = 'rgba(' + this.senseColor(m) + ',' + a.toFixed(3) + ')';
+      c.font = (m.txt ? '500 ' : '400 ') + m.sz.toFixed(1) + "px 'IBM Plex Mono', monospace";
+      try { c.letterSpacing = m.txt ? '0.18em' : '0px'; } catch (e) {}
+      c.fillText(m.g, sx, sy);
+    }
+    try { c.letterSpacing = '0px'; } catch (e) {}
   }
 
   widthAt(u) {
@@ -447,6 +607,8 @@ class Component extends DCLogic {
       }
     }
 
+    this.stepSense(dt);
+
     this.cam.x += (this.head.x - this.cam.x) * Math.min(1, dt * 3.2);
     this.cam.y += (this.head.y - this.cam.y) * Math.min(1, dt * 3.2);
 
@@ -461,6 +623,133 @@ class Component extends DCLogic {
     }
   }
 
+  ensureLayers(w, h, dpr) {
+    if (!this.L) {
+      const mk = () => { const el = document.createElement('canvas'); return { el, ctx: el.getContext('2d') }; };
+      this.L = { world: mk(), latent: mk(), periph: mk(), sharp: mk(), core: mk(), outer: mk(), fog: mk(), ghost: mk(), sense: mk() };
+    }
+    const L = this.L;
+    const fit = (o, pw, ph) => { if (o.el.width !== pw || o.el.height !== ph) { o.el.width = pw; o.el.height = ph; } };
+    const pw = Math.max(1, Math.round(w * dpr)), ph = Math.max(1, Math.round(h * dpr));
+    fit(L.world, pw, ph); fit(L.latent, pw, ph); fit(L.periph, pw, ph); fit(L.sharp, pw, ph); fit(L.fog, pw, ph); fit(L.ghost, pw, ph); fit(L.sense, pw, ph);
+    L.mw = Math.max(1, Math.round(w * 0.5)); L.mh = Math.max(1, Math.round(h * 0.5));
+    fit(L.core, L.mw, L.mh); fit(L.outer, L.mw, L.mh);
+    return L;
+  }
+
+  // Soft organic field of sight: a chain of overlapping blobs cast from the head
+  // along the look direction, radii modulated by slow noise so no cone or circle reads.
+  paintSight(ctx, mw, mh, cx, cy, ang, reach, width, near, seed, tail) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, mw, mh);
+    ctx.globalCompositeOperation = 'lighter';
+    const fx = Math.cos(ang), fy = Math.sin(ang);
+    const px = -fy, py = fx;
+    const t0 = this.time;
+    const blob = (x, y, r, a) => {
+      if (r <= 0.5 || a <= 0.01) return;
+      const gr = ctx.createRadialGradient(x, y, 0, x, y, r);
+      gr.addColorStop(0, 'rgba(255,255,255,' + a + ')');
+      gr.addColorStop(0.5, 'rgba(255,255,255,' + a * 0.72 + ')');
+      gr.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = gr;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 6.284); ctx.fill();
+    };
+    blob(cx, cy, near, 0.95);
+    const steps = 15;
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const wob = 1
+        + 0.17 * Math.sin(t * 5.1 + t0 * 0.62 + seed)
+        + 0.10 * Math.sin(t * 11.7 - t0 * 0.41 + seed * 2.1);
+      const lat = width * (0.13 * Math.sin(t * 3.3 + t0 * 0.5 + seed) + 0.07 * Math.sin(t * 8.1 - t0 * 0.33));
+      const d = reach * (0.06 + 0.94 * t);
+      const r = width * (0.34 + 0.78 * Math.pow(Math.sin(Math.PI * (0.12 + 0.88 * t)), 0.75)) * wob;
+      const a = 0.95 * (1 - Math.pow(t, tail));
+      blob(cx + fx * d + px * lat, cy + fy * d + py * lat, r, a);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // Unseen space is not dark — it is *unresolved*. The world keeps its paper brightness
+  // everywhere; sight only restores contrast, colour and detail. Outside it the same
+  // habitat is blurred, desaturated and lifted toward a cool paper grey.
+  paintWash(L, w, h) {
+    const gf = L.fog.ctx, pw = L.fog.el.width, ph = L.fog.el.height;
+    gf.setTransform(1, 0, 0, 1, 0, 0);
+    gf.clearRect(0, 0, pw, ph);
+    gf.fillStyle = '#EEF0F2';
+    gf.fillRect(0, 0, pw, ph);
+    // Broad, feathered removal: a heavily blurred mask means the veil thins over a long
+    // distance instead of switching off at an edge.
+    gf.globalCompositeOperation = 'destination-out';
+    gf.filter = 'blur(' + Math.round(Math.max(26, w * 0.05)) + 'px)';
+    gf.globalAlpha = 0.55;
+    gf.drawImage(L.outer.el, 0, 0, pw, ph);
+    gf.filter = 'blur(' + Math.round(Math.max(14, w * 0.022)) + 'px)';
+    gf.globalAlpha = 0.85;
+    gf.drawImage(L.core.el, 0, 0, pw, ph);
+    gf.filter = 'none';
+    gf.globalAlpha = 1;
+    gf.globalCompositeOperation = 'source-over';
+  }
+
+  compositeVision(g, L, w, h, S) {
+    const hp = this.rp && this.rp[0] ? this.rp[0] : this.head;
+    const hx = (w / 2 + (hp.x - this.cam.x) * S) * 0.5;
+    const hy = (h / 2 + (hp.y - this.cam.y) * S) * 0.5;
+    const ang = this.head.a;
+    const sc = this.sizeScale * S * 0.5;
+    const gain = 1 + Math.min(1, Math.abs(this.vel) / 190) * 0.32;
+
+    this.paintSight(L.core.ctx, L.mw, L.mh, hx, hy, ang, 300 * sc * gain, 130 * sc, 52 * sc, 0.0, 1.7);
+    this.paintSight(L.outer.ctx, L.mw, L.mh, hx, hy, ang, 560 * sc * gain, 260 * sc, 130 * sc, 1.9, 2.9);
+
+    // Uncertain render of the whole habitat: soft, grey, detail dissolved but present.
+    const gg = L.ghost.ctx;
+    gg.setTransform(1, 0, 0, 1, 0, 0);
+    gg.clearRect(0, 0, L.ghost.el.width, L.ghost.el.height);
+    gg.filter = 'blur(' + Math.max(5, 9 * S) + 'px) grayscale(1) contrast(0.62) brightness(1.16)';
+    gg.drawImage(L.world.el, 0, 0);
+    gg.filter = 'none';
+
+    const gp = L.periph.ctx;
+    gp.setTransform(1, 0, 0, 1, 0, 0);
+    gp.clearRect(0, 0, L.periph.el.width, L.periph.el.height);
+    gp.filter = 'blur(' + Math.max(1.5, 2.6 * S) + 'px) grayscale(0.55) contrast(0.88)';
+    gp.drawImage(L.world.el, 0, 0);
+    gp.filter = 'none';
+    gp.globalCompositeOperation = 'destination-in';
+    gp.drawImage(L.outer.el, 0, 0, L.periph.el.width, L.periph.el.height);
+    gp.globalCompositeOperation = 'source-over';
+
+    const gs = L.sharp.ctx;
+    gs.setTransform(1, 0, 0, 1, 0, 0);
+    gs.clearRect(0, 0, L.sharp.el.width, L.sharp.el.height);
+    gs.drawImage(L.world.el, 0, 0);
+    gs.globalCompositeOperation = 'destination-in';
+    gs.drawImage(L.core.el, 0, 0, L.sharp.el.width, L.sharp.el.height);
+    gs.globalCompositeOperation = 'source-over';
+
+    // Survey grid persists everywhere as the paper's own texture.
+    g.globalAlpha = 0.3;
+    g.filter = 'blur(0.6px)';
+    g.drawImage(L.latent.el, 0, 0, w, h);
+    g.filter = 'none';
+
+    g.globalAlpha = 0.58;
+    g.drawImage(L.ghost.el, 0, 0, w, h);
+
+    this.paintWash(L, w, h);
+    g.globalAlpha = 0.5;
+    g.drawImage(L.fog.el, 0, 0, w, h);
+
+    g.globalAlpha = 0.8;
+    g.drawImage(L.periph.el, 0, 0, w, h);
+    g.globalAlpha = 1;
+    g.drawImage(L.sharp.el, 0, 0, w, h);
+  }
+
   draw() {
     const cv = this.canvasRef.current; if (!cv) return;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -471,21 +760,59 @@ class Component extends DCLogic {
     g.clearRect(0, 0, w, h);
 
     const S = this.zoom;
-    g.save();
-    g.translate(w / 2, h / 2); g.scale(S, S); g.translate(-this.cam.x, -this.cam.y);
+    const L = this.ensureLayers(w, h, dpr);
+
+    const gl = L.latent.ctx;
+    gl.setTransform(dpr, 0, 0, dpr, 0, 0);
+    gl.clearRect(0, 0, w, h);
+    gl.save();
+    gl.translate(w / 2, h / 2); gl.scale(S, S); gl.translate(-this.cam.x, -this.cam.y);
 
     const step = 90;
     const x0 = Math.floor((this.cam.x - w / 2 / S) / step) * step, x1 = this.cam.x + w / 2 / S;
     const y0 = Math.floor((this.cam.y - h / 2 / S) / step) * step, y1 = this.cam.y + h / 2 / S;
-    g.fillStyle = 'rgba(20,20,15,0.13)';
-    for (let x = x0; x < x1; x += step) for (let y = y0; y < y1; y += step) { g.beginPath(); g.arc(x, y, 1 / S, 0, 6.284); g.fill(); }
+    gl.fillStyle = 'rgba(20,20,15,0.34)';
+    for (let x = x0; x < x1; x += step) for (let y = y0; y < y1; y += step) { gl.beginPath(); gl.arc(x, y, 1.15 / S, 0, 6.284); gl.fill(); }
+    gl.restore();
+
+    const gw = L.world.ctx;
+    gw.setTransform(dpr, 0, 0, dpr, 0, 0);
+    gw.clearRect(0, 0, w, h);
+    gw.save();
+    gw.translate(w / 2, h / 2); gw.scale(S, S); gw.translate(-this.cam.x, -this.cam.y);
+    gw.fillStyle = 'rgba(20,20,15,0.15)';
+    for (let x = x0; x < x1; x += step) for (let y = y0; y < y1; y += step) { gw.beginPath(); gw.arc(x, y, 1 / S, 0, 6.284); gw.fill(); }
+    gw.restore();
+    gw.save();
+    gw.translate(w / 2, h / 2); gw.scale(S, S); gw.translate(-this.cam.x, -this.cam.y);
 
     for (const p of this.pellets) {
       const pu = 1 + Math.sin(this.time * 2 + p.ph) * 0.12;
-      g.beginPath(); g.arc(p.x, p.y, 8.5 * pu, 0, 6.284);
-      g.strokeStyle = 'rgba(20,20,15,0.26)'; g.lineWidth = 1 / S; g.stroke();
-      g.beginPath(); g.arc(p.x, p.y, 2.6, 0, 6.284); g.fillStyle = '#14140F'; g.fill();
+      gw.beginPath(); gw.arc(p.x, p.y, 8.5 * pu, 0, 6.284);
+      gw.strokeStyle = 'rgba(20,20,15,0.26)'; gw.lineWidth = 1 / S; gw.stroke();
+      gw.beginPath(); gw.arc(p.x, p.y, 2.6, 0, 6.284); gw.fillStyle = '#14140F'; gw.fill();
     }
+    for (const c of this.carrion) {
+      gw.fillStyle = 'rgba(20,20,15,0.34)';
+      for (const lo of c.lobes) { gw.beginPath(); gw.arc(c.x + lo.dx, c.y + lo.dy, lo.r, 0, 6.284); gw.fill(); }
+      gw.fillStyle = 'rgba(20,20,15,0.12)';
+      gw.beginPath(); gw.arc(c.x, c.y, 15, 0, 6.284); gw.fill();
+    }
+    gw.restore();
+
+    this.compositeVision(g, L, w, h, S);
+
+    // The sensory layer sits over the habitat as annotation, not atmosphere:
+    // multiplied in so marks read as pigment on the same paper, never as light.
+    this.paintSense(L, w, h, S, dpr);
+    g.save();
+    g.globalCompositeOperation = 'multiply';
+    g.globalAlpha = 0.95;
+    g.drawImage(L.sense.el, 0, 0, w, h);
+    g.restore();
+
+    g.save();
+    g.translate(w / 2, h / 2); g.scale(S, S); g.translate(-this.cam.x, -this.cam.y);
 
     const n = this.rp.length;
     const ink = '#14140F';

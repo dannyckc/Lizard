@@ -23,6 +23,8 @@ extends RefCounted
 ## unfolds over adjacent frames rather than making a foot teleport.
 const LIMB_CONTACT_ITERATIONS: int = 6
 const LIMB_CONTACT_SLOP: float = 0.35
+const STEP_RETARGET_RESPONSE: float = 14.0
+const LANDING_PREDICTION_STRIDES: float = 0.65
 
 var limbs: Array[Limb] = []
 
@@ -101,7 +103,7 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		# where the ideal will be when the foot actually touches down, not where
 		# it is now — see _landing_spot().
 		var remaining: float = (1.0 - limb.step_t) * limb.step_duration
-		var retarget: float = 1.0 - exp(-9.0 * delta)
+		var retarget: float = 1.0 - exp(-STEP_RETARGET_RESPONSE * delta)
 		var aim: Vector2 = limb.clamp_to_envelope(
 			body.anchors[limb.key], _landing_spot(limb, remaining), p.limb_max_reach, swing)
 		limb.step_to = limb.step_to.lerp(aim, retarget)
@@ -193,12 +195,14 @@ func _step_duration(limb: Limb, p: CreatureParams) -> float:
 ## Aiming at the present ideal is what made the hind feet look unplanted: by the
 ## time the foot lands the body has moved on, so it arrives already behind and
 ## is dragged the whole of its stance phase. Leading by the socket's own
-## velocity puts the foot down where the ideal will actually be, and the extra
-## stride fraction is the margin it then has to be dragged back through before
-## it is due again.
+## velocity puts the foot down where the ideal will actually be. The prediction
+## is capped because `ideal` already contains the authored foot lead: an
+## uncapped flight prediction plus another fixed lead makes a quick turn or
+## reversal send the foot on a needlessly wide correction.
 func _landing_spot(limb: Limb, flight: float) -> Vector2:
-	return limb.ideal + limb.socket_vel * flight \
-		+ limb.travel * (limb.stride * 0.45 * limb.pace)
+	var prediction: Vector2 = (limb.socket_vel * flight).limit_length(
+		limb.stride * LANDING_PREDICTION_STRIDES)
+	return limb.ideal + prediction
 
 
 func _solve_limb(limb: Limb, body: BodyShape, p: CreatureParams, swing: float,

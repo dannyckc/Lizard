@@ -107,7 +107,7 @@ extends Resource
 ## comfortably above segment_count * segment_length.
 @export_range(0.0, 0.9, 0.01) var turn_speed_falloff: float = 0.55
 ## How quickly angular velocity reaches the commanded turn rate.
-@export_range(1.0, 20.0, 0.1) var turn_responsiveness: float = 8.0
+@export_range(1.0, 20.0, 0.1) var turn_responsiveness: float = 12.0
 ## The head swings around a point this far behind it, so the creature can
 ## pivot on the spot instead of needing forward speed to change direction.
 @export_range(0.0, 160.0, 1.0) var turn_pivot: float = 46.0
@@ -251,7 +251,7 @@ const PRESETS: Dictionary = {
 		"arm_length": 52.0, "leg_length": 60.0, "stance_width": 0.9, "stance_reach": 0.8,
 		"stride_distance": 42.0, "step_duration": 0.42, "step_height": 14.0,
 		"move_speed": 130.0, "acceleration": 400.0,
-		"turn_speed_deg": 110.0, "turn_responsiveness": 5.0, "turn_pivot": 80.0,
+		"turn_speed_deg": 110.0, "turn_responsiveness": 7.0, "turn_pivot": 80.0,
 		"density": 1.15, "muscle_power": 1.1, "jaw_power": 2.4,
 		"bite_damage": 3.2, "bite_reach": 28.0, "bite_radius": 20.0,
 		"chew_interval": 0.5,
@@ -270,7 +270,7 @@ const PRESETS: Dictionary = {
 		"arm_length": 44.0, "leg_length": 50.0, "stance_width": 1.1, "stance_reach": 0.74,
 		"stride_distance": 40.0, "step_duration": 0.44, "step_height": 9.0,
 		"move_speed": 120.0, "acceleration": 340.0,
-		"turn_speed_deg": 95.0, "turn_responsiveness": 4.5, "turn_pivot": 90.0,
+		"turn_speed_deg": 95.0, "turn_responsiveness": 6.5, "turn_pivot": 90.0,
 		"density": 1.45, "muscle_power": 1.15, "jaw_power": 7.5,
 		"bite_damage": 3.6, "bite_reach": 32.0, "bite_radius": 21.0,
 		"bite_cooldown": 0.6, "chew_interval": 0.45,

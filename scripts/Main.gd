@@ -15,11 +15,13 @@ const COL_GRID := Color(INK, 0.13)
 @onready var food_field: FoodField = $FoodField
 @onready var scrap_field: ScrapField = $ScrapField
 @onready var creature: Creature = $Creature
+@onready var senses: CreatureSenses = $Creature/Senses
 @onready var view: CreatureView = $Creature/View
 @onready var target_creature: Creature = $TargetCreature
 @onready var target_view: CreatureView = $TargetCreature/View
 @onready var bite_cue: BiteCue = $BiteCue
 @onready var camera: Camera2D = $Camera2D
+@onready var sight_renderer: SightRenderer = $SightRenderer
 
 var input := MovementInput.new()
 var panel: TuningPanel
@@ -169,6 +171,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				target_view.debug = view.debug
 			KEY_R:
 				creature.reset()
+				senses.reset_for_species(senses.active_species)
 				target_creature.reset(target_creature.spawn_position, target_creature.spawn_heading)
 				food_field.pellets.clear()
 				food_field.refresh(creature.head_pos)
@@ -206,10 +209,12 @@ func _zoom_by(factor: float) -> void:
 	camera.zoom = Vector2(z, z)
 
 
-func _on_species_selected(_preset_name: String) -> void:
+func _on_species_selected(preset_name: String) -> void:
 	# Rebuild immediately so structural changes (especially segment count) feel
 	# as responsive as the sliders and tabs look.
 	creature.rebuild()
+	senses.reset_for_species(preset_name)
+	sight_renderer.refresh_profile()
 
 
 ## Resolves one closing of a set of jaws: the apex of a lunge, a chew from jaws

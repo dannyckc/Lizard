@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="Script" path="res://scripts/Main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/FoodField.gd" id="2_food"]
@@ -7,6 +7,8 @@
 [ext_resource type="Script" path="res://scripts/creature/CreatureView.gd" id="4_view"]
 [ext_resource type="Script" path="res://scripts/creature/CreatureParams.gd" id="5_params"]
 [ext_resource type="Script" path="res://scripts/world/BiteCue.gd" id="7_bite_cue"]
+[ext_resource type="Script" path="res://scripts/senses/CreatureSenses.gd" id="8_senses"]
+[ext_resource type="Script" path="res://scripts/senses/SightRenderer.gd" id="9_sight_renderer"]
 
 [sub_resource type="Resource" id="Resource_params"]
 script = ExtResource("5_params")
@@ -27,6 +29,9 @@ script = ExtResource("6_scrap")
 script = ExtResource("3_creature")
 params = SubResource("Resource_params")
 
+[node name="Senses" type="Node" parent="Creature"]
+script = ExtResource("8_senses")
+
 [node name="View" type="Node2D" parent="Creature"]
 script = ExtResource("4_view")
 
@@ -39,6 +44,11 @@ alive = false
 
 [node name="View" type="Node2D" parent="TargetCreature"]
 script = ExtResource("4_view")
+render_z_index = 4
+
+[node name="SightRenderer" type="Node2D" parent="."]
+script = ExtResource("9_sight_renderer")
+senses_path = NodePath("../Creature/Senses")
 
 [node name="BiteCue" type="Node2D" parent="."]
 script = ExtResource("7_bite_cue")

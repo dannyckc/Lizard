@@ -67,6 +67,12 @@ var move_dir: Vector2 = Vector2.RIGHT
 ## Speed as a 0..1 fraction of top speed. Drives stride, step timing and sway.
 var speed_norm: float = 0.0
 
+## Shared feel shaping rather than species traits. Species keep their weight in
+## acceleration and turn-rate parameters; these only decide how controls settle.
+const BRAKE_MULTIPLIER: float = 2.0
+const PIVOT_FADE_START: float = 0.08
+const PIVOT_FADE_END: float = 0.45
+
 ## The cursor articulates only the head around the solved neck. This angle is
 ## deliberately separate from `heading`, which remains the WASD-owned body
 ## direction used by locomotion, gait and collision braking.
@@ -409,7 +415,12 @@ func _physics_process(delta: float) -> void:
 	# without changing point 1 or anything downstream of it.
 	spine.pose_head(head_look_dir, seg_len)
 	body.build(spine, params, size_scale)
-	gait.update(delta, body, move_dir, speed_norm, params, size_scale,
+	# `move_dir` is the body's facing and intentionally never flips in reverse.
+	# The gait only needs a signed fallback for the instant a socket is moving
+	# too slowly to measure its own travel direction.
+	var gait_dir: Vector2 = -move_dir if speed < -0.01 \
+		or (absf(speed) <= 0.01 and command.throttle < 0.0) else move_dir
+	gait.update(delta, body, gait_dir, speed_norm, params, size_scale,
 		Callable(self, "_limb_contact_push"))
 	anatomy.update(self)
 	physique.update(body, spine, anatomy.tissue, params)
@@ -581,12 +592,13 @@ func _integrate_motion(delta: float) -> void:
 	var desired_ang_vel: float = command.turn * turn_rate
 	ang_vel = lerpf(ang_vel, desired_ang_vel, 1.0 - exp(-p.turn_responsiveness * delta))
 
-	# Turning swings the head around a pivot behind it instead of just spinning
-	# it in place. Without this a stationary creature could rotate its heading
-	# without the head ever moving, so the spine would never bend and the feet
-	# would never trip their stride threshold — it would turn without walking.
-	# The pivot shortens at speed so fast turns are wide arcs, not handbrakes.
-	var pivot_dist: float = p.turn_pivot * size_scale * (1.0 - 0.6 * speed_norm)
+	# Turning at rest swings the head around a pivot behind it so the spine and
+	# feet visibly participate. Once the creature is travelling, linear motion
+	# already gives the turn an arc; keeping a second pivot offset there makes a
+	# direction change begin with an unnecessary sideways reposition. Fade that
+	# offset out early and let ordinary forward/reverse travel own the moving arc.
+	var pivot_blend: float = 1.0 - smoothstep(PIVOT_FADE_START, PIVOT_FADE_END, speed_norm)
+	var pivot_dist: float = p.turn_pivot * size_scale * pivot_blend
 	var pivot: Vector2 = head_pos - Vector2.RIGHT.rotated(heading) * pivot_dist
 	heading = wrapf(heading + ang_vel * delta, -PI, PI)
 	head_pos = pivot + Vector2.RIGHT.rotated(heading) * pivot_dist
@@ -597,12 +609,26 @@ func _integrate_motion(delta: float) -> void:
 		* (p.sprint_multiplier if command.sprint else 1.0) * haul
 	var desired_speed: float = command.throttle * top_speed
 	var rate: float = p.acceleration * size_scale * haul
-	if absf(desired_speed) < absf(speed):
-		rate *= 1.6
-	speed = move_toward(speed, desired_speed, rate * delta)
+	var reversing: bool = not is_zero_approx(speed) and not is_zero_approx(desired_speed) \
+		and signf(speed) != signf(desired_speed)
+	if reversing:
+		# Brake to a readable beat before applying thrust in the other direction.
+		# This answers a reversal promptly without erasing the body's weight by
+		# jumping directly between equal and opposite top speeds.
+		speed = move_toward(speed, 0.0, rate * BRAKE_MULTIPLIER * delta)
+	else:
+		if absf(desired_speed) < absf(speed):
+			rate *= BRAKE_MULTIPLIER
+		speed = move_toward(speed, desired_speed, rate * delta)
 
 	move_dir = Vector2.RIGHT.rotated(heading)
-	head_pos += move_dir * (speed * delta)
+	var displacement: Vector2 = move_dir * (speed * delta)
+	head_pos += displacement
+	# A head-driven chain cannot be pushed backward through itself. Carry the
+	# followers with reverse travel, while leaving heading, head articulation,
+	# contacts and the downstream gait in their existing ownership layers.
+	if speed < 0.0 and spine != null:
+		spine.translate_followers(displacement)
 	speed_norm = clampf(absf(speed) / maxf(p.move_speed * size_scale, 1.0), 0.0, 1.0)
 
 

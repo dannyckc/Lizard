@@ -306,6 +306,22 @@ func translate(offset: Vector2) -> void:
 		prev[i] += offset
 
 
+## Carries the simulated body with a head that is walking backward.
+##
+## Forward locomotion can drag this chain from point 0 because the head is in
+## front of everything it is pulling. In reverse the same operation drives the
+## head into point 1 and makes the constraint solver turn the torso inside-out
+## before the tail starts moving. Carrying only the followers by the reverse
+## displacement keeps their existing shape and Verlet velocity while point 0
+## remains owned by the normal head pin in `step`.
+func translate_followers(offset: Vector2) -> void:
+	if offset == Vector2.ZERO:
+		return
+	for i in range(1, points.size()):
+		points[i] += offset
+		prev[i] += offset
+
+
 ## Articulates only the head around the solved neck. Locomotion pins and solves
 ## the complete chain first; applying look afterwards means cursor aim cannot
 ## tow the torso, alter the authoritative movement heading, or leak momentum

@@ -20,6 +20,10 @@ class_name CreatureView
 extends Node2D
 
 @export var debug: bool = false
+## Canvas order is part of perception presentation: ambient creatures belong to
+## the habitat below SightRenderer, while the controlled creature stays crisp
+## above it. The view remains otherwise identical and simulation-independent.
+@export var render_z_index: int = 10
 
 const INK := Color("14140f")
 const PAPER := Color("f3f1ec")
@@ -75,7 +79,7 @@ var _flat := PackedColorArray([Color.TRANSPARENT])
 
 func _ready() -> void:
 	creature = get_parent() as Creature
-	z_index = 10
+	z_index = render_z_index
 
 
 func _physics_process(_delta: float) -> void:

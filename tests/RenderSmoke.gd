@@ -1,8 +1,8 @@
 ## Boots the real Main scene headless and walks the creature for a few seconds
 ## with the debug overlay on, so every _draw() path (body fill, tissue grain,
-## limbs, planted + stepping feet, Bite cue, HUD, grid) actually executes. Catches
-## bad draw arguments and scene wiring mistakes that a pure-simulation test
-## cannot.
+## limbs, planted + stepping feet, Bite cue, HUD, grid and screen-space Sight)
+## actually executes. Catches bad draw arguments, shader compilation failures
+## and scene wiring mistakes that a pure-simulation test cannot.
 ##
 ##   /Applications/Godot.app/Contents/MacOS/Godot --headless \
 ##       --path . --script tests/RenderSmoke.gd

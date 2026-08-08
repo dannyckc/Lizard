@@ -782,12 +782,11 @@ Four couplings are easy to trip over:
 - **`stance_reach` should stay below ~0.85**, or the IK chain sits locked
   straight and the legs stop looking like legs. Keep it below `limb_max_reach`
   too, or the rest pose is already against the envelope boundary.
-- **`turn_pivot` places the turn centre**, measured back from the head. At the
-  defaults it lands close to the shoulder station, so a spot pivot rotates the
-  creature roughly about its front feet and the hips sweep the wide arc. The
-  gait copes with that now, but moving the pivot back toward the midpoint of the
-  two limb girdles turns it about its centre instead, which is both what a real
-  quadruped does and much less work for the hind legs.
+- **`turn_pivot` places the low-speed turn centre**, measured back from the head.
+  At the defaults it lands close to the shoulder station, so a spot pivot
+  rotates the creature roughly about its front feet. The offset fades away once
+  the creature is moving, where ordinary travel already supplies the arc and a
+  second pivot displacement would only widen direction changes.
 
 Two more couplings arrive with the physique, and both are the same trap in
 different clothes: **the silhouette is an input to combat now.** Widening the body
@@ -799,16 +798,34 @@ and `jaw_power` are corrections on top of that rather than the whole of it.
 `constraint_iterations` and `fabrik_iterations` are cost/quality dials; the
 defaults (6 and 6) are already past the point of visible improvement.
 
+## SENSES: sight
+
+The player creature owns a `CreatureSenses` child. Each sense registers as an
+independent perception layer; sight is the only layer currently implemented, so
+hearing and smell can be added beside it without depending on sight. `SightSense`
+provides the gameplay-facing head pose and continuous `clarity_at()` query, while
+`SightRenderer` consumes that state only for presentation.
+
+The default `SightProfile` defines a clear near/forward field and a broader
+peripheral field. Its world distances and visual treatment are resource
+properties ready to be replaced per species. Species selection and full reset
+both reset the component through the same hook. The renderer samples the habitat
+below the player, leaving the controlled creature and HUD sharp; unresolved space
+is kept paper-bright, softly blurred, desaturated and low contrast rather than
+darkened or clipped by a hard visibility mask.
+
 ## Tests
 
-Six headless checks cover controls, simulation, rendering, UI, combat and the
-bodies in the habitat:
+Eight headless checks cover controls, movement feel, simulation, rendering, UI,
+combat, sight and the bodies in the habitat:
 
 ```sh
 godot --headless --path . --script tests/ControlsTest.gd # input/head-look isolation
+godot --headless --path . --script tests/MovementFeelTest.gd # reverse/steering behaviour
 godot --headless --path . --script tests/SimTest.gd      # simulation invariants
 godot --headless --path . --script tests/RenderSmoke.gd  # every draw path
 godot --headless --path . --script tests/UIInteractionTest.gd # HUD interactions
+godot --headless --path . --script tests/SightTest.gd    # perception/reset/render order
 godot --headless --path . --script tests/CombatTest.gd    # bite/anatomy slice
 godot --headless --path . --script tests/RagdollTest.gd   # the dead body
 ```
