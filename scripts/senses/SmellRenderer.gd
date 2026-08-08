@@ -62,6 +62,47 @@ const PIGMENT_SHADER: String = "res://shaders/smell.gdshader"
 class MarkVisual extends RefCounted:
 	var line: TextLine
 	var hue: Color = Color.WHITE
+	var glyphs: Array[GlyphVisual] = []
+
+
+## One already-shaped glyph, expressed as a quad in its font atlas. Marks can
+## share these immutable metrics, then all glyphs using the same atlas texture
+## are submitted as one triangle array instead of one TextLine draw at a time.
+class GlyphVisual extends RefCounted:
+	var texture: RID
+	var offset: Vector2 = Vector2.ZERO
+	var size: Vector2 = Vector2.ZERO
+	var uv: Rect2 = Rect2()
+
+
+class GlyphBatch extends RefCounted:
+	var texture: RID
+	var points := PackedVector2Array()
+	var colours := PackedColorArray()
+	var uvs := PackedVector2Array()
+	var indices := PackedInt32Array()
+
+	func append_glyph(glyph: GlyphVisual, origin: Vector2, colour: Color) -> void:
+		var first: int = points.size()
+		var at: Vector2 = origin + glyph.offset
+		points.append(at)
+		points.append(at + Vector2(glyph.size.x, 0.0))
+		points.append(at + glyph.size)
+		points.append(at + Vector2(0.0, glyph.size.y))
+		colours.append(colour)
+		colours.append(colour)
+		colours.append(colour)
+		colours.append(colour)
+		uvs.append(glyph.uv.position)
+		uvs.append(glyph.uv.position + Vector2(glyph.uv.size.x, 0.0))
+		uvs.append(glyph.uv.end)
+		uvs.append(glyph.uv.position + Vector2(0.0, glyph.uv.size.y))
+		indices.append(first)
+		indices.append(first + 1)
+		indices.append(first + 2)
+		indices.append(first)
+		indices.append(first + 2)
+		indices.append(first + 3)
 
 
 var senses: CreatureSenses
@@ -70,6 +111,12 @@ var _font: Font
 var _tracked: Font
 var _glyphs: Array[PackedStringArray] = []
 var _mark_visuals: Dictionary = {}
+var _glyph_batches: Dictionary = {}
+
+## Exposed to the renderer benchmark: a saturated read should cost
+## one command per live font atlas, not one command per mark.
+var last_batch_count: int = 0
+var last_glyph_count: int = 0
 
 
 func _ready() -> void:
@@ -149,6 +196,9 @@ func _draw() -> void:
 	var cell: float = maxf(profile.lattice_cell, 1.0)
 	var steps: float = float(profile.opacity_steps)
 	_prune_visuals(smell.marks)
+	_glyph_batches.clear()
+	last_batch_count = 0
+	last_glyph_count = 0
 
 	for mark in smell.marks:
 		var at: Vector2 = canvas * mark.pos
@@ -162,9 +212,12 @@ func _draw() -> void:
 		at = (at / cell).round() * cell
 		var visual: MarkVisual = _visual_for(mark, profile)
 		var line_size: Vector2 = visual.line.get_size()
-		visual.line.draw(get_canvas_item(),
-			Vector2(at.x - CENTRE_BOX * 0.5, at.y - line_size.y * 0.5),
-			Color(visual.hue, alpha * profile.layer_opacity))
+		var origin := Vector2(at.x - CENTRE_BOX * 0.5, at.y - line_size.y * 0.5)
+		var colour := Color(visual.hue, alpha * profile.layer_opacity)
+		for glyph in visual.glyphs:
+			_batch_for(glyph.texture).append_glyph(glyph, origin, colour)
+			last_glyph_count += 1
+	_flush_glyph_batches()
 	draw_set_transform_matrix(Transform2D.IDENTITY)
 
 
@@ -191,8 +244,66 @@ func _visual_for(mark: SmellSense.Mark, profile: SmellProfile) -> MarkVisual:
 	visual.line.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	visual.line.add_string(text, font, size)
 	visual.hue = _pigment_hue(mark, profile)
+	_cache_glyphs(visual)
 	_mark_visuals[mark_id] = visual
 	return visual
+
+
+func _cache_glyphs(visual: MarkVisual) -> void:
+	var text_server := TextServerManager.get_primary_interface()
+	var shaped: RID = visual.line.get_rid()
+	var line_size: Vector2 = visual.line.get_size()
+	# TextLine draws from the top-left of its alignment box. Convert the shaped
+	# baseline and advances into offsets from that same point once, at creation.
+	var pen := Vector2((CENTRE_BOX - line_size.x) * 0.5,
+		text_server.shaped_text_get_ascent(shaped))
+	for shaped_glyph in text_server.shaped_text_get_glyphs(shaped):
+		var repeat: int = maxi(int(shaped_glyph.get("repeat", 1)), 1)
+		var font_rid: RID = shaped_glyph.font_rid
+		var font_size: int = shaped_glyph.font_size
+		var glyph_index: int = shaped_glyph.index
+		var cache_size := Vector2i(font_size, 0)
+		var glyph_size: Vector2 = text_server.font_get_glyph_size(
+			font_rid, cache_size, glyph_index)
+		var texture_size: Vector2 = text_server.font_get_glyph_texture_size(
+			font_rid, cache_size, glyph_index)
+		var texture: RID = text_server.font_get_glyph_texture_rid(
+			font_rid, cache_size, glyph_index)
+		var uv_pixels: Rect2 = text_server.font_get_glyph_uv_rect(
+			font_rid, cache_size, glyph_index)
+		var glyph_offset: Vector2 = text_server.font_get_glyph_offset(
+			font_rid, cache_size, glyph_index) + shaped_glyph.offset
+		for _copy in repeat:
+			if texture.is_valid() and glyph_size.x > 0.0 and glyph_size.y > 0.0 \
+					and texture_size.x > 0.0 and texture_size.y > 0.0:
+				var glyph := GlyphVisual.new()
+				glyph.texture = texture
+				glyph.offset = pen + glyph_offset
+				glyph.size = glyph_size
+				glyph.uv = Rect2(uv_pixels.position / texture_size,
+					uv_pixels.size / texture_size)
+				visual.glyphs.append(glyph)
+			pen.x += float(shaped_glyph.advance)
+
+
+func _batch_for(texture: RID) -> GlyphBatch:
+	if _glyph_batches.has(texture):
+		return _glyph_batches[texture] as GlyphBatch
+	var batch := GlyphBatch.new()
+	batch.texture = texture
+	_glyph_batches[texture] = batch
+	return batch
+
+
+func _flush_glyph_batches() -> void:
+	for batch_value in _glyph_batches.values():
+		var batch := batch_value as GlyphBatch
+		if batch.indices.is_empty():
+			continue
+		RenderingServer.canvas_item_add_triangle_array(get_canvas_item(),
+			batch.indices, batch.points, batch.colours, batch.uvs,
+			PackedInt32Array(), PackedFloat32Array(), batch.texture)
+		last_batch_count += 1
 
 
 func _prune_visuals(marks: Array[SmellSense.Mark]) -> void:

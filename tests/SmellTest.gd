@@ -38,6 +38,7 @@ func _process(_delta: float) -> bool:
 		"smell does not originate at the solved head")
 
 	_persistence(field)
+	_batched_sources(field)
 	_trails(field)
 	_reading(smell, field)
 	_perception_not_emission(smell, field)
@@ -80,6 +81,23 @@ func _persistence(field: ScentField) -> void:
 	# proximity meter.
 	_check(ScentField.KIND_COUNT == 5 and ScentField.CARRY.size() == 5
 		and ScentField.HOLD.size() == 5, "the scent kinds are not fully described")
+
+
+## A cohort can saturate the field without changing its ceiling or renewal
+## semantics. Internally this also proves food/scrap collection can defer the
+## expensive thinning pass until the whole batch has arrived.
+func _batched_sources(field: ScentField) -> void:
+	field.clear()
+	var sources := PackedVector2Array()
+	for i in ScentField.MAX_TRACES + 80:
+		sources.append(Vector2(float(i) * ScentField.MERGE_RADIUS * 1.1, -6000.0))
+	field.deposit_many(sources, ScentField.Kind.SCRAP)
+	_check(field.traces.size() == ScentField.MAX_TRACES,
+		"a batched cohort bypassed the scent-field ceiling")
+	var before: int = field.traces.size()
+	field.deposit_many(sources, ScentField.Kind.SCRAP)
+	_check(field.traces.size() == before,
+		"renewing a batched cohort multiplied its live traces")
 
 
 ## A moving source leaves the path it walked, ageing from the tail forward.
@@ -266,7 +284,8 @@ func _layering(senses: CreatureSenses, field: ScentField) -> void:
 	_check(cached_visual != null and cached_visual.line != null
 		and renderer._visual_for(cache_mark, senses.smell.profile) == cached_visual,
 		"SMELL reshapes an unchanged mark every frame instead of reusing its glyph run")
-
+	_check(not cached_visual.glyphs.is_empty(),
+		"SMELL cached text but did not prepare glyphs for batched rendering")
 	var species_profile := SmellProfile.new()
 	species_profile.reach = 333.0
 	senses.set_smell_profile(species_profile)

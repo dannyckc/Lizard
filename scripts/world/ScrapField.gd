@@ -56,6 +56,7 @@ var _points := PackedVector2Array()
 var _colors := PackedColorArray()
 var _indices := PackedInt32Array()
 var _flat := PackedColorArray([COL_SHADOW])
+var _strand_points := PackedVector2Array()
 
 
 func _ready() -> void:
@@ -183,7 +184,10 @@ func _draw() -> void:
 		get_canvas_item(), _indices, _points, _colors)
 
 	# A few uninterrupted strands sell muscle density without outlining the
-	# polygon or revealing the simulation cells that made it.
+	# polygon or revealing the simulation cells that made it. All disconnected
+	# strands share one canvas command; a tear no longer adds three draw calls per
+	# muscle piece on its first visible frame.
+	_strand_points.clear()
 	for scrap in scraps:
 		if scrap.layer != TissueGrid.MUSCLE:
 			continue
@@ -193,5 +197,7 @@ func _draw() -> void:
 		var spacing: float = scrap.size / sqrt(scrap.aspect) * 0.12
 		for strand in range(-1, 2):
 			var offset: Vector2 = across * (float(strand) * spacing)
-			draw_line(scrap.pos - axis * half_length + offset,
-				scrap.pos + axis * half_length + offset, COL_MUSCLE_DEEP, 0.8, true)
+			_strand_points.append(scrap.pos - axis * half_length + offset)
+			_strand_points.append(scrap.pos + axis * half_length + offset)
+	if not _strand_points.is_empty():
+		draw_multiline(_strand_points, COL_MUSCLE_DEEP, 0.8, true)

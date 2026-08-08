@@ -859,7 +859,10 @@ lattice — they belong to the observer, not to the habitat — and multiplied i
 the page as pigment rather than laid over it as light, which is why
 `shaders/smell.gdshader` exists: `CanvasItemMaterial`'s multiply mode has no use
 for a glyph's coverage and would stamp solid blocks, so the blend folds the
-coverage in itself. The layer sits above the sight treatment and below the
+coverage in itself. The shaped glyph metrics are retained with the mark, and
+every visible glyph sharing a font-atlas texture enters one triangle array; a
+saturated read is a handful of atlas submissions rather than hundreds of
+independent text draws. The layer sits above the sight treatment and below the
 controlled creature, which is the argument for it: what the eyes could not
 resolve, the nose still annotates.
 
@@ -932,6 +935,12 @@ already standing in it do smell, of the right things. And the layer is where it
 claims to be: over the sight treatment, under the controlled creature, multiplied
 into the paper with the glyph coverage folded into the blend, which is the one
 way this layer can fail while still drawing.
+
+Food pellets and torn scraps are gathered into the scent field as cohorts. If
+their deposits cross the trace ceiling, thinning and rebuilding the spatial bins
+happens once after the cohort rather than once for every piece. Their world
+presentation follows the same rule: pellets share one triangle array, as do the
+disconnected muscle strands across all visible scraps.
 
 `HearingTest` checks the same separation from both sides. It holds a wave before
 and after arrival, verifies range, direction, distance falloff, profile swapping

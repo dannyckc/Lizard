@@ -76,6 +76,12 @@ var _rng := RandomNumberGenerator.new()
 ## Rebuilt once per tick and used only inside it: a live index would have to be
 ## maintained through every removal for no gain.
 var _bins: Dictionary = {}
+## Food and newly torn scraps arrive as cohorts. Defer the trace ceiling until
+## the whole cohort is indexed: otherwise every source beyond MAX_TRACES sorts
+## and rebuilds the entire field independently, producing a hitch exactly when
+## a bite adds several pieces of meat.
+var _batch_depth: int = 0
+var _thin_pending: bool = false
 
 
 func _ready() -> void:
@@ -118,7 +124,28 @@ func deposit(at: Vector2, kind: int, freshness: float = 1.0, source_id: int = 0)
 	traces.append(trace)
 	_bin_of(at).append(trace)
 	if traces.size() > MAX_TRACES:
-		_thin()
+		if _batch_depth > 0:
+			_thin_pending = true
+		else:
+			_thin()
+
+
+## Renews a cohort of same-kind sources as one field operation. Besides
+## avoiding repeated validation, this guarantees that a saturated scent field
+## is thinned only once for a whole pellet/scrap batch.
+func deposit_many(positions: Variant, kind: int, freshness: float = 1.0,
+		source_id: int = 0) -> void:
+	if freshness <= 0.0 or kind < 0 or kind >= KIND_COUNT:
+		return
+	_begin_batch()
+	for source in positions:
+		var at: Vector2
+		if source is Vector2:
+			at = source
+		else:
+			at = source.pos
+		deposit(at, kind, freshness, source_id)
+	_end_batch()
 
 
 ## How saturated a place is with scent, 0..1, before any nose is involved. Kinds
@@ -140,6 +167,8 @@ func clear() -> void:
 	traces.clear()
 	_bins.clear()
 	_since_tick = 0.0
+	_batch_depth = 0
+	_thin_pending = false
 
 
 func _fade(delta: float) -> void:
@@ -153,12 +182,11 @@ func _fade(delta: float) -> void:
 ## Everything in the habitat that smells, asked where it is now. Sources are read
 ## rather than notified, so no object in the world has to know this field exists.
 func _gather() -> void:
+	_begin_batch()
 	if _food_field != null:
-		for pellet in _food_field.pellets:
-			deposit(pellet, Kind.FORAGE)
+		deposit_many(_food_field.pellets, Kind.FORAGE)
 	if _scrap_field != null:
-		for scrap in _scrap_field.scraps:
-			deposit(scrap.pos, Kind.SCRAP)
+		deposit_many(_scrap_field.scraps, Kind.SCRAP)
 	for node in get_tree().get_nodes_in_group("creatures"):
 		var each := node as Creature
 		if each == null or each.body == null:
@@ -174,6 +202,18 @@ func _gather() -> void:
 		var hurt: float = 1.0 - each.anatomy.tissue.integrity()
 		if hurt > BLEED_THRESHOLD:
 			deposit(each.bounds_center, Kind.BLOOD, minf(1.0, hurt * BLEED_GAIN), owner_id)
+	_end_batch()
+
+
+func _begin_batch() -> void:
+	_batch_depth += 1
+
+
+func _end_batch() -> void:
+	_batch_depth = maxi(_batch_depth - 1, 0)
+	if _batch_depth == 0 and _thin_pending:
+		_thin_pending = false
+		_thin()
 
 
 func _renewable(at: Vector2, kind: int) -> Trace:
