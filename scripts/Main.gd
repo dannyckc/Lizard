@@ -84,6 +84,12 @@ func _build_ui() -> void:
 	layer.add_child(hud)
 	panel = hud.panel
 	hud.species_selected.connect(_on_species_selected)
+	# Which bodies the anatomy tab can be pointed at. Named here because which
+	# creature is whose is the world's business — the HUD only opens them up.
+	hud.set_specimens([
+		{"name": "Self", "creature": creature},
+		{"name": "Target", "creature": target_creature},
+	])
 
 
 func _build_backdrop() -> void:
@@ -200,6 +206,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_F2:
 				view.debug = not view.debug
 				target_view.debug = view.debug
+			KEY_F3:
+				hud.toggle_view()
 			KEY_R:
 				creature.reset()
 				senses.reset_for_species(senses.active_species)

@@ -1317,6 +1317,48 @@ func _layer_reference(layer: int) -> float:
 		_: return ORGAN_HP
 
 
+## How much fat one cell was *built* with — the plan's profile there, times this
+## species' reserve.
+##
+## What a cell's surviving fat has to be quoted against, because the plan lays
+## down more over a flank than over an ankle and both should read as full when
+## they are. Lives here rather than in whoever is drawing, so a cell rendered on
+## the creature, on a severed leg and in the anatomy panel is measured the same
+## way in all three.
+func fat_capacity(p: Patch, cell: int) -> float:
+	if p == null:
+		return FAT_HP * fat_reserve
+	return FAT_HP * fat_reserve \
+		* plan.fat_at(p.key, cell / p.rows, p.row_centre(cell % p.rows))
+
+
+## Fraction of one layer still standing across the whole animal. O(1), off the
+## same per-region totals the functional layer reads.
+func layer_left(layer: int) -> float:
+	var left: float = 0.0
+	var full: float = 0.0
+	for region in BodyPlan.REGIONS:
+		var i: int = region * LAYERS + layer
+		left += region_hp[i]
+		full += region_full[i]
+	return clampf(left / full, 0.0, 1.0) if full > 0.0 else 1.0
+
+
+## Cells the animal was built out of, and how many of them are now holes.
+func cell_count() -> int:
+	var total: int = 0
+	for key in patches:
+		total += (patches[key] as Patch).cells
+	return total
+
+
+func gone_count() -> int:
+	var total: int = 0
+	for key in patches:
+		total += (patches[key] as Patch).gone_count
+	return total
+
+
 ## How much padding the body is actually carrying, against an ordinary animal of
 ## the same plan. 1.0 is that animal, above is a well-fed one, and it falls as fat
 ## is bitten away — so a creature that has been opened up gets lighter for the

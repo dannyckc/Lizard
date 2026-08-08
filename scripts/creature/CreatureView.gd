@@ -61,6 +61,9 @@ const COL_MUSCLE_FIBRE := Color("3f160f", 0.62)
 ## Limbs sit close to the ground, so they get one tight shadow rather than the
 ## torso's three.
 const COL_SHADOW_LIMB := Color(INK, 0.05)
+## Every layer of the depth stack showing — what a body looks like from outside,
+## and the only mask the game itself ever draws with. See `top_layer`.
+const ALL_LAYERS: int = (1 << TissueGrid.LAYERS) - 1
 
 ## The open mouth: teeth in paper against the ink head, over the flesh colour of
 ## the gullet behind them. Nothing new is introduced to the palette — a mouth is
@@ -419,45 +422,56 @@ func _flush_flat(offset: Vector2, color: Color) -> void:
 ## through them, which is the whole reason no case here has to know anything about
 ## damage. A cell is drawn as whatever is currently on top of it.
 func _cell_color(patch: TissueGrid.Patch, cell: int) -> Color:
-	return tissue_color(patch.hp, cell * TissueGrid.LAYERS, _fat_capacity(patch, cell))
+	var tissue: TissueGrid = creature.anatomy.tissue
+	return tissue_color(patch.hp, cell * TissueGrid.LAYERS, tissue.fat_capacity(patch, cell))
 
 
-## The same reading, off nothing but a depth stack and how much fat that
+## The layer currently uppermost in a cell — the first one a bite has not yet
+## spent, skipping any the caller has peeled away. -1 when nothing it can see is
+## left there.
+##
+## `visible` exists for the anatomy panel, which is a dissection rather than a
+## second renderer: switching a layer off there means lifting it off the specimen
+## and reading what is underneath, so it goes through exactly the depth stack a
+## bite would and produces the colours a bite that deep would have exposed.
+static func top_layer(hp: PackedFloat32Array, base: int, visible: int = ALL_LAYERS) -> int:
+	for layer in TissueGrid.LAYERS:
+		if (visible & (1 << layer)) != 0 and hp[base + layer] > 0.0:
+			return layer
+	return -1
+
+
+## The colour of that layer, off nothing but a depth stack and how much fat that
 ## particular cell was built with.
 ##
 ## Static because meat off a creature has to be drawn in the creature's own inks.
 ## A severed leg is not lit differently, coloured differently or abstracted once it
 ## is on the ground — it is the same tissue in the same state, and the one way to
 ## guarantee it keeps looking like it is to leave exactly one place that decides.
-static func tissue_color(hp: PackedFloat32Array, base: int, fat_capacity: float) -> Color:
-	var skin: float = hp[base + TissueGrid.SKIN]
-	if skin > 0.0:
-		# Skin holds together as a membrane until it actually tears. A slight warm
-		# shift communicates strain without dissolving it into fat cell by cell.
-		return COL_BODY_HEAD.lerp(Color("2b211b"), (1.0 - skin / TissueGrid.SKIN_HP) * 0.24)
-	var fat: float = hp[base + TissueGrid.FAT]
-	if fat > 0.0:
-		# Measured against this cell's own fat rather than the global maximum: the
-		# plan lays down more over the trunk than over a foot, and a full flank and
-		# a full ankle should both read as full.
-		return COL_FAT.lerp(COL_FAT_DEEP, 1.0 - fat / maxf(fat_capacity, 0.0001))
-	var muscle: float = hp[base + TissueGrid.MUSCLE]
-	if muscle > 0.0:
-		return COL_MUSCLE.lerp(COL_MUSCLE_DEEP, 1.0 - muscle / TissueGrid.MUSCLE_HP)
-	var bone: float = hp[base + TissueGrid.BONE]
-	if bone > 0.0:
-		return COL_BONE.lerp(COL_BONE_WORN, 1.0 - bone / TissueGrid.BONE_HP)
+static func tissue_color(hp: PackedFloat32Array, base: int, fat_capacity: float,
+		visible: int = ALL_LAYERS) -> Color:
+	match top_layer(hp, base, visible):
+		TissueGrid.SKIN:
+			# Skin holds together as a membrane until it actually tears. A slight warm
+			# shift communicates strain without dissolving it into fat cell by cell.
+			return COL_BODY_HEAD.lerp(Color("2b211b"),
+				(1.0 - hp[base + TissueGrid.SKIN] / TissueGrid.SKIN_HP) * 0.24)
+		TissueGrid.FAT:
+			# Measured against this cell's own fat rather than the global maximum: the
+			# plan lays down more over the trunk than over a foot, and a full flank and
+			# a full ankle should both read as full.
+			return COL_FAT.lerp(COL_FAT_DEEP,
+				1.0 - hp[base + TissueGrid.FAT] / maxf(fat_capacity, 0.0001))
+		TissueGrid.MUSCLE:
+			return COL_MUSCLE.lerp(COL_MUSCLE_DEEP,
+				1.0 - hp[base + TissueGrid.MUSCLE] / TissueGrid.MUSCLE_HP)
+		TissueGrid.BONE:
+			return COL_BONE.lerp(COL_BONE_WORN,
+				1.0 - hp[base + TissueGrid.BONE] / TissueGrid.BONE_HP)
+	# The floor of the stack. A cell with nothing above the organ is drawn as the
+	# organ, and one with nothing at all is retired before it ever reaches here.
 	return COL_ORGAN.lerp(COL_ORGAN_SPENT,
 		1.0 - hp[base + TissueGrid.ORGAN] / TissueGrid.ORGAN_HP)
-
-
-## How much fat this particular cell was built with — the plan's profile at that
-## place, times the species' reserve.
-func _fat_capacity(patch: TissueGrid.Patch, cell: int) -> float:
-	var tissue: TissueGrid = creature.anatomy.tissue
-	var row: int = cell % patch.rows
-	return TissueGrid.FAT_HP * tissue.fat_reserve \
-		* tissue.plan.fat_at(patch.key, cell / patch.rows, patch.row_centre(row))
 
 
 ## Material detail deliberately ignores cell boundaries. Intact skin is read as

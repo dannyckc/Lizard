@@ -8,8 +8,16 @@ const PAPER := Color("f3f1ec")
 const INK := Color("14140f")
 const EDGE := Color(0.078, 0.078, 0.059, 0.13)
 
+## The two things this HUD can be looking at. The field is the animal in its
+## habitat; the anatomy is the same animal opened up. They are views of one
+## creature rather than two screens, so the switch is a tab and not a mode.
+const VIEW_FIELD: String = "Field"
+const VIEW_ANATOMY: String = "Anatomy"
+const VIEWS: Array[String] = [VIEW_FIELD, VIEW_ANATOMY]
+
 var params: CreatureParams
 var panel: TuningPanel
+var anatomy: AnatomyPanel
 
 var _sans_base: SystemFont
 var _mono_base: Font
@@ -20,7 +28,9 @@ var _mono_tracked: Font
 
 var _stats: Dictionary = {}
 var _species_buttons: Dictionary = {}
+var _view_buttons: Dictionary = {}
 var _active_species: String = "Lizard"
+var _active_view: String = VIEW_FIELD
 var _panel_open: bool = true
 var _hint_target: float = 1.0
 
@@ -30,6 +40,10 @@ var _stage_value: Label
 var _biomass_meter: BiomassMeter
 var _move_hint: Label
 var _tuning_button: Button
+var _stats_grid: GridContainer
+var _species_tabs: HBoxContainer
+var _field_block: Control
+var _anatomy_note: Label
 
 
 func _ready() -> void:
@@ -43,10 +57,16 @@ func _ready() -> void:
 	_build_tuning_panel()
 	_build_tuning_button()
 	_build_move_hint()
+	_build_anatomy()
 	_set_active_species(_active_species)
+	set_view(_active_view)
+	resized.connect(_fit_anatomy)
+	_fit_anatomy()
 
 
 func _process(delta: float) -> void:
+	if anatomy != null and anatomy.visible:
+		anatomy.refresh()
 	if _move_hint == null:
 		return
 	_move_hint.modulate.a = lerpf(
@@ -95,8 +115,65 @@ func set_panel_open(open: bool) -> void:
 	_panel_open = open
 	if panel == null:
 		return
-	panel.visible = open
+	panel.visible = open and _active_view == VIEW_FIELD
 	_update_tuning_button()
+
+
+## Which view the HUD is on. The field's own furniture stands down while the
+## specimen is out, because the anatomy drawer occupies the same right-hand
+## column the species tabs and the tuning drawer do — and because a dissection
+## should have the page to itself.
+func set_view(view_name: String) -> void:
+	if not VIEWS.has(view_name):
+		return
+	_active_view = view_name
+	var field: bool = view_name == VIEW_FIELD
+	if _stats_grid != null:
+		_stats_grid.visible = field
+	if _species_tabs != null:
+		_species_tabs.visible = field
+	if _field_block != null:
+		_field_block.visible = field
+	if _tuning_button != null:
+		_tuning_button.visible = field
+	if _move_hint != null:
+		_move_hint.visible = field
+	if _anatomy_note != null:
+		_anatomy_note.visible = not field
+	if anatomy != null:
+		anatomy.visible = not field
+		if not field:
+			anatomy.refresh()
+	if panel != null:
+		panel.visible = _panel_open and field
+	_update_tuning_button()
+	for name in _view_buttons:
+		var button: Button = _view_buttons[name]
+		var selected: bool = str(name) == view_name
+		button.text = ("•  " if selected else "   ") + str(name).to_upper()
+		button.add_theme_color_override("font_color", INK if selected else Color(INK, 0.42))
+		button.add_theme_color_override("font_hover_color", INK if selected else Color(INK, 0.72))
+		button.add_theme_stylebox_override("normal", _tab_style(selected))
+
+
+func toggle_view() -> void:
+	set_view(VIEW_FIELD if _active_view == VIEW_ANATOMY else VIEW_ANATOMY)
+
+
+func active_view() -> String:
+	return _active_view
+
+
+## The creatures the anatomy tab can be pointed at. Named by the world, because
+## which body is whose is the world's business and not the HUD's.
+func set_specimens(list: Array) -> void:
+	if anatomy != null:
+		anatomy.set_specimens(list)
+
+
+func _fit_anatomy() -> void:
+	if anatomy != null:
+		anatomy.fit_to_height(size.y - 96.0)
 
 
 func reset_hint() -> void:
@@ -188,19 +265,37 @@ func _build_identity_and_stats() -> void:
 	var proto := _label("PROTO  0.1", 10, _mono_tracked, Color(INK, 0.42))
 	identity.add_child(proto)
 
-	var grid := GridContainer.new()
-	grid.columns = 2
-	grid.add_theme_constant_override("h_separation", 22)
-	grid.add_theme_constant_override("v_separation", 4)
-	grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	block.add_child(grid)
+	var views := HBoxContainer.new()
+	views.name = "ViewTabs"
+	views.add_theme_constant_override("separation", 4)
+	block.add_child(views)
+	for view_name in VIEWS:
+		var button := Button.new()
+		button.text = "   " + view_name.to_upper()
+		button.flat = true
+		button.focus_mode = Control.FOCUS_NONE
+		button.custom_minimum_size = Vector2(0.0, 28.0)
+		button.add_theme_font_override("font", _sans_tracked)
+		button.add_theme_font_size_override("font_size", 10)
+		button.add_theme_stylebox_override("hover", _tab_style(false, 0.28))
+		button.add_theme_stylebox_override("pressed", _tab_style(true))
+		button.pressed.connect(set_view.bind(view_name))
+		views.add_child(button)
+		_view_buttons[view_name] = button
+
+	_stats_grid = GridContainer.new()
+	_stats_grid.columns = 2
+	_stats_grid.add_theme_constant_override("h_separation", 22)
+	_stats_grid.add_theme_constant_override("v_separation", 4)
+	_stats_grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	block.add_child(_stats_grid)
 	for key in ["STATE", "SPEED", "MASS", "AIRBORNE", "SEGMENTS"]:
 		var key_label := _label(key, 10, _mono_tracked, Color(INK, 0.40))
 		key_label.custom_minimum_size.x = 74.0
-		grid.add_child(key_label)
+		_stats_grid.add_child(key_label)
 		var value := _label("—", 10, _mono_tracked, INK)
 		_stats[key] = value
-		grid.add_child(value)
+		_stats_grid.add_child(value)
 
 
 func _build_species_tabs() -> void:
@@ -214,6 +309,7 @@ func _build_species_tabs() -> void:
 	tabs.alignment = BoxContainer.ALIGNMENT_END
 	tabs.add_theme_constant_override("separation", 6)
 	add_child(tabs)
+	_species_tabs = tabs
 
 	for preset_name in CreatureParams.PRESETS:
 		var name := str(preset_name)
@@ -243,6 +339,7 @@ func _build_biomass_and_legend() -> void:
 	block.offset_bottom = -30.0
 	block.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(block)
+	_field_block = block
 
 	var biomass := VBoxContainer.new()
 	biomass.custom_minimum_size.x = 300.0
@@ -291,6 +388,7 @@ func _build_biomass_and_legend() -> void:
 	legend.add_child(_legend_item(["⇧"], "SPRINT"))
 	legend.add_child(_legend_item(["F1"], "TUNING"))
 	legend.add_child(_legend_item(["F2"], "DEBUG"))
+	legend.add_child(_legend_item(["F3"], "ANATOMY"))
 	legend.add_child(_legend_item(["R"], "RESET"))
 
 
@@ -345,6 +443,28 @@ func _build_tuning_button() -> void:
 	_tuning_button.pressed.connect(toggle_panel)
 	add_child(_tuning_button)
 	_update_tuning_button()
+
+
+func _build_anatomy() -> void:
+	anatomy = AnatomyPanel.new()
+	anatomy.set_ui_fonts(_sans, _sans_tracked, _mono, _mono_tracked)
+	add_child(anatomy)
+
+	# The one caption the anatomy view needs, in the field's own footnote voice:
+	# it names the two rules the whole picture is drawn by, so the layer list and
+	# the two networks read as a description of a body rather than as legend keys.
+	_anatomy_note = _label(
+		"DEPTH STACK · SKIN OVER FAT OVER MUSCLE OVER BONE OVER ORGAN.\n"
+		+ "NERVES RUN THE CORD INSIDE THE VERTEBRAE; VESSELS RUN BESIDE THEM.",
+		9, _mono_tracked, Color(INK, 0.30))
+	_anatomy_note.name = "AnatomyNote"
+	_anatomy_note.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_anatomy_note.offset_left = 32.0
+	_anatomy_note.offset_top = -48.0
+	_anatomy_note.offset_right = 452.0
+	_anatomy_note.offset_bottom = -30.0
+	_anatomy_note.add_theme_constant_override("line_spacing", 6)
+	add_child(_anatomy_note)
 
 
 func _build_move_hint() -> void:

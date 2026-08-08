@@ -14,6 +14,10 @@ var ticks: int = 0
 var main: Node
 ## Whether the grip overlay had anything to draw at any point in the run.
 var gripped: bool = false
+## Holes the anatomy tab had on its specimen while it was out. Zero means the
+## panel was up over an intact body and its wound-rim pass never ran, which would
+## make a clean smoke run prove less than it looks like it does.
+var specimen_holes: int = 0
 
 
 func _initialize() -> void:
@@ -54,6 +58,19 @@ func _physics_process(_delta: float) -> bool:
 		_scar_target()  # exercise the skin, muscle, bone and cavity cell draws
 	if ticks == 60:
 		_sever_target()  # exercise the carrion field's cell, shadow and grain draws
+	# The anatomy tab, over a body that has been opened, worn to the bone and had a
+	# leg taken off it — so the specimen's wash, tissue, grain, wound rim, lattice,
+	# both networks, their pulses and both organ markers all go down. Held out over
+	# a stretch of frames rather than one, because the pulses only move on the
+	# frames after the first and the fit only eases on the frames after that.
+	if ticks == 70:
+		_open_anatomy()
+	if ticks > 70 and ticks < 150:
+		var specimen: AnatomyView = (main.hud as EvolutionHUD).anatomy.view
+		if specimen.visible and specimen.fitted():
+			specimen_holes = maxi(specimen_holes, specimen.tissue().gone_count())
+	if ticks == 150:
+		main.hud.set_view(EvolutionHUD.VIEW_FIELD)
 	if ticks == 120:
 		main.get_node("Creature").params.tail_enabled = false  # exercise tail clipping
 	if ticks >= 240:
@@ -67,13 +84,17 @@ func _physics_process(_delta: float) -> bool:
 		var smell: SmellSense = (main.get_node("Creature/Senses") as CreatureSenses).smell
 		var sounds: Array[SoundField.SoundWave] = (main.get_node("SoundField") as SoundField).waves
 		var carrion: CarrionField = main.get_node("CarrionField")
-		print("render smoke OK — %d draws / %d ticks | speed %.0f px/s | travelled %.0f px | outline %d verts | feet moved: %s | gripped: %s | target integrity %.2f | %d scraps | %d parts | %d scent / %d marks"
+		print("render smoke OK — %d draws / %d ticks | speed %.0f px/s | travelled %.0f px | outline %d verts | feet moved: %s | gripped: %s | target integrity %.2f | %d scraps | %d parts | %d scent / %d marks | specimen holes %d"
 			% [draws, ticks, c.speed, c.head_pos.length(), c.body.outline.size(),
 				str(stepped), str(gripped), target.anatomy.tissue.integrity(),
 				main.get_node("ScrapField").scraps.size(), carrion.parts.size(),
-				(main.get_node("ScentField") as ScentField).traces.size(), smell.marks.size()])
+				(main.get_node("ScentField") as ScentField).traces.size(), smell.marks.size(),
+				specimen_holes])
 		if smell.marks.is_empty():
 			print("RENDER SMOKE FAIL — the smell layer drew nothing")
+			quit(1)
+		if specimen_holes <= 0:
+			print("RENDER SMOKE FAIL — the anatomy tab was never out over an opened body")
 			quit(1)
 		if carrion.parts.is_empty():
 			print("RENDER SMOKE FAIL — the carrion field had no part to draw")
@@ -83,6 +104,22 @@ func _physics_process(_delta: float) -> bool:
 			quit(1)
 		quit()
 	return false
+
+
+## Opens the anatomy tab on the chewed target, with the skin and fat lifted off
+## it. Peeled, because an intact specimen only ever draws the top of the depth
+## stack and the whole of what this view adds is the reading underneath.
+func _open_anatomy() -> void:
+	var hud: EvolutionHUD = main.hud
+	hud.set_view(EvolutionHUD.VIEW_ANATOMY)
+	var panel: AnatomyPanel = hud.anatomy
+	panel.select_specimen(1)  # the target: the one that has been eaten
+	panel.view.set_layer_shown(TissueGrid.SKIN, false)
+	panel.view.set_layer_shown(TissueGrid.FAT, false)
+	# One hover, so the readout and the selected-cell outline are drawn too.
+	var torso: TissueGrid.Patch = panel.creature().anatomy.tissue.patch(TissueGrid.BODY_KEY)
+	panel.view._settle(1.0)
+	panel.view._pick(panel.view.to_panel(torso.centre_of(torso.cells / 2)))
 
 
 ## Puts the player's jaws on the target and holds them there, so the debug

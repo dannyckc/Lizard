@@ -33,6 +33,7 @@ godot --path . --editor   # open the editor
 | `Shift` | sprint |
 | `F1` | show/hide the tuning panel |
 | `F2` | toggle debug draw |
+| `F3` | switch between the **Field** and **Anatomy** views |
 | `R` | reset |
 | mouse wheel | zoom |
 
@@ -824,6 +825,76 @@ changed, so an animal nobody has bitten never floods a network to be told its
 nerves are fine. What runs every tick is about a hundred float operations of
 supply and decline, because those move continuously while the body does not.
 
+#### Looking at it: the Anatomy tab
+
+`F3`, or the **Anatomy** tab beside **Field** at the top left, swaps the HUD's
+field furniture for a specimen drawer — `AnatomyPanel`, with `AnatomyView` on the
+slab. The whole of it is a *reading* of a creature; there is no anatomy model
+behind the panel.
+
+The specimen is the creature's own `TissueGrid`. Every quad on it is a cell,
+taken from the world-space corners the lattice re-derives each tick and put
+through one rigid transform — a rotation, a scale and an offset:
+
+```gdscript
+func to_panel(world: Vector2) -> Vector2:
+    return _origin + (world - _anchor).rotated(_rot) * _scale
+```
+
+That is the entire relationship between the drawer and the animal, and it is what
+makes the picture true rather than merely similar. The silhouette is that
+creature's silhouette because it is tessellated out of that creature's cells; the
+bend is the bend its spine is holding right now; a Gecko is small and quick and a
+Crocodile is broad and slab-sided without either being drawn; a flank chewed open
+is chewed open here; a leg that has come off is missing from both views because
+it is missing from the lattice they share. The rotation presents it snout-up by
+turning the mean direction of its own spine onto the page — re-orienting the
+animal without straightening it, so the pose survives the presentation.
+
+The colours are not a second palette either. `CreatureView.tissue_color` is the
+one static that decides what a depth stack looks like, and the specimen, the
+creature in the field and the meat on the ground all call it. What the drawer
+adds is a **mask**:
+
+```gdscript
+static func top_layer(hp: PackedFloat32Array, base: int, visible: int) -> int
+```
+
+Switching a layer off in the list lifts it off the specimen, and the colour that
+comes up underneath is whatever a bite that deep would have exposed — the same
+outside-in walk down the same stack, asked to skip what the viewer has peeled.
+Grain follows it: skin that has been lifted stops drawing its tension lines and
+the muscle beneath starts drawing its fibres, because both are answers to the
+same question about the same cell. Turn everything off and the body is still
+there in the faintest wash, so a specimen with no layer selected still reads as a
+body rather than as nothing.
+
+The rest is what the anatomy stack already computes, drawn where it happens:
+
+* **Vessels and nerves** are laid along the cells their conduits actually pass
+  through, in the inks the `F2` overlay uses. Width and alpha carry `delivery` —
+  what *arrives* — so a sound run still fades out behind a cut upstream of it,
+  and a run broken at a cell goes dashed from exactly the cell whose flesh was
+  taken. Blood travels in beats and nerve traffic in quick dashes, phase-shifted
+  by depth down the tree, so the two read as different systems rather than as two
+  colours of the same line.
+* **Heart and brain** are marked at the cells they occupy, on a leader clear of
+  the body, ringed by how much of the organ is left. An organ destroyed and taken
+  with the flesh around it is not marked at all, because there is nothing there
+  to mark.
+* **Holes** are drawn as the rim of the opening — an edge with surviving tissue on
+  the far side of it — and never filled. Outlining every destroyed cell would draw
+  the grid of the wound instead of its shape.
+* **Hovering a cell** reads out its region and its stack, layer by layer, listing
+  only the layers that cell was built with: `THORAX · SKN 100 FAT 62 MSC 41 BNE 100`.
+
+The four vitals under the layer list are the functional layer's own numbers —
+brain, heart, `BodyState.bleeding`, and how many of the eighteen conduit runs are
+cut off — and the header quotes `tissue.integrity()` against the words the body
+uses for itself, so a collapsed animal says *Collapsed* rather than a percentage.
+The chips at the bottom right pick which body is on the slab; the world names
+them, since which creature is whose is the world's business and not the HUD's.
+
 ### Teeth, and the mark they leave
 
 A bite is not a circle of damage. It is a set of teeth closing, and what those
@@ -1290,7 +1361,7 @@ godot --headless --path . --script tests/ControlsTest.gd # input/head-look isola
 godot --headless --path . --script tests/MovementFeelTest.gd # reverse/steering behaviour
 godot --headless --path . --script tests/SimTest.gd      # simulation invariants
 godot --headless --path . --script tests/RenderSmoke.gd  # every draw path
-godot --headless --path . --script tests/UIInteractionTest.gd # HUD interactions
+godot --headless --path . --script tests/UIInteractionTest.gd # HUD interactions, anatomy tab
 godot --headless --path . --script tests/SightTest.gd    # perception/reset/render order
 godot --headless --path . --script tests/SmellTest.gd    # scent persistence/trails/reads
 godot --headless --path . --script tests/HearingTest.gd  # arrival/occlusion/events/reset
@@ -1464,6 +1535,18 @@ report itself entirely nominal, with all four limbs unmodulated. It is what
 guarantees a healthy animal runs the same code it did before the anatomy existed —
 and it is what caught the diagonal-coupling gate, where a dead limb was being
 pulled into its partner's step and picking itself up on alternate beats.
+
+`UIInteractionTest` covers the anatomy tab as a *view of a creature* rather than
+as a widget, because the ways it can break are all ways of quietly stopping being
+one. That it opens on the body the world handed it; that the specimen is framed,
+snout-up, with every station of the animal on the page — the check that fails when
+a creature changes size; that peeling the skin reaches the layer under it, read
+through the same static the field draws with, so a panel that started inking its
+own body is caught; that pointing it at the other creature moves both the specimen
+and every readout; and that a body bitten open stops reading as intact. `RenderSmoke`
+then holds the tab open over a target that has been chewed to the bone and had a
+leg taken off, and fails if the specimen it drew had no holes in it — a clean run
+over an intact body would exercise none of the paths worth smoke-testing.
 
 `SimTest` drives each preset through idle → walk → turn → pivot → idle and
 asserts that segment lengths hold, bends stay inside the limit, IK bones keep
