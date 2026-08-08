@@ -57,7 +57,7 @@ input ──▶ head position ──▶ contacts ──▶ spine ──▶ body 
 | File | Responsibility |
 |---|---|
 | [MovementInput.gd](scripts/MovementInput.gd) | devices → an abstract `{throttle, turn, sprint}` command |
-| [Creature.gd](scripts/creature/Creature.gd) | motion integration and body-vs-body contacts; drives the four systems below in order |
+| [Creature.gd](scripts/creature/Creature.gd) | motion integration plus body and limb contact queries; drives the four systems below in order |
 | [Constraints.gd](scripts/creature/Constraints.gd) | the two projection primitives everything is built from |
 | [Spine.gd](scripts/creature/Spine.gd) | the particle chain and its relaxation solve |
 | [BodyShape.gd](scripts/creature/BodyShape.gd) | outline, head, eyes, limb sockets, tail — all derived from the spine |
@@ -131,23 +131,25 @@ the creature is working hardest.
 
 Creatures collide with each other, against the same chain of variable-radius
 capsules the view fills — so what you cannot walk through is exactly what is
-drawn. Limbs are excluded: legs here are kinematic, they neither carry weight
-nor receive it, and colliding them would only jam two creatures apart at arm's
-length while their bodies still read as clear.
+drawn. Body contacts translate the bodies themselves; limb contacts are handled
+inside the procedural IK and therefore bend or move the limb without holding two
+creatures apart at arm's length.
 
-Two decisions make it fit the one-way tick chain rather than fight it:
+Three decisions make it fit the one-way tick chain rather than fight it:
 
 - **Each creature resolves its own half of every contact and never writes to
-  another's state.** Both parties run the same pass, so a half each separates
-  them exactly once and the result cannot depend on the order the group is
-  ticked in. The bodies tested against are the ones solved last tick — a few
-  pixels of staleness at 60 Hz, and a positional correction is iterative anyway.
+  another's state.** Both parties run the same pass, so separation remains
+  symmetric without one creature reaching into another creature's simulation
+  state.
+- **The narrow phase compares capsule pairs, not spine points.** This catches a
+  narrow body crossing halfway along a long segment, where no endpoint lies
+  inside the other silhouette and a point-probe solver reports a false clear.
 - **Corrections are applied between the motion integration and the spine
   solve**, so the silhouette, the limbs and the tissue lattice are all built
-  from the corrected pose within the same tick instead of a tick behind it. A
-  push on the head moves `head_pos`; a push on a body point shifts `points` and
-  `prev` together, which keeps it pure displacement for exactly the Verlet
-  reason the undulation does the same.
+  from the corrected pose within the same tick instead of a tick behind it. The
+  complete creature is translated as one rigid correction, with every `point`
+  and `prev` shifted equally. Collision therefore cannot kink the spine and set
+  up a correction/constraint tug-of-war.
 
 Position alone is not enough, and the difference is not subtle. Corrected only
 positionally, a creature walking into another keeps walking: measured, it shoved
@@ -162,10 +164,19 @@ away and leave.
 ### Gait
 
 Purely reactive, no timeline. Each foot has an ideal position derived from the
-body's current pose; a planted foot stays nailed to the world until it drifts
+body’s current pose; a planted foot stays nailed to the world until it drifts
 further than `stride_distance` from that ideal, then arcs to a spot slightly
 *ahead* and re-plants. Step frequency therefore falls out of speed for free, and
 an idle creature is genuinely still.
+
+Each upper bone, lower bone and foot is also tested as a capsule against every
+other creature's tissue-aware body. A penetration shifts the foot target and
+the two-bone chain is solved again, repeatedly over a small bounded pass. This
+makes the knee fold and a planted foot slide around the obstacle while FABRIK
+continues to guarantee exact bone lengths. The correction is written back to
+the gait's world-space foot state, so it persists rather than snapping into the
+obstacle again next tick. Limbs remain kinematic—they react to a body but do not
+push that body—and a destroyed limb or a hole in the obstacle stops colliding.
 
 Diagonal pairs (front-left + rear-right, front-right + rear-left) share a beat,
 and a foot may never lift while the opposite diagonal is airborne — that is what
@@ -461,9 +472,11 @@ none of the last four.
 
 And it covers contacts: a creature driven at another for four seconds at full
 throttle ends up stopped against it rather than through it and with its speed
-collapsed; two creatures started deeply inside each other separate without
-either spine stretching; and a creature with nobody near it is not displaced at
-all. Each fails loudly if the contact pass is removed.
+collapsed; deep separation translates every spine particle rigidly; sparse
+capsules crossing between their endpoints are still detected and untangled; a
+foreleg placed through another torso bends clear without changing either bone's
+length; and a creature with nobody near it is not displaced at all. Each fails
+loudly if the contact pass is removed.
 
 `SimTest` drives each preset through idle → walk → turn → pivot → idle and
 asserts that segment lengths hold, bends stay inside the limit, IK bones keep

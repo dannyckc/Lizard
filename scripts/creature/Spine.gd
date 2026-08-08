@@ -144,6 +144,20 @@ func displace(i: int, offset: Vector2) -> void:
 	prev[i] += offset
 
 
+## Translates the complete chain without adding Verlet velocity.
+##
+## Contact resolution uses this instead of pushing individual particles. A
+## collision is an external change to the creature's world position, not a
+## force that should kink its spine; moving `points` and `prev` together keeps
+## both the solved shape and its existing momentum intact.
+func translate(offset: Vector2) -> void:
+	if offset == Vector2.ZERO:
+		return
+	for i in points.size():
+		points[i] += offset
+		prev[i] += offset
+
+
 ## Local forward/perpendicular basis at every spine point. The body shape and
 ## the limb anchors are built entirely out of these, which is what keeps the
 ## silhouette readable while the chain bends.

@@ -50,20 +50,19 @@ var size_scale: float = 1.0
 
 # --- collision --------------------------------------------------------------
 ## Fraction of a contact each creature resolves on its own. Both parties run the
-## same pass against each other, so a half each separates them exactly once —
-## and no creature ever writes to another's state, which is what keeps this
-## order-independent however many of them end up in one pile.
+## same pass against each other, so together they provide one full correction
+## without either creature writing into the other's simulation state.
 const CONTACT_SHARE: float = 0.5
-## Ceiling on how far one tick may push a single body point. A deep overlap —
+## Ceiling on how far one tick may translate a complete creature. A deep overlap —
 ## two creatures spawned inside each other, or a segment count change that
-## lengthens a body through its neighbour — then unwinds over several ticks
-## instead of catapulting the chain apart in one. It has to stay comfortably
-## above how far a creature travels in a tick (about 5 px at a sprint) or a
-## body walks into another faster than the correction pushes it out.
+## lengthens a body through its neighbour — then unwinds over a few ticks
+## instead of teleporting it. This is applied before CONTACT_SHARE, giving each
+## body at most six pixels of correction per pair and tick.
 const MAX_CONTACT_PUSH: float = 12.0
+const CONTACT_EPSILON: float = 0.0001
 
 ## Bounding circle around the whole body, refreshed with the pose. Only used to
-## reject creature pairs before the per-point contact walk.
+## reject creature pairs before the capsule-pair contact walk.
 var bounds_center: Vector2 = Vector2.ZERO
 var bounds_radius: float = 0.0
 
@@ -168,7 +167,8 @@ func _physics_process(delta: float) -> void:
 	var seg_len: float = params.segment_length * size_scale
 	spine.step(delta, head_pos + move_dir * lunge_offset, params, speed_norm, seg_len)
 	body.build(spine, params, size_scale)
-	gait.update(delta, body, move_dir, speed_norm, params, size_scale)
+	gait.update(delta, body, move_dir, speed_norm, params, size_scale,
+		Callable(self, "_limb_contact_push"))
 	anatomy.update(self)
 	_update_bounds()
 
@@ -264,19 +264,22 @@ func _integrate_motion(delta: float) -> void:
 ## Pushes this creature out of any other creature it is standing inside.
 ##
 ## Each creature resolves its own half of every contact and never touches
-## another's state, so the result does not depend on the order the group is
-## ticked in — the same reason the rest of the chain is strictly one-way. The
-## bodies tested against are the ones solved last tick; at 60 Hz that is a few
-## pixels of staleness, and a positional correction is iterative anyway, so it
-## costs nothing but buys back the whole ordering problem.
+## another's state. A contact translates the complete creature: pushing the
+## penetrated spine particles separately makes the distance/angle solver pull
+## them back on the very next line, creating a slow separation and feeding the
+## disagreement into the flexible body as exaggerated flailing.
 ##
-## Bodies collide, limbs do not. Legs here are kinematic — they neither carry
-## weight nor receive it — so colliding them would only jam two creatures apart
-## at arm's length while their bodies still read as clear of each other.
+## Detection compares every pair of variable-radius spine capsules rather than
+## probing only their endpoints. Endpoint probes miss a thin body crossing the
+## middle of a long segment, which is exactly how creatures can become deeply
+## interlocked before the old solver notices them.
+##
+## This pass is body-vs-body only. Limb contacts run later inside the gait solve:
+## they bend or slide the limb around the obstacle without pushing either body
+## apart at arm's length.
 func _resolve_contacts() -> void:
 	if spine == null or body == null or not is_inside_tree():
 		return
-	var last: int = mini(body.last_index, spine.size() - 1)
 	# The single deepest contact anywhere on the body, kept unclamped so the
 	# brake below can read how squarely it opposes travel.
 	var deepest: Vector2 = Vector2.ZERO
@@ -284,35 +287,224 @@ func _resolve_contacts() -> void:
 		var other := node as Creature
 		if other == null or other == self or other.body == null or other.spine == null:
 			continue
-		# Both bounds are a tick old, so right at the boundary this can reject a
-		# pair whose true overlap is a pixel or two. That contact is caught on
-		# the next tick, which is the whole tolerance a positional correction
-		# works to anyway.
-		if bounds_center.distance_to(other.bounds_center) > bounds_radius + other.bounds_radius:
+		# The body's bound is from its last solved pose, while the authoritative
+		# head has already integrated this tick. Inflate by that small sweep so a
+		# fast nose cannot cross the broad-phase boundary unnoticed.
+		var head_sweep: float = head_pos.distance_to(spine.points[0])
+		if bounds_center.distance_to(other.bounds_center) \
+				> bounds_radius + other.bounds_radius + head_sweep:
 			continue
-		for i in range(last + 1):
-			# Both halves of a contact have to know about both sets of holes.
-			# `push_out_of_body` narrows the body being walked into; this narrows
-			# the body doing the walking, so a creature eaten open at the waist
-			# can be closed over rather than held off at its old width.
-			var solid: float = _solid_at(i, last)
-			if solid <= 0.0:
-				continue
-			# Point 0 is the head, and the head is placed rather than simulated,
-			# so its contact has to move `head_pos` — the spine's copy of it is
-			# overwritten from there a few lines later.
-			var at: Vector2 = head_pos if i == 0 else spine.points[i]
-			var push: Vector2 = other.push_out_of_body(at, body.widths[i] * solid)
-			if push == Vector2.ZERO:
-				continue
-			if push.length_squared() > deepest.length_squared():
-				deepest = push
-			push = push.limit_length(MAX_CONTACT_PUSH) * CONTACT_SHARE
-			if i == 0:
-				head_pos += push
-			else:
-				spine.displace(i, push)
+		var push: Vector2 = _push_out_of_creature(other)
+		if push == Vector2.ZERO:
+			continue
+		if push.length_squared() > deepest.length_squared():
+			deepest = push
+		_translate_contact(push.limit_length(MAX_CONTACT_PUSH) * CONTACT_SHARE)
 	_brake_into(deepest)
+
+
+## Deepest capsule-pair penetration from `other` into this creature. The return
+## vector points in the direction this whole creature must move to get clear.
+func _push_out_of_creature(other: Creature) -> Vector2:
+	var self_last: int = mini(body.last_index, spine.size() - 1)
+	var other_last: int = mini(other.body.last_index, other.spine.size() - 1)
+	if self_last < 1 or other_last < 1:
+		return Vector2.ZERO
+
+	var deepest: float = 0.0
+	var out: Vector2 = Vector2.ZERO
+	for i in range(self_last):
+		var a0: Vector2 = head_pos if i == 0 else spine.points[i]
+		var a1: Vector2 = spine.points[i + 1]
+		for j in range(other_last):
+			var b0: Vector2 = other.spine.points[j]
+			var b1: Vector2 = other.spine.points[j + 1]
+			var uv: Vector2 = _closest_segment_parameters(a0, a1, b0, b1)
+			var axis_a: Vector2 = a0.lerp(a1, uv.x)
+			var axis_b: Vector2 = b0.lerp(b1, uv.y)
+			var delta: Vector2 = axis_a - axis_b
+			var distance: float = delta.length()
+			var normal: Vector2 = delta / distance if distance > CONTACT_EPSILON \
+				else _coincident_contact_normal(other, a0, a1, b0, b1)
+
+			# Each radius is narrowed on the side actually facing the contact, so
+			# a bitten-open flank remains a real opening in both halves of the test.
+			var self_side: float = (-normal).dot(spine.perps[i])
+			var other_side: float = normal.dot(other.spine.perps[j])
+			var self_solid: float = _contact_solid(i, uv.x, self_side, self_last)
+			var other_solid: float = other._contact_solid(j, uv.y, other_side, other_last)
+			if self_solid <= 0.0 or other_solid <= 0.0:
+				continue
+			var self_radius: float = lerpf(body.widths[i], body.widths[i + 1], uv.x) * self_solid
+			var other_radius: float = lerpf(
+				other.body.widths[j], other.body.widths[j + 1], uv.y) * other_solid
+			var overlap: float = self_radius + other_radius - distance
+			if overlap <= deepest:
+				continue
+			deepest = overlap
+			out = normal * overlap
+	return out
+
+
+## Translates the pose as one piece and cancels the same shift out of the gait's
+## socket-velocity history. Feet may remain planted and naturally take a step,
+## but collision correction must not masquerade as a huge burst of locomotion.
+func _translate_contact(offset: Vector2) -> void:
+	if offset == Vector2.ZERO:
+		return
+	head_pos += offset
+	spine.translate(offset)
+	bounds_center += offset
+	if gait != null:
+		for limb in gait.limbs:
+			if limb.socket_tracked:
+				limb.prev_anchor += offset
+
+
+## Tissue reach for one point along a contact capsule. The explicit head cap
+## owns the front half of the first interval; the remaining chain uses the
+## side-specific torso lattice.
+func _contact_solid(segment: int, u: float, side: float, last: int) -> float:
+	if segment == 0 and u <= 0.5:
+		return anatomy.tissue.head_solid()
+	var t: float = (float(segment) + u) / float(maxi(last, 1))
+	# At an end cap the contact direction can be parallel to the spine, with no
+	# meaningful flank sign. The circular cap reaches as far as its wider side.
+	if absf(side) <= CONTACT_EPSILON:
+		return maxf(anatomy.tissue.body_solid(t, -1.0),
+			anatomy.tissue.body_solid(t, 1.0))
+	return anatomy.tissue.body_solid(t, side)
+
+
+## Closest parameters on two finite line segments, returned as (u, v). This is
+## the narrow-phase axis query for the two capsules.
+static func _closest_segment_parameters(a0: Vector2, a1: Vector2,
+		b0: Vector2, b1: Vector2) -> Vector2:
+	var da: Vector2 = a1 - a0
+	var db: Vector2 = b1 - b0
+	var r: Vector2 = a0 - b0
+	var aa: float = da.dot(da)
+	var bb: float = db.dot(db)
+	var ab: float = da.dot(db)
+	var ar: float = da.dot(r)
+	var br: float = db.dot(r)
+	var u: float = 0.0
+	var v: float = 0.0
+
+	if aa <= CONTACT_EPSILON and bb <= CONTACT_EPSILON:
+		return Vector2.ZERO
+	if aa <= CONTACT_EPSILON:
+		return Vector2(0.0, clampf(br / bb, 0.0, 1.0))
+	if bb <= CONTACT_EPSILON:
+		return Vector2(clampf(-ar / aa, 0.0, 1.0), 0.0)
+
+	var denominator: float = aa * bb - ab * ab
+	if denominator > CONTACT_EPSILON:
+		u = clampf((ab * br - ar * bb) / denominator, 0.0, 1.0)
+	v = (ab * u + br) / bb
+	if v < 0.0:
+		v = 0.0
+		u = clampf(-ar / aa, 0.0, 1.0)
+	elif v > 1.0:
+		v = 1.0
+		u = clampf((ab - ar) / aa, 0.0, 1.0)
+	return Vector2(u, v)
+
+
+## Intersecting/collinear axes have no geometric separation direction. Pick a
+## stable normal from the lower-instance-id participant, then orient it away
+## from the other centre (or by id when the centres also coincide). Both sides
+## consequently choose exact opposites even when their headings are reversed.
+func _coincident_contact_normal(other: Creature, a0: Vector2, a1: Vector2,
+		b0: Vector2, b1: Vector2) -> Vector2:
+	var self_first: bool = get_instance_id() < other.get_instance_id()
+	var tangent: Vector2 = (a1 - a0) if self_first else (b1 - b0)
+	if tangent.length_squared() <= CONTACT_EPSILON:
+		tangent = Vector2.RIGHT
+	tangent = tangent.normalized()
+	var normal := Vector2(-tangent.y, tangent.x)
+	# Canonicalise an unoriented axis so reversed creature headings agree.
+	if normal.x < -CONTACT_EPSILON \
+			or (absf(normal.x) <= CONTACT_EPSILON and normal.y < 0.0):
+		normal = -normal
+	var centre_delta: Vector2 = bounds_center - other.bounds_center
+	var side: float = centre_delta.dot(normal)
+	if absf(side) > CONTACT_EPSILON:
+		return normal * signf(side)
+	return normal if self_first else -normal
+
+
+## Collision callback consumed by Gait while it solves a limb. Limbs only react
+## to other creatures' bodies: their own torso is already excluded by the gait's
+## anatomical swing envelope, and limb-vs-limb contacts would make four light,
+## kinematic chains snag one another without a useful notion of mass.
+func _limb_contact_push(limb_key: String, limb_segment: int,
+		a: Vector2, b: Vector2, radius: float) -> Vector2:
+	if not is_inside_tree() or radius <= 0.0:
+		return Vector2.ZERO
+	var solid: float = anatomy.tissue.limb_solid(limb_key, limb_segment)
+	if solid <= 0.0:
+		return Vector2.ZERO
+	var collision_radius: float = radius * solid
+	var midpoint: Vector2 = (a + b) * 0.5
+	var capsule_bound: float = a.distance_to(b) * 0.5 + collision_radius
+	var deepest: Vector2 = Vector2.ZERO
+	for node in get_tree().get_nodes_in_group("creatures"):
+		var other := node as Creature
+		if other == null or other == self or other.body == null or other.spine == null:
+			continue
+		if midpoint.distance_to(other.bounds_center) \
+				> capsule_bound + other.bounds_radius:
+			continue
+		var push: Vector2 = other.push_capsule_out_of_body(
+			a, b, collision_radius, bounds_center - other.bounds_center)
+		if push.length_squared() > deepest.length_squared():
+			deepest = push
+	return deepest
+
+
+## Pushes an arbitrary capsule out of this creature's tissue-aware body. Used
+## for limb bones and feet, including the mid-segment crossings that a point
+## query cannot see. `preferred` resolves the otherwise ambiguous direction
+## when the two capsule axes intersect exactly.
+func push_capsule_out_of_body(a: Vector2, b: Vector2, radius: float,
+		preferred: Vector2 = Vector2.ZERO) -> Vector2:
+	if body == null or spine == null or radius <= 0.0:
+		return Vector2.ZERO
+	var last: int = mini(body.last_index, spine.size() - 1)
+	var deepest: float = 0.0
+	var out: Vector2 = Vector2.ZERO
+	for i in range(last):
+		var body_a: Vector2 = spine.points[i]
+		var body_b: Vector2 = spine.points[i + 1]
+		var uv: Vector2 = _closest_segment_parameters(a, b, body_a, body_b)
+		var limb_axis: Vector2 = a.lerp(b, uv.x)
+		var body_axis: Vector2 = body_a.lerp(body_b, uv.y)
+		var delta: Vector2 = limb_axis - body_axis
+		var distance: float = delta.length()
+		var normal: Vector2
+		if distance > CONTACT_EPSILON:
+			normal = delta / distance
+		else:
+			# Prefer the side containing the limb root/owning creature. Projecting
+			# onto the body's normal chooses the shortest route out rather than
+			# sliding an intersecting bone all the way along the torso.
+			var body_normal: Vector2 = spine.perps[i]
+			var root_side: float = (a - body_axis).dot(body_normal)
+			if absf(root_side) <= CONTACT_EPSILON:
+				root_side = preferred.dot(body_normal)
+			normal = body_normal * (-1.0 if root_side < 0.0 else 1.0)
+		var side: float = normal.dot(spine.perps[i])
+		var solid: float = _contact_solid(i, uv.y, side, last)
+		if solid <= 0.0:
+			continue
+		var body_radius: float = lerpf(body.widths[i], body.widths[i + 1], uv.y) * solid
+		var overlap: float = radius + body_radius - distance
+		if overlap <= deepest:
+			continue
+		deepest = overlap
+		out = normal * overlap
+	return out
 
 
 ## How much tissue is still standing around one spine point, as a fraction of
@@ -350,7 +542,6 @@ func _brake_into(push: Vector2) -> void:
 
 ## The displacement that would just lift a circle of `radius` at `at` clear of
 ## this creature's body, or ZERO if it is already clear.
-##
 ## Tested against the same chain of variable-radius capsules the view fills, so
 ## creatures collide with exactly the silhouette that is drawn. Only the deepest
 ## overlap is returned: consecutive capsules share their end caps, so summing

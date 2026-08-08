@@ -18,6 +18,12 @@
 class_name Gait
 extends RefCounted
 
+## A few target/IK passes are enough for a two-bone chain to route around a
+## smooth body capsule. Corrections are capped so a deeply spawned overlap
+## unfolds over adjacent frames rather than making a foot teleport.
+const LIMB_CONTACT_ITERATIONS: int = 6
+const LIMB_CONTACT_SLOP: float = 0.35
+
 var limbs: Array[Limb] = []
 
 
@@ -34,7 +40,8 @@ func setup() -> void:
 
 
 func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
-		p: CreatureParams, scale: float) -> void:
+		p: CreatureParams, scale: float,
+		collision_query: Callable = Callable()) -> void:
 	if body.anchors.is_empty():
 		return
 
@@ -161,7 +168,7 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 
 	# --- 4. solve the limbs -------------------------------------------------
 	for limb in limbs:
-		_solve_limb(limb, body, p, swing)
+		_solve_limb(limb, body, p, swing, scale, collision_query)
 
 
 func _start_step(limb: Limb, body: BodyShape, p: CreatureParams, swing: float) -> void:
@@ -200,14 +207,78 @@ func _landing_spot(limb: Limb, flight: float) -> Vector2:
 		+ limb.travel * (limb.stride * 0.45 * limb.pace)
 
 
-func _solve_limb(limb: Limb, body: BodyShape, p: CreatureParams, swing: float) -> void:
+func _solve_limb(limb: Limb, body: BodyShape, p: CreatureParams, swing: float,
+		scale: float, collision_query: Callable) -> void:
 	var a: Spine.Frame = body.anchors[limb.key]
-	var root: Vector2 = a.pos
 	# Solve to the *lifted* position, not the ground one, so the leg folds up
 	# and clears during a step instead of dragging along the floor. The lift is
 	# a raw screen-space offset, so it can push an already-extended target out of
 	# range; clamping here means the fake height can never straighten the leg.
 	var target: Vector2 = limb.clamp_to_envelope(a, limb.visual, p.limb_max_reach, swing)
+	_solve_limb_to(limb, a, target, p)
+
+	if collision_query.is_valid():
+		var upper_radius: float = maxf(limb.total_length * 0.16, 2.5 * scale) * 0.5
+		var lower_radius: float = upper_radius * 0.72
+		var foot_radius: float = maxf(limb.total_length * 0.10, 3.0 * scale)
+		var contact_applied: bool = false
+		for _iteration in LIMB_CONTACT_ITERATIONS:
+			var upper_push: Vector2 = collision_query.call(
+				limb.key, 0, limb.joints[0], limb.joints[1], upper_radius)
+			var lower_push: Vector2 = collision_query.call(
+				limb.key, 1, limb.joints[1], limb.joints[2], lower_radius)
+			var foot_push: Vector2 = collision_query.call(
+				limb.key, 2, limb.joints[2], limb.joints[2], foot_radius)
+
+			# Moving the target bends both bones through the ordinary IK solve.
+			# The upper bone has only about half the foot's leverage, so amplify
+			# its correction; lower-bone and foot contacts track more directly.
+			var correction: Vector2 = foot_push
+			if lower_push.length_squared() * 1.3 * 1.3 > correction.length_squared():
+				correction = lower_push * 1.3
+			if upper_push.length_squared() * 2.0 * 2.0 > correction.length_squared():
+				correction = upper_push * 2.0
+			if correction.length_squared() <= LIMB_CONTACT_SLOP * LIMB_CONTACT_SLOP:
+				break
+
+			var max_correction: float = maxf(limb.total_length * 0.22, 4.0 * scale)
+			var next_target: Vector2 = limb.clamp_to_envelope(
+				a, target + correction.limit_length(max_correction), p.limb_max_reach, swing)
+			if next_target.distance_squared_to(target) <= 0.000001:
+				# The direct route can point outside the limb's reach fan. In that
+				# case walk along the obstacle instead, keeping the choice of side
+				# stable by preferring the limb's anatomical outward direction.
+				var route: Vector2 = Vector2(-correction.y, correction.x).normalized()
+				if route.dot(limb.rest_dir) < 0.0:
+					route = -route
+				next_target = limb.clamp_to_envelope(
+					a, target + route * max_correction, p.limb_max_reach, swing)
+				if next_target.distance_squared_to(target) <= 0.000001:
+					next_target = limb.clamp_to_envelope(
+						a, target - route * max_correction, p.limb_max_reach, swing)
+				if next_target.distance_squared_to(target) <= 0.000001:
+					break
+			target = next_target
+			contact_applied = true
+			_solve_limb_to(limb, a, target, p)
+
+		# Keep the gait's world-space foot state aligned with the collision-safe
+		# solve. A planted foot slides around the obstacle; an airborne one keeps
+		# its lift and is re-routed again as its procedural arc advances.
+		if contact_applied:
+			limb.visual = limb.joints[2]
+			limb.ground = limb.visual + Vector2(0.0, limb.lift)
+			if not limb.stepping:
+				limb.planted = limb.ground
+				limb.visual = limb.planted
+
+
+## Seeds the anatomical bend and runs the existing fixed-length IK solve for a
+## target. Contact avoidance only changes that target; it never compromises bone
+## length or invents a second animation system.
+func _solve_limb_to(limb: Limb, a: Spine.Frame, target: Vector2,
+		p: CreatureParams) -> void:
+	var root: Vector2 = a.pos
 
 	# Place the knee before solving. FABRIK stays on whichever side of the
 	# root->target axis it starts on, so the seed is what decides which way the

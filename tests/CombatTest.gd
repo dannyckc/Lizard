@@ -1,5 +1,5 @@
 ## Focused first-slice test for mouse aim, anatomy queries, the layered tissue
-## lattice, body-vs-body contacts and the one-click/one-bite cooldown contract.
+## lattice, procedural body/limb contacts and the one-click/one-bite cooldown contract.
 ##
 ##   /Applications/Godot.app/Contents/MacOS/Godot --headless \
 ##       --path . --script tests/CombatTest.gd
@@ -395,6 +395,8 @@ func _check_contacts(player: Creature, target: Creature) -> void:
 		"a creature pressed against another kept its walking speed (%.0f px/s)" % player.speed)
 	_check(_deepest_overlap(player, target) < 1.0,
 		"a creature driven at another came to rest inside it")
+	_check(player._push_out_of_creature(target).length() < 1.0,
+		"capsule contacts found a resting overlap that point probes missed")
 
 	# Laid down alongside each other, deeply interpenetrating: the worst case for
 	# a chain solve, since the correction has to survive the constraint pass that
@@ -404,6 +406,29 @@ func _check_contacts(player: Creature, target: Creature) -> void:
 	var overlap_before: float = _deepest_overlap(player, target)
 	_check(overlap_before > 10.0,
 		"the contact case did not start overlapping (%.1f px) — it proves nothing" % overlap_before)
+
+	# A contact correction is a change in the creature's world position, not a
+	# deformation. Every current and previous particle must receive exactly the
+	# same shift or the constraint solver will turn separation into body flailing.
+	var points_before: PackedVector2Array = player.spine.points.duplicate()
+	var prev_before: PackedVector2Array = player.spine.prev.duplicate()
+	var head_before: Vector2 = player.head_pos
+	player._resolve_contacts()
+	var rigid_shift: Vector2 = player.head_pos - head_before
+	_check(rigid_shift.length() > 0.1, "deep contact produced no correction")
+	var nonrigid_error: float = 0.0
+	for i in player.spine.size():
+		nonrigid_error = maxf(nonrigid_error,
+			(player.spine.points[i] - points_before[i] - rigid_shift).length())
+		nonrigid_error = maxf(nonrigid_error,
+			(player.spine.prev[i] - prev_before[i] - rigid_shift).length())
+	_check(nonrigid_error < 0.001,
+		"contact bent the spine while separating it (%.3f px non-rigid shift)" % nonrigid_error)
+
+	# Reset because the direct pass above intentionally stopped between the
+	# contact phase and the normal spine/body rebuild.
+	player.reset(Vector2.ZERO, 0.0)
+	target.reset(Vector2(-70.0, 5.0), 0.0)
 
 	for _i in 180:
 		player._physics_process(TICK)
@@ -425,6 +450,73 @@ func _check_contacts(player: Creature, target: Creature) -> void:
 	_check(player.head_pos.is_equal_approx(undisturbed),
 		"a creature with nobody near it was displaced by the contact pass")
 
+	# Put another creature's snout directly through a lower foreleg while the
+	# two torsos remain clear. The procedural gait must route the chain around
+	# that body, retain exact bone lengths, and persist the displaced plant
+	# instead of drawing the same penetrating pose again on every tick.
+	player.reset(Vector2.ZERO, 0.0)
+	var contact_limb: Limb = player.gait.limbs[0]
+	var obstacle_at: Vector2 = contact_limb.joints[1].lerp(contact_limb.joints[2], 0.55)
+	var relative_knee_before: Vector2 = contact_limb.joints[1] - contact_limb.joints[0]
+	target.reset(obstacle_at, -PI * 0.5)
+	var torso_overlap: float = player._push_out_of_creature(target).length()
+	var limb_overlap_before: float = _limb_body_overlap(player, contact_limb, target)
+	_check(torso_overlap < 1.0,
+		"limb collision case also overlapped the torsos (%.2f px)" % torso_overlap)
+	_check(limb_overlap_before > 8.0,
+		"limb collision case did not start deeply intersecting (%.2f px)" % limb_overlap_before)
+
+	for _i in 12:
+		player._physics_process(TICK)
+	var limb_overlap_after: float = _limb_body_overlap(player, contact_limb, target)
+	var relative_knee_after: Vector2 = contact_limb.joints[1] - contact_limb.joints[0]
+	_check(limb_overlap_after < 1.0,
+		"procedural limb stayed inside the other body (%.2f px)" % limb_overlap_after)
+	_check(relative_knee_after.distance_to(relative_knee_before) > 2.0,
+		"colliding limb did not change its bend around the obstacle")
+	for bone in 2:
+		var actual: float = contact_limb.joints[bone].distance_to(contact_limb.joints[bone + 1])
+		_check(absf(actual - contact_limb.lengths[bone]) < 0.05,
+			"limb collision changed bone %d length by %.2f px" \
+				% [bone, absf(actual - contact_limb.lengths[bone])])
+
+	# Sparse, narrow chains crossing halfway along two long segments. None of
+	# their spine points is inside the other body, so the former point-probe
+	# solver saw no collision at all even though the drawn capsules intersected.
+	var saved_player := CreatureParams.new()
+	var saved_target := CreatureParams.new()
+	saved_player.copy_from(player.params)
+	saved_target.copy_from(target.params)
+	for p: CreatureParams in [player.params, target.params]:
+		p.segment_count = 6
+		p.segment_length = 40.0
+		p.body_wave = 0.0
+		p.head_width = 1.0
+		p.chest_width = 1.0
+		p.waist_width = 1.0
+		p.hip_width = 1.0
+		p.tail_tip_width = 1.0
+	player.reset(Vector2.ZERO, 0.0)
+	target.reset(Vector2(-20.0, 20.0), PI * 0.5)
+	var endpoint_overlap: float = maxf(
+		_deepest_overlap(player, target), _deepest_overlap(target, player))
+	var capsule_overlap: float = player._push_out_of_creature(target).length()
+	_check(endpoint_overlap < 0.001,
+		"mid-segment regression accidentally touched an endpoint (%.2f px)" % endpoint_overlap)
+	_check(capsule_overlap > 1.5,
+		"crossing capsule axes were missed (%.2f px overlap reported)" % capsule_overlap)
+
+	for _i in 30:
+		player._physics_process(TICK)
+		target._physics_process(TICK)
+	_check(player._push_out_of_creature(target).length() < 0.1,
+		"crossing mid-segments remained interlocked after contact resolution")
+
+	player.params.copy_from(saved_player)
+	target.params.copy_from(saved_target)
+	player.reset(Vector2.ZERO, 0.0)
+	target.reset(Vector2(900.0, 0.0), 0.0)
+
 
 ## Deepest interpenetration of `a`'s body into `b`'s, in pixels.
 func _deepest_overlap(a: Creature, b: Creature) -> float:
@@ -441,6 +533,21 @@ func _worst_segment_error(creature: Creature) -> float:
 	for i in range(1, creature.spine.size()):
 		var d: float = creature.spine.points[i - 1].distance_to(creature.spine.points[i])
 		worst = maxf(worst, absf(d - seg_len) / seg_len)
+	return worst
+
+
+## Deepest overlap of either bone or the foot with `obstacle`'s body.
+func _limb_body_overlap(owner: Creature, limb: Limb, obstacle: Creature) -> float:
+	var upper_radius: float = maxf(limb.total_length * 0.16, 2.5 * owner.size_scale) * 0.5
+	var radii: Array[float] = [upper_radius, upper_radius * 0.72]
+	var preferred: Vector2 = owner.bounds_center - obstacle.bounds_center
+	var worst: float = 0.0
+	for segment in 2:
+		worst = maxf(worst, obstacle.push_capsule_out_of_body(
+			limb.joints[segment], limb.joints[segment + 1], radii[segment], preferred).length())
+	var foot_radius: float = maxf(limb.total_length * 0.10, 3.0 * owner.size_scale)
+	worst = maxf(worst, obstacle.push_capsule_out_of_body(
+		limb.joints[2], limb.joints[2], foot_radius, preferred).length())
 	return worst
 
 
@@ -462,7 +569,7 @@ func _check(condition: bool, message: String) -> void:
 
 func _finish() -> void:
 	if failures.is_empty():
-		print("combat slice OK — target, anatomy, layered tissue, lunge, aim, cooldown and body contacts")
+		print("combat slice OK — target, anatomy, tissue, lunge, cooldown, body and limb contacts")
 		quit(0)
 	else:
 		for failure in failures:
