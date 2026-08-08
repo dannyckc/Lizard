@@ -2,14 +2,21 @@
 ##
 ## Per physics tick:
 ##   1. integrate the head's position/heading from the movement command;
-##   2. drag the spine after it (constraint solve);
-##   3. rebuild the body shape from the solved spine;
-##   4. run the gait, which reads the new body and solves the limb IK.
+##   2. correct that position against other bodies — pushed out of the ones it is
+##      inside, pulled back onto anything its jaws have hold of;
+##   3. drag the spine after it (constraint solve);
+##   4. rebuild the body shape from the solved spine;
+##   5. run the gait, which reads the new body and solves the limb IK.
 ##
-## The dependency chain is strictly one-way — input -> head -> spine -> body ->
-## limbs — which is why the whole thing is stable without any global solver.
-## All state is in world space and this node stays at the origin, so the view
-## can draw the raw coordinates.
+## The dependency chain is strictly one-way — input -> head -> contacts -> spine
+## -> body -> limbs — which is why the whole thing is stable without any global
+## solver. All state is in world space and this node stays at the origin, so the
+## view can draw the raw coordinates.
+##
+## Step 2 is the only place two creatures affect each other, and both halves of
+## it work the same way: each creature measures the error itself, corrects its
+## own share of it, and never writes into the other's state. The share is its
+## mass — see `_contact_share` — which is the whole of what weight does here.
 class_name Creature
 extends Node2D
 
@@ -30,6 +37,11 @@ var spine: Spine
 var body: BodyShape
 var gait: Gait
 var anatomy: AnatomyState = AnatomyState.new()
+## Mass, strength and bite force, read off the solved body and the lattice each
+## tick. Not settings — see Physique. Refreshed at the end of the tick with the
+## rest of the derived state, so the contact and grip passes read the physique of
+## the pose they are correcting, exactly as they already read its bounds.
+var physique: Physique = Physique.new()
 
 # --- motion state -----------------------------------------------------------
 var head_pos: Vector2 = Vector2.ZERO
@@ -58,15 +70,24 @@ var food_eaten: int = 0
 var size_scale: float = 1.0
 
 # --- collision --------------------------------------------------------------
-## Fraction of a contact each creature resolves on its own. Both parties run the
-## same pass against each other, so together they provide one full correction
-## without either creature writing into the other's simulation state.
+## Fraction of a contact each creature resolves on its own when the two weigh the
+## same. Both parties run the same pass against each other, so together they
+## provide one full correction without either creature writing into the other's
+## simulation state. Mass then splits that correction unevenly — see
+## `_contact_share` — but the two halves still sum to exactly one.
 const CONTACT_SHARE: float = 0.5
+## Floor and ceiling on a mass-weighted share. An extreme ratio would otherwise
+## leave the heavy party contributing nothing at all to a separation, so a pair
+## spawned inside each other could stay interlocked; and the light party would be
+## teleported by the whole of it.
+const MIN_CONTACT_SHARE: float = 0.08
 ## Ceiling on how far one tick may translate a complete creature. A deep overlap —
 ## two creatures spawned inside each other, or a segment count change that
 ## lengthens a body through its neighbour — then unwinds over a few ticks
-## instead of teleporting it. This is applied before CONTACT_SHARE, giving each
-## body at most six pixels of correction per pair and tick.
+## instead of teleporting it. Applied before the mass share, so the lighter body
+## of a badly mismatched pair takes at most eleven pixels of it per tick and an
+## evenly matched one six. The grip's tether is capped by the same number, for
+## the same reason: neither correction may become a jump.
 const MAX_CONTACT_PUSH: float = 12.0
 const CONTACT_EPSILON: float = 0.0001
 
@@ -88,13 +109,58 @@ const LUNGE_TOTAL: float = LUNGE_WINDUP + LUNGE_STRIKE + LUNGE_RECOVER
 ## How far the head rocks back during the wind-up, as a fraction of the throw.
 const LUNGE_SETBACK: float = -0.22
 
+# --- grip -------------------------------------------------------------------
+## Play in the jaws, in pixels. The tether takes up nothing inside this, which is
+## what stops the biter's own spine settling under a clamped head from quietly
+## towing it into its victim, and what keeps a fresh grip from fighting the
+## contact pass that is holding the two bodies apart at the same point.
+const GRIP_SLACK: float = 3.0
+## Separation speed, in px/s, at which one unit of purchase puts one unit of
+## force on the jaws. This is what `jaw_power` is measured against.
+const GRIP_LOAD_REFERENCE: float = 150.0
+## How quickly measured load follows the instantaneous pull. A grip has to be
+## broken by a sustained heave rather than by one coarse tick.
+const GRIP_LOAD_RESPONSE: float = 6.0
+## What one unit of towed mass costs the hauler, against its own strength.
+const HAUL_COST: float = 1.0
+## However overmatched, a creature can still shuffle. Zero here would be a
+## creature frozen by a grip, which is the static hold this replaced.
+const HAUL_FLOOR: float = 0.05
+## How much sooner the jaws come round again per unit of strain.
+const CHEW_STRAIN_RATE: float = 1.6
+## How much of the jaws' penetration is spent holding on, per unit of strain.
+const CHEW_STRAIN_COST: float = 0.75
+## Floor under that, so jaws at the edge of losing their grip still do damage.
+const CHEW_MIN_DEPTH: float = 0.30
+## How much wider than the footprint it crushes a set of jaws can find a new hold
+## in. `bite_radius` is the volume a bite destroys; the gape is the span the jaws
+## can close on, and it has to be the larger of the two or a bite that eats a
+## clean hole would then be unable to reach the flesh around the hole it made.
+const GRIP_GAPE: float = 1.75
+## Resolution of the search for somewhere new to hold. Only ever runs on the tick
+## a mouthful comes away, so it is priced like the bite it follows rather than
+## like anything per-frame.
+const REGRIP_STATIONS: int = 32
+const REGRIP_LATERALS: Array[float] = [0.0, 0.5, -0.5, 0.9, -0.9]
+
 var bite_cooldown_remaining: float = 0.0
 var bite_connected: bool = false
 ## True from a world-space left-button press until its matching release. A
 ## connected strike that reaches its hit frame during that interval clamps at
-## full extension; holding a miss never creates a latch.
+## full extension and takes hold of what it bit; holding a miss never creates a
+## latch.
 var bite_held: bool = false
 var bite_latched: bool = false
+## The jaws' hold on another creature, or null. Owned and written only here; the
+## victim finds it by looking, so neither party touches the other's state.
+var grip: Grip = null
+## The grip currently holding *this* creature, refreshed once at the top of the
+## tick so the three consumers below do not each walk the creature group.
+var _held_by: Grip = null
+## Set when a grip ends by itself — torn off, or the flesh under it eaten away.
+## Cleared on button release, so jaws that lost their hold cannot silently take
+## it again while the button is still down.
+var _grip_lockout: bool = false
 ## Seconds into the current strike, or -1 while not striking.
 var bite_time: float = -1.0
 ## How far ahead of its resting position the lunge is currently holding the
@@ -132,6 +198,7 @@ func rebuild() -> void:
 	# Existing damage is kept — it lives in body space precisely so a structural
 	# rebuild cannot wash it off — but its world geometry is now stale.
 	anatomy.update(self)
+	physique.update(body, spine, anatomy.tissue, params)
 	_update_bounds()
 
 
@@ -154,6 +221,19 @@ func reset(at: Vector2 = Vector2.ZERO, facing: float = 0.0) -> void:
 	lunge_offset = 0.0
 	_bite_requested = false
 	_impact_done = false
+	_grip_lockout = false
+	grip = null
+	_held_by = null
+	# Reset is an authority from outside the simulation, not a move inside it, so
+	# it is the one place a creature reaches into another's state: a body teleported
+	# back to its spawn is no longer the body anybody had hold of, and leaving the
+	# tether attached would yank the biter across the world after it.
+	if is_inside_tree():
+		for node in get_tree().get_nodes_in_group("creatures"):
+			var other := node as Creature
+			if other != null and other != self and other.grip != null and other.grip.victim == self:
+				other.grip = null
+				other.bite_latched = false
 	rebuild()
 
 
@@ -164,6 +244,8 @@ func _physics_process(delta: float) -> void:
 	# live each tick, so tuning sliders take effect immediately.
 	if spine == null or spine.size() != params.segment_count:
 		rebuild()
+
+	_held_by = _find_grip_on_self()
 
 	if _bite_requested:
 		_bite_requested = false
@@ -179,6 +261,11 @@ func _physics_process(delta: float) -> void:
 	# the silhouette, the limbs and the tissue lattice are all built from the
 	# corrected pose within this same tick rather than a tick behind it.
 	_resolve_contacts()
+	# Immediately after, because the two are the same kind of correction pointing
+	# opposite ways: contacts push bodies out of each other, a grip pulls jaws back
+	# onto flesh. Running them in one phase lets a pair that is both held and
+	# overlapping settle within a tick instead of alternating.
+	_resolve_grip()
 
 	# The lunge is fed to the spine rather than to `head_pos`, which stays the
 	# creature's honest position: the throw has to be something the body follows
@@ -195,6 +282,7 @@ func _physics_process(delta: float) -> void:
 	gait.update(delta, body, move_dir, speed_norm, params, size_scale,
 		Callable(self, "_limb_contact_push"))
 	anatomy.update(self)
+	physique.update(body, spine, anatomy.tissue, params)
 	_update_bounds()
 
 	# Resolve at full extension, once the pose above is the lunged one, so the
@@ -208,6 +296,11 @@ func _physics_process(delta: float) -> void:
 	if bite_time >= LUNGE_TOTAL:
 		bite_time = -1.0
 		lunge_offset = 0.0
+
+	# Last, because everything it does is a consequence of the pose that has just
+	# been solved: what the jaws are now pulling against, whether they can still
+	# hold it, and whether they have come round to close again.
+	_advance_grip(delta)
 
 
 ## Advances the strike clock and resolves it to a forward displacement.
@@ -223,8 +316,9 @@ func _advance_lunge(delta: float) -> void:
 		return
 	# A held bite clamps only after the synchronous world resolver confirmed that
 	# the jaws connected. Keeping the clock on the hit frame holds the visible
-	# head at full extension without applying another hit or restarting cooldown.
-	if bite_latched and bite_held:
+	# head at full extension without restarting the cooldown; what the jaws then
+	# do to the flesh in them is the grip's business, not the animation's.
+	if is_bite_latched():
 		bite_time = LUNGE_WINDUP + LUNGE_STRIKE
 		lunge_offset = params.bite_reach * size_scale * 0.85
 		return
@@ -258,21 +352,26 @@ func is_lunging() -> bool:
 ## Smooth, anatomically bounded cursor look. Only this derived head direction
 ## reads `aim_world`; body heading and motion remain exclusively command-driven.
 func _update_head_look(delta: float) -> void:
-	# Once the jaws connect, holding the button holds the pose too. Cursor motion
-	# cannot sweep a latched bite across the target or silently retarget it.
-	if is_bite_latched():
-		return
 	# The solved neck is the truthful centre of the head's range. It can lag the
 	# logical movement heading during a turn, and clamping against `heading`
 	# instead would let the first joint exceed the spine's bend invariant.
 	var neck_angle: float = spine.forwards[1].angle() if spine != null and spine.size() > 2 else heading
 	var max_look: float = minf(HEAD_LOOK_MAX_ANGLE, deg_to_rad(params.max_bend_deg))
 	var desired: float = neck_angle
-	if command.aim_active:
+	# A latched head is aimed by what it is holding, not by the cursor. The pose
+	# is not frozen — the two bodies move relative to each other while the grip
+	# lasts — so the head has to keep tracking the flesh in its jaws or the
+	# drawn head would drift off the place the tether is anchored to.
+	var aim_active: bool = command.aim_active
+	var aim_world: Vector2 = command.aim_world
+	if is_bite_latched() and grip != null and grip.is_alive():
+		aim_active = true
+		aim_world = grip.anchor()
+	if aim_active:
 		var look_origin: Vector2 = head_pos
 		if spine != null and spine.size() > 1:
 			look_origin = spine.points[1]
-		var to_aim: Vector2 = command.aim_world - look_origin
+		var to_aim: Vector2 = aim_world - look_origin
 		if to_aim.length_squared() > HEAD_LOOK_DEADZONE_SQ:
 			var local: float = clampf(
 				wrapf(to_aim.angle() - neck_angle, -PI, PI),
@@ -294,14 +393,12 @@ func _update_head_look(delta: float) -> void:
 
 func _integrate_motion(delta: float) -> void:
 	var p: CreatureParams = params
-	if is_bite_latched():
-		# A latch is a brace, not another movement mode. Stopping the authoritative
-		# anchor keeps the full-extension jaw pose planted until button release.
-		speed = 0.0
-		ang_vel = 0.0
-		speed_norm = 0.0
-		move_dir = Vector2.RIGHT.rotated(heading)
-		return
+	# A grip is a load on whichever end of it this creature is, and the only thing
+	# it changes about locomotion is how much of it survives that load. Turning is
+	# deliberately left alone, for the same reason a body contact never touches
+	# heading: however overmatched a creature is, thrashing has to remain
+	# available — and thrashing is exactly what loads a set of jaws.
+	var haul: float = _haul_factor()
 
 	# Turn rate falls off with speed so the arc stays wider than the body. At a
 	# standstill the full rate is available, which is what lets the creature
@@ -324,9 +421,10 @@ func _integrate_motion(delta: float) -> void:
 
 	# Forward speed: accelerate toward the commanded speed, coast down faster
 	# than we spin up so releasing the key feels responsive.
-	var top_speed: float = p.move_speed * size_scale * (p.sprint_multiplier if command.sprint else 1.0)
+	var top_speed: float = p.move_speed * size_scale \
+		* (p.sprint_multiplier if command.sprint else 1.0) * haul
 	var desired_speed: float = command.throttle * top_speed
-	var rate: float = p.acceleration * size_scale
+	var rate: float = p.acceleration * size_scale * haul
 	if absf(desired_speed) < absf(speed):
 		rate *= 1.6
 	speed = move_toward(speed, desired_speed, rate * delta)
@@ -358,11 +456,25 @@ func _resolve_contacts() -> void:
 	if spine == null or body == null or not is_inside_tree():
 		return
 	# The single deepest contact anywhere on the body, kept unclamped so the
-	# brake below can read how squarely it opposes travel.
+	# brake below can read how squarely it opposes travel, along with the share of
+	# it this creature's mass makes it responsible for.
 	var deepest: Vector2 = Vector2.ZERO
+	var deepest_share: float = CONTACT_SHARE
 	for node in get_tree().get_nodes_in_group("creatures"):
 		var other := node as Creature
 		if other == null or other == self or other.body == null or other.spine == null:
+			continue
+		# Two creatures joined at the jaws are governed by the tether, not by
+		# separation. A grip holds the biter's mouth *on* — meaning inside —
+		# flesh the contact pass would spend every tick pushing it back out of,
+		# and the two constraints act on the same pair at the same point in
+		# opposite directions: the pair buzzes, and the stretch the grip's load is
+		# measured from runs away with it. So while a hold is in force this pair
+		# has exactly one rule between them, and it is the one the jaws impose.
+		# Both parties reach the same conclusion from the same grip, so neither
+		# collides with the other while the other does not. Everything else in the
+		# world still collides with both, and the limbs still route around both.
+		if _is_joined_to(other):
 			continue
 		# The body's bound is from its last solved pose, while the authoritative
 		# head has already integrated this tick. Inflate by that small sweep so a
@@ -374,10 +486,33 @@ func _resolve_contacts() -> void:
 		var push: Vector2 = _push_out_of_creature(other)
 		if push == Vector2.ZERO:
 			continue
+		var share: float = _contact_share(other)
 		if push.length_squared() > deepest.length_squared():
 			deepest = push
-		_translate_contact(push.limit_length(MAX_CONTACT_PUSH) * CONTACT_SHARE)
-	_brake_into(deepest)
+			deepest_share = share
+		_translate_contact(push.limit_length(MAX_CONTACT_PUSH) * share)
+	_brake_into(deepest, deepest_share)
+
+
+## How much of a contact with `other` this creature does the moving for.
+##
+## Mass, and nothing else. The share is the *other* body's fraction of the pair's
+## total, so a light creature does nearly all of the moving and a heavy one barely
+## notices. Both parties compute it from the same two numbers, so the two shares
+## sum to exactly one and the separation is still complete without either creature
+## writing into the other's state. Equal masses give 0.5 each — the constant this
+## replaced — so two creatures of the same build behave exactly as they did.
+##
+## This is the whole of what weight does to a contact. There is still no shove
+## force and no momentum transfer: what changed is only *who yields*, which is
+## what the pass was already deciding and previously always split down the middle.
+func _contact_share(other: Creature) -> float:
+	if other == null or other.physique == null:
+		return CONTACT_SHARE
+	var total: float = physique.mass + other.physique.mass
+	if total <= 0.0:
+		return CONTACT_SHARE
+	return clampf(other.physique.mass / total, MIN_CONTACT_SHARE, 1.0 - MIN_CONTACT_SHARE)
 
 
 ## Deepest capsule-pair penetration from `other` into this creature. The return
@@ -607,14 +742,20 @@ func _solid_at(i: int, last: int) -> float:
 ## another creature reading as solid and reading as sticky.
 ##
 ## Heading is deliberately untouched, so a creature pressed against another can
-## always turn away and walk off. Nothing here has mass, so contact is symmetric
-## and neither party can push the other.
-func _brake_into(push: Vector2) -> void:
+## always turn away and walk off.
+##
+## `share` is the fraction of the contact this creature's mass made it responsible
+## for, and scaling the brake by it is what gives weight a consequence in motion
+## rather than only in position. A heavy creature walking into a light one is
+## barely slowed by it and pushes it along ahead of itself; a light one walking
+## into a heavy one stops as dead as it always did. At equal masses this is half
+## the old rate, which still collapses the speed within a few ticks.
+func _brake_into(push: Vector2, share: float) -> void:
 	if push == Vector2.ZERO or is_zero_approx(speed):
 		return
 	var into: float = -(move_dir * speed).normalized().dot(push.normalized())
 	if into > 0.0:
-		speed = move_toward(speed, 0.0, absf(speed) * into)
+		speed = move_toward(speed, 0.0, absf(speed) * into * clampf(share, 0.0, 1.0))
 
 
 ## The displacement that would just lift a circle of `radius` at `at` clear of
@@ -677,6 +818,90 @@ func _update_bounds() -> void:
 	bounds_radius = lo.distance_to(hi) * 0.5
 
 
+# ------------------------------------------------------------ body space ----
+# A grip has to survive the pose being rebuilt from scratch every tick, and a
+# structural rebuild on top of that, so it is stored the same way tissue damage
+# is: in body space. These three convert between that and the world.
+
+## World position of a point bound into this creature's body space. `bind` is
+## (spine_t, lateral), lateral running -1..1 across the local half-width.
+##
+## Read off the live spine rather than the cached BodyShape frame, so it stays
+## truthful inside the contact phase — where the creature may already have been
+## translated this tick but the silhouette has not yet been rebuilt around it.
+func body_point(bind: Vector2) -> Vector2:
+	if spine == null or body == null or body.widths.is_empty():
+		return head_pos
+	var frame: Spine.Frame = spine.sample(clampf(bind.x, 0.0, 1.0))
+	return frame.pos + frame.perp * (bind.y * _width_at(bind.x))
+
+
+## The inverse: the body-space coordinates of a world point, clamped onto the
+## silhouette so jaws closing just outside a flank still bind to the flesh rather
+## than to the air beside it.
+func body_bind(at: Vector2) -> Vector2:
+	if spine == null or body == null or spine.size() < 2:
+		return Vector2.ZERO
+	var last: int = maxi(mini(body.last_index, spine.size() - 1), 1)
+	var span: float = float(maxi(spine.size() - 1, 1))
+	var best := Vector2.ZERO
+	var best_distance: float = INF
+	for i in range(last):
+		var a: Vector2 = spine.points[i]
+		var b: Vector2 = spine.points[i + 1]
+		var u: float = AnatomyState.segment_u(at, a, b)
+		var axis: Vector2 = a.lerp(b, u)
+		var d: float = at.distance_squared_to(axis)
+		if d >= best_distance:
+			continue
+		best_distance = d
+		var half: float = lerpf(body.widths[i], body.widths[i + 1], u)
+		best = Vector2((float(i) + u) / span,
+			clampf((at - axis).dot(spine.perps[i]) / maxf(half, 0.001), -1.0, 1.0))
+	return best
+
+
+## How much tissue is still standing where a bind sits, 0 if it has been eaten
+## clean through. The lattice indexes the torso over the *clipped* spine while a
+## bind runs over the whole chain, so the conversion lives here rather than being
+## left loose in two coordinate systems at the call sites.
+func bind_solid(bind: Vector2) -> float:
+	if spine == null or body == null:
+		return 0.0
+	var span: float = float(maxi(spine.size() - 1, 1))
+	# The same split the contact query uses: the explicit head cap owns the front
+	# half of the first interval and the torso lattice owns everything behind it.
+	# Without it a hold on the snout is judged by the first *torso* column, which
+	# is a different piece of the creature entirely.
+	if bind.x * span < 0.5:
+		return anatomy.tissue.head_solid()
+	var last: float = float(maxi(mini(body.last_index, spine.size() - 1), 1))
+	return anatomy.tissue.body_solid(clampf(bind.x * span / last, 0.0, 1.0), bind.y)
+
+
+func _width_at(t: float) -> float:
+	var n: int = body.widths.size()
+	if n < 2:
+		return body.widths[0] if n == 1 else 1.0
+	var s: float = clampf(t, 0.0, 1.0) * float(n - 1)
+	var i: int = clampi(int(floor(s)), 0, n - 2)
+	return lerpf(body.widths[i], body.widths[i + 1], s - float(i))
+
+
+## The centre of the jaw volume, in world space — where a bite is tested from and
+## where a grip holds from.
+##
+## Built from the live spine rather than the cached head frame for the same
+## reason `body_point` is: a contact or a grip may already have translated the
+## creature this tick, and jaws a translation behind the body would drag their
+## own hold along with them.
+func jaw_point() -> Vector2:
+	if spine == null or body == null or body.widths.is_empty():
+		return head_pos
+	return spine.points[0] \
+		+ spine.forwards[0] * (body.widths[0] + params.bite_radius * size_scale * 0.35)
+
+
 ## Head-first collision test used by the food field.
 func mouth_radius() -> float:
 	return (body.head_radius if body != null else 10.0) + 6.0
@@ -713,10 +938,228 @@ func set_bite_held(held: bool) -> void:
 	bite_held = held
 	if not held:
 		bite_latched = false
+		grip = null
+		_grip_lockout = false
 
 
 func is_bite_latched() -> bool:
-	return bite_latched and bite_held
+	return bite_latched and bite_held and grip != null
+
+
+## Whether something else has hold of this creature. Refreshed once per tick, so
+## a reader outside the simulation sees the same answer the tick did.
+func is_being_gripped() -> bool:
+	return _held_by != null and _held_by.is_alive()
+
+
+# ------------------------------------------------------------------ grip ----
+
+## Takes up this creature's own share of the slack in whatever jaws are involved
+## with it — its own, or somebody else's closed on it.
+##
+## Deliberately the same shape as the contact pass beside it: measure the current
+## error, translate the complete creature by the fraction of it this body's mass
+## makes it responsible for, and never write anything to the other party. Both
+## sides run this against the same grip, so between them the slack is taken up
+## once. A tether that only pulls and a contact that only pushes then coexist at
+## almost the same point instead of oscillating against each other.
+##
+## Dragging is not implemented anywhere. It is what this does when the masses are
+## uneven: the light body gets nearly the whole correction and is towed along
+## behind jaws that barely move.
+func _resolve_grip() -> void:
+	if spine == null or body == null:
+		return
+	if grip != null:
+		if not grip.is_alive():
+			_release_grip()
+		else:
+			# Measured before either party moves, and only by the owner, so the load
+			# the jaws are carrying is one number from one source rather than two
+			# halves of a correction added up out of order.
+			grip.tension = grip.slack().length()
+			_take_up_slack(grip, grip.victim, 1.0)
+	if _held_by != null and _held_by.is_alive():
+		_take_up_slack(_held_by, _held_by.biter, -1.0)
+
+
+## Whether a set of jaws — either creature's — currently joins this pair.
+func _is_joined_to(other: Creature) -> bool:
+	if grip != null and grip.victim == other:
+		return true
+	return _held_by != null and _held_by.biter == other
+
+
+## `direction` is +1 for the biter, whose jaws move onto the flesh, and -1 for the
+## victim, whose flesh is pulled back into the jaws.
+func _take_up_slack(held: Grip, other: Creature, direction: float) -> void:
+	var slack: Vector2 = held.slack()
+	if slack == Vector2.ZERO:
+		return
+	_translate_contact(
+		slack.limit_length(MAX_CONTACT_PUSH) * _contact_share(other) * direction)
+
+
+## The consequences of the hold, resolved against the pose that has just been
+## solved: what the jaws are carrying, whether they can still carry it, and
+## whether they have come round to close again.
+func _advance_grip(delta: float) -> void:
+	if grip == null:
+		return
+	if not grip.is_alive() or not bite_held:
+		_release_grip()
+		return
+
+	# Load, in the same currency as bite force. Two terms, and only two.
+	#
+	# Reduced mass is what a tether between two free bodies actually has to
+	# restrain. It is dominated by the *lighter* of the pair, which is why holding
+	# something small is easy however hard it fights, why being the small one and
+	# holding something large is where jaws come off, and why a real contest only
+	# happens between near-equals. Its root rather than itself, because the jaws
+	# get a proportionally bigger hold of a bigger body at the same time as the
+	# body becomes harder to hold: purchase grows with the flesh in them.
+	#
+	# Separation speed is how fast the two are actually coming apart — measured,
+	# not intended, so a creature towed along quietly loads the jaws with nothing
+	# and one thrashing on the spot loads them with everything. This is why a
+	# grip is escaped by turning: heading is the one thing a load never slows.
+	var mine: float = physique.mass
+	var theirs: float = grip.victim.physique.mass
+	var purchase: float = sqrt(mine * theirs / maxf(mine + theirs, 0.0001))
+	var separation_speed: float = grip.tension / maxf(delta, 0.0001)
+	var instant: float = purchase * separation_speed / GRIP_LOAD_REFERENCE
+	grip.load = lerpf(grip.load, instant, 1.0 - exp(-GRIP_LOAD_RESPONSE * delta))
+
+	# The mouthful the jaws were holding has come away. They take hold of the
+	# surface it left behind rather than opening, and only let go when there is
+	# nothing within them to hold at all.
+	if grip.bind_is_hollow() and not _regrip():
+		_release_grip(true)
+		return
+
+	if grip.load > physique.bite_force:
+		_tear_free()
+		return
+
+	# One clock, both halves of what holding on does to a body. The harder the two
+	# pull against each other the sooner the jaws come round again *and* the less
+	# of their force is left over to drive deep — so a victim that has stopped
+	# struggling is chewed through in a few deep bites, and one that keeps
+	# thrashing saws itself open on the same set of jaws. Neither is a rule of its
+	# own; both are `strain` read twice.
+	grip.chew_timer -= delta * (1.0 + grip.strain() * CHEW_STRAIN_RATE)
+	if grip.chew_timer <= 0.0:
+		grip.chew_timer = maxf(params.chew_interval, 0.05)
+		# Through the ordinary world resolver, so a chew sheds meat, picks its
+		# target and reports a miss exactly the way the opening bite does.
+		bite_started.emit(jaw_point(), params.bite_radius * size_scale)
+
+
+## How deep one closing of these jaws drives, in the tissue lattice's hit points.
+##
+## Full `bite_damage` for a free strike, which is what every bite in the game was
+## until now. A latched one spends part of its force simply staying shut, so what
+## is left to cut with falls away as the load rises.
+func bite_depth() -> float:
+	var strain: float = grip.strain() if grip != null and grip.is_alive() else 0.0
+	return params.bite_damage \
+		* clampf(1.0 - strain * CHEW_STRAIN_COST, CHEW_MIN_DEPTH, 1.0)
+
+
+## Re-seats jaws whose mouthful has come away, on the surviving flesh inside
+## them. Returns false when there is none, which is the one way chewing ends by
+## succeeding.
+##
+## Without this a strong bite would *lose* its grip faster than a weak one: the
+## better it chews, the sooner the cell it was bound to is gone. Re-seating is
+## what turns a latch into chewing in — the wound deepens under jaws that stay
+## shut, rather than the hold ending the moment it works. It is routed through
+## the same anatomy query the world bites with, so what the jaws can find hold of
+## is exactly what they could find to bite.
+func _regrip() -> bool:
+	if grip == null or not grip.is_alive():
+		return false
+	var jaw: Vector2 = jaw_point()
+	var reach: float = params.bite_radius * size_scale * GRIP_GAPE
+	var victim: Creature = grip.victim
+	var best := Vector2.ZERO
+	var best_distance: float = INF
+	for k in REGRIP_STATIONS + 1:
+		var t: float = float(k) / float(REGRIP_STATIONS)
+		for lateral in REGRIP_LATERALS:
+			var candidate := Vector2(t, lateral)
+			if victim.bind_solid(candidate) <= 0.0:
+				continue
+			var d: float = jaw.distance_to(victim.body_point(candidate))
+			if d < best_distance:
+				best_distance = d
+				best = candidate
+	if best_distance > reach:
+		return false
+	grip.bind = best
+	grip.rest_length = best_distance + GRIP_SLACK
+	return true
+
+
+## Jaws pulled off the flesh they were holding. They do not simply open — they
+## take a mouthful with them, resolved through the same world path as any other
+## bite so a tear sheds meat and opens tissue like one.
+func _tear_free() -> void:
+	var at: Vector2 = grip.anchor()
+	_release_grip(true)
+	bite_started.emit(at, params.bite_radius * size_scale)
+
+
+## `lost` marks a grip that ended by itself rather than by the button coming up.
+## Jaws that were pulled off cannot silently take hold again while the button is
+## still down: a bite is one press, and that has to stay true of the hold as well
+## as of the strike.
+func _release_grip(lost: bool = false) -> void:
+	grip = null
+	bite_latched = false
+	_grip_lockout = lost
+
+
+## The grip somebody else has on this creature, or null. Walks the creature group
+## the same way the contact pass does, because the alternative — the biter
+## registering itself on its victim — is precisely the cross-creature write the
+## whole tick order is built to avoid.
+func _find_grip_on_self() -> Grip:
+	if not is_inside_tree():
+		return null
+	for node in get_tree().get_nodes_in_group("creatures"):
+		var other := node as Creature
+		if other == null or other == self or other.grip == null:
+			continue
+		if other.grip.victim == self and other.grip.is_alive():
+			return other.grip
+	return null
+
+
+## How much of its own locomotion this creature keeps with something on the other
+## end of a set of jaws — its own jaws, or the ones holding it.
+##
+## Force over load, in the currency the physique already works in: a creature can
+## pull with `strength`, and a grip adds the whole of another body to what that
+## strength has to move. Because strength goes as mass^(2/3) while the load goes
+## as mass, this is the square-cube law arriving exactly where it matters — a
+## Komodo tows a Gecko without noticing, a Gecko latched onto a Komodo can barely
+## walk, and neither case needed a rule written for it.
+##
+## `speed_norm` is deliberately still measured against the *unhauled* top speed,
+## so a creature straining against a load takes short shuffling strides and its
+## undulation dies down. Effort reads off the gait for free.
+func _haul_factor() -> float:
+	var towed: float = 0.0
+	if grip != null and grip.is_alive():
+		towed += grip.victim.physique.mass
+	if _held_by != null and _held_by.is_alive():
+		towed += _held_by.biter.physique.mass
+	if towed <= 0.0:
+		return 1.0
+	return clampf(physique.strength / (physique.strength + towed * HAUL_COST),
+		HAUL_FLOOR, 1.0)
 
 
 ## Pure query used by the world combat resolver so only the closest creature is
@@ -739,10 +1182,49 @@ func apply_bite(center: Vector2, radius: float, depth: float) -> float:
 
 
 ## Called by the world after it has selected and damaged (or failed to find) a
-## target, so the strike knows whether it connected.
-func resolve_bite(connected: bool) -> void:
+## target, so the jaws know what they closed on.
+##
+## Also where a hold begins and ends, because a hold is exactly "the jaws found
+## flesh and the button is still down". A chew routes through here too: the grip
+## already knows its victim, so what the resolver adds is the one thing it cannot
+## know for itself — whether there was still anything there to bite.
+func resolve_bite(connected: bool, target: Creature = null, hit: AnatomyState.Hit = null) -> void:
 	bite_connected = connected
-	bite_latched = connected and bite_held
+	if grip != null:
+		# A chew that closes on nothing is a chew that closes on nothing. It does
+		# not end the hold: what the jaws have hold of is the bind, and the three
+		# things that can end that are the flesh under it being gone with nothing
+		# left to re-seat on, the load pulling them off, and the button coming up.
+		return
+	if not (connected and bite_held) or target == null or _grip_lockout:
+		bite_latched = false
+		return
+	_form_grip(target, hit)
+
+
+## Closes the jaws on a specific creature and records where.
+##
+## The bind comes off the hit's own surface point when there is one, because the
+## hit test is the world's answer to *what did these jaws close on* — it already
+## knows which structure was reached and has already discounted tissue that is no
+## longer there. The jaw centre is only the fallback.
+func _form_grip(target: Creature, hit: AnatomyState.Hit) -> void:
+	if target == null or target.spine == null or target.body == null:
+		return
+	var jaw: Vector2 = jaw_point()
+	var held := Grip.new()
+	held.biter = self
+	held.victim = target
+	held.bind = target.body_bind(hit.world_point if hit != null else jaw)
+	# Rest length is the gap the jaws actually closed at, plus their own play. A
+	# fresh grip is therefore already satisfied and pulls nothing: it exists to
+	# take up slack that appears *after* it, which is what stops it wrestling the
+	# contact pass holding the two bodies apart at that same point, and what keeps
+	# a biter's own spine settling under a clamped head from towing it forward.
+	held.rest_length = jaw.distance_to(target.body_point(held.bind)) + GRIP_SLACK
+	held.chew_timer = maxf(params.chew_interval, 0.05)
+	grip = held
+	bite_latched = true
 
 
 ## The hit frame. Announces the jaw volume at full extension and lets the world
@@ -753,6 +1235,4 @@ func _strike() -> void:
 	# The body is head-driven, so the truthful jaw direction is the solved head
 	# frame; allowing the click vector to bypass it would make the creature bite
 	# sideways before its visible head has reached the cursor.
-	var radius: float = params.bite_radius * size_scale
-	var center: Vector2 = body.head.pos + body.head.fwd * (body.head_radius + radius * 0.35)
-	bite_started.emit(center, radius)
+	bite_started.emit(jaw_point(), params.bite_radius * size_scale)

@@ -30,11 +30,14 @@ func _ready() -> void:
 	camera.make_current()
 	camera.zoom = Vector2(DEFAULT_ZOOM, DEFAULT_ZOOM)
 	camera.global_position = creature.head_pos
-	creature.bite_started.connect(_on_creature_bite_started)
-	# Any creature can be bitten, so any creature can shed. Children are ready
-	# before their parent, so the group is already populated here.
+	# Any creature can be bitten, so any creature can bite and any creature can
+	# shed. Children are ready before their parent, so the group is already
+	# populated here. The biter is bound rather than assumed, because a latched
+	# bite now emits again every time its jaws come round to chew.
 	for node in get_tree().get_nodes_in_group("creatures"):
-		(node as Creature).tissue_shed.connect(_on_tissue_shed.bind(node))
+		var each := node as Creature
+		each.bite_started.connect(_on_creature_bite_started.bind(each))
+		each.tissue_shed.connect(_on_tissue_shed.bind(node))
 	food_field.refresh(creature.head_pos)
 	_build_ui()
 
@@ -136,6 +139,12 @@ func _update_hud() -> void:
 		state = "running"
 	if creature.is_lunging():
 		state = "biting"
+	# A hold outranks the lunge that started it: once the jaws are on something,
+	# what the creature is doing is holding on, not striking.
+	if creature.is_bite_latched():
+		state = "gripping"
+	elif creature.is_being_gripped():
+		state = "held"
 
 	hud.update_metrics(
 		state,
@@ -143,7 +152,8 @@ func _update_hud() -> void:
 		stepping,
 		creature.food_eaten,
 		creature.anatomy.tissue.integrity(),
-		creature.spine.size()
+		creature.spine.size(),
+		creature.physique.mass
 	)
 
 
@@ -200,20 +210,26 @@ func _on_species_selected(_preset_name: String) -> void:
 	creature.rebuild()
 
 
-## Resolves one bite, fired at the apex of the biter's lunge.
+## Resolves one closing of a set of jaws: the apex of a lunge, a chew from jaws
+## already latched, or the mouthful a grip takes with it when it is torn off.
 ##
 ## The hit test picks a single victim — the body overlapped most deeply — and
 ## only then does the bite erode that creature's tissue, by position, across
 ## whatever structures of it the jaws actually cover. Owned by the world rather
 ## than by either participant so creature update order cannot turn one strike
-## into several hits as more creatures are introduced.
-func _on_creature_bite_started(center: Vector2, radius: float) -> void:
+## into several hits as more creatures are introduced, and so all three cases go
+## down exactly one path.
+##
+## Depth is asked of the biter rather than read off its params: a set of jaws
+## already holding something spends part of its force staying shut, and only what
+## is left over cuts.
+func _on_creature_bite_started(center: Vector2, radius: float, biter: Creature) -> void:
 	bite_cue.show_at(center)
 	var best_target: Creature = null
 	var best_hit: AnatomyState.Hit = null
 	for node in get_tree().get_nodes_in_group("creatures"):
 		var candidate := node as Creature
-		if candidate == null or candidate == creature:
+		if candidate == null or candidate == biter:
 			continue
 		var hit: AnatomyState.Hit = candidate.query_bite(center, radius)
 		if hit != null and (best_hit == null or hit.score < best_hit.score):
@@ -222,10 +238,9 @@ func _on_creature_bite_started(center: Vector2, radius: float) -> void:
 
 	var connected: bool = false
 	if best_target != null:
-		var removed: float = best_target.apply_bite(
-			center, radius, creature.params.bite_damage)
+		var removed: float = best_target.apply_bite(center, radius, biter.bite_depth())
 		connected = removed > 0.0
-	creature.resolve_bite(connected)
+	biter.resolve_bite(connected, best_target if connected else null, best_hit)
 
 
 func _on_tissue_shed(chunks: Array, origin: Vector2, source: Creature) -> void:

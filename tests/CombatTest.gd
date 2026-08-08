@@ -76,8 +76,241 @@ func _run_checks() -> void:
 
 	_check_contacts(player, target)
 
+	_check_physique(player, target)
+	_check_grip(player, target)
+
 	main.queue_free()
 	_finish()
+
+
+## Mass, strength and bite force are read off the creature rather than set on it,
+## so what has to hold is that they track the thing they are read from: the drawn
+## silhouette, the head, and how much tissue is left.
+func _check_physique(player: Creature, target: Creature) -> void:
+	var lizard: float = _physique_of(player, "Lizard").mass
+	var gecko: float = _physique_of(player, "Gecko").mass
+	var komodo: Physique = _physique_of(player, "Komodo")
+	var crocodile: Physique = _physique_of(player, "Crocodile")
+	_check(gecko < lizard and lizard < komodo.mass and komodo.mass < crocodile.mass,
+		"mass did not follow build (gecko %.2f, lizard %.2f, komodo %.2f, croc %.2f)"
+			% [gecko, lizard, komodo.mass, crocodile.mass])
+	_check(komodo.mass > lizard * 3.0,
+		"a Komodo came out only %.1fx a Lizard — the silhouette is not reaching mass"
+			% (komodo.mass / lizard))
+
+	# Square-cube: the big one is stronger outright and weaker per unit of mass.
+	# Without that a large creature would simply be a small one times a constant
+	# and nothing about scale would matter.
+	_check(crocodile.strength > komodo.strength,
+		"the heavier creature was not the stronger one")
+	_check(crocodile.strength / crocodile.mass < komodo.strength / komodo.mass,
+		"strength scaled with mass rather than with cross-section")
+	_check(crocodile.bite_force > komodo.bite_force * 3.0,
+		"a Crocodile's jaws (%.1f) were not in a different league from a Komodo's (%.1f)"
+			% [crocodile.bite_force, komodo.bite_force])
+
+	# Widening the body has to be enough on its own, or mass is really a slider
+	# that happens to be spelled differently.
+	player.params.apply_preset("Lizard")
+	player.reset(Vector2.ZERO, 0.0)
+	player._physics_process(TICK)
+	var narrow: float = player.physique.mass
+	player.params.chest_width *= 2.0
+	player.params.waist_width *= 2.0
+	player._physics_process(TICK)
+	_check(player.physique.mass > narrow * 1.5,
+		"doubling the torso's width barely changed its mass (%.2f -> %.2f)"
+			% [narrow, player.physique.mass])
+
+	# ...and damage has to take it back off again, along with the strength and the
+	# bite force derived from it. A creature eaten hollow is not the creature that
+	# walked in.
+	player.params.apply_preset("Lizard")
+	player.reset(Vector2.ZERO, 0.0)
+	player._physics_process(TICK)
+	var whole: Physique = Physique.new()
+	whole.update(player.body, player.spine, player.anatomy.tissue, player.params)
+	var scraps: Array = []
+	for i in 12:
+		var station: int = clampi(2 + i, 2, player.body.last_index - 1)
+		for _repeat in 8:
+			player.anatomy.tissue.bite(player.spine.points[station], 12.0, 3.0, scraps)
+	player._physics_process(TICK)
+	_check(player.physique.mass < whole.mass * 0.9,
+		"chewing a creature open did not make it lighter (%.2f -> %.2f)"
+			% [whole.mass, player.physique.mass])
+	_check(player.physique.strength < whole.strength,
+		"a half-eaten creature was as strong as an intact one")
+	player.params.apply_preset("Lizard")
+	player.reset(Vector2.ZERO, 0.0)
+	target.reset(Vector2(900.0, 0.0), 0.0)
+
+
+## Weight decides who yields. Both parties still resolve one full contact between
+## them; what mass changes is how that one correction is divided, which is the
+## whole of the difference between shoving and being shoved.
+func _check_weight(player: Creature, target: Creature) -> void:
+	# Equal builds must behave exactly as they did before mass existed: half each.
+	player.params.apply_preset("Lizard")
+	target.params.apply_preset("Lizard")
+	player.reset(Vector2.ZERO, 0.0)
+	target.reset(Vector2(900.0, 0.0), 0.0)
+	player._physics_process(TICK)
+	target._physics_process(TICK)
+	_check(absf(player._contact_share(target) - 0.5) < 0.02,
+		"two identical creatures no longer split a contact down the middle (%.3f)"
+			% player._contact_share(target))
+
+	var light_gain: float = _shove(player, target, "Gecko", "Crocodile")
+	var heavy_gain: float = _shove(player, target, "Crocodile", "Gecko")
+	_check(heavy_gain > light_gain * 3.0,
+		"weight bought nothing in a shove: a Crocodile moved a Gecko %.0f px and a Gecko moved a Crocodile %.0f px"
+			% [heavy_gain, light_gain])
+	_check(light_gain < 40.0,
+		"a Gecko walked a Crocodile %.0f px across the world" % light_gain)
+	_check(heavy_gain > 60.0,
+		"a Crocodile leaning on a Gecko only moved it %.0f px — nothing is being shoved at all"
+			% heavy_gain)
+
+	player.params.apply_preset("Lizard")
+	target.params.apply_preset("Lizard")
+	player.reset(Vector2.ZERO, 0.0)
+	target.reset(Vector2(900.0, 0.0), 0.0)
+
+
+## How far a creature of `pusher_name` shoves a stationary one of `pushee_name`
+## by walking into it for two seconds.
+func _shove(pusher: Creature, pushee: Creature, pusher_name: String, pushee_name: String) -> float:
+	pusher.params.apply_preset(pusher_name)
+	pushee.params.apply_preset(pushee_name)
+	pusher.reset(Vector2.ZERO, 0.0)
+	pushee.reset(Vector2(150.0, 0.0), PI)
+	var start: Vector2 = pushee.head_pos
+	var drive := MovementInput.Command.new()
+	drive.throttle = 1.0
+	for _i in 240:
+		pusher.command = drive
+		pusher._physics_process(TICK)
+		pushee._physics_process(TICK)
+	return start.distance_to(pushee.head_pos)
+
+
+## The grip: a latch that can be dragged with, struggled against, chewed through
+## and torn off, with which of those happens decided by the three physical
+## quantities and nothing else.
+func _check_grip(player: Creature, target: Creature) -> void:
+	_check_weight(player, target)
+
+	# A heavy set of jaws on light prey: it goes where the biter goes.
+	var towed: float = _hold(player, target, "Crocodile", "Gecko", "drag", 3.0)
+	_check(player.grip != null,
+		"a Crocodile lost its hold on a Gecko it was simply walking away with")
+	_check(towed > 100.0,
+		"prey held in a Crocodile's jaws was towed only %.0f px in three seconds" % towed)
+	_check(target.anatomy.tissue.integrity() < 0.95,
+		"three seconds in a Crocodile's jaws left the victim unchewed")
+	# Chewing has to keep going after it has eaten through what it first took
+	# hold of, or a strong bite would lose its grip faster than a weak one.
+	var chewed_through: bool = false
+	for key in [TissueGrid.BODY_KEY]:
+		var patch: TissueGrid.Patch = target.anatomy.tissue.patch(key)
+		chewed_through = chewed_through or patch.gone_count > 0
+	_check(chewed_through and player.grip != null,
+		"jaws that ate clean through their mouthful did not take hold of the next")
+
+	# The same jaws, with the victim thrashing: unshakeable.
+	_hold(player, target, "Crocodile", "Gecko", "thrash", 3.0)
+	_check(player.grip != null,
+		"a thrashing Gecko shook a Crocodile off jaws worth %.1f"
+			% player.physique.bite_force)
+
+	# Reverse the pair and the same rules produce the opposite outcome.
+	_hold(player, target, "Gecko", "Crocodile", "drag", 2.0)
+	_check(target.head_pos.distance_to(Vector2(60.0, 0.0)) < 60.0,
+		"a Gecko dragged a Crocodile %.0f px" % target.head_pos.distance_to(Vector2(60.0, 0.0)))
+	_check(absf(player.speed) < player.params.move_speed * 0.5,
+		"a Gecko hauling a Crocodile kept %.0f px/s of its own top speed" % player.speed)
+
+	# ...and light jaws on something that will not be held come off it.
+	_hold(player, target, "Gecko", "Crocodile", "thrash", 3.0)
+	_check(player.grip == null,
+		"a Gecko held a thrashing Crocodile with jaws it could never close on it")
+	_check(not player.is_bite_latched(),
+		"a torn-off grip still reported itself as latched")
+	_check(player.bite_held,
+		"tearing free let go of the button as well as of the victim")
+	_check(target.anatomy.tissue.integrity() < 1.0,
+		"jaws pulled off a victim came away clean")
+
+	# Depth is what is left of the jaws' force after holding on, so the same bite
+	# cuts deeper into something that has stopped fighting.
+	_hold(player, target, "Crocodile", "Komodo", "thrash", 1.5)
+	var strained: float = player.bite_depth()
+	_check(player.grip != null, "the strained-chew case lost its grip before measuring")
+	if player.grip != null:
+		_check(player.grip.load > 0.0, "a thrashing victim put no load on the jaws at all")
+		_check(strained < player.params.bite_damage,
+			"jaws holding a struggling victim bit as deep as free ones (%.2f of %.2f)"
+				% [strained, player.params.bite_damage])
+	player.set_bite_held(false)
+	player._physics_process(TICK)
+	_check(is_equal_approx(player.bite_depth(), player.params.bite_damage),
+		"a free bite did not go in at its full configured depth")
+
+	player.params.apply_preset("Lizard")
+	target.params.apply_preset("Lizard")
+	player.reset(Vector2.ZERO, 0.0)
+	target.reset(Vector2(900.0, 0.0), 0.0)
+
+
+## Latches `biter_name`'s jaws onto `victim_name` and runs the pair for
+## `seconds`. `mode` is what happens next: the biter walks off with it, or the
+## victim spins on the spot trying to shake it. Returns how far the victim moved.
+func _hold(biter: Creature, victim: Creature, biter_name: String, victim_name: String,
+		mode: String, seconds: float) -> float:
+	biter.set_bite_held(false)
+	biter.params.apply_preset(biter_name)
+	victim.params.apply_preset(victim_name)
+	biter.reset(Vector2.ZERO, 0.0)
+	victim.reset(Vector2(60.0, 0.0), PI)
+	for _i in 20:
+		biter._physics_process(TICK)
+		victim._physics_process(TICK)
+
+	biter.set_bite_held(true)
+	biter.request_bite(Vector2(200.0, 0.0))
+	for _i in 20:
+		biter._physics_process(TICK)
+		victim._physics_process(TICK)
+	if biter.grip == null:
+		failures.append("%s never got hold of %s to begin with" % [biter_name, victim_name])
+		return 0.0
+
+	var biter_cmd := MovementInput.Command.new()
+	var victim_cmd := MovementInput.Command.new()
+	if mode == "drag":
+		biter_cmd.throttle = 1.0
+	else:
+		victim_cmd.turn = 1.0
+	var start: Vector2 = victim.head_pos
+	for _i in int(round(seconds / TICK)):
+		biter.command = biter_cmd
+		victim.command = victim_cmd
+		biter._physics_process(TICK)
+		victim._physics_process(TICK)
+	return start.distance_to(victim.head_pos)
+
+
+## The physique a preset settles at, measured on a real creature so it comes off
+## the solved silhouette rather than off the numbers that produced it.
+func _physique_of(creature: Creature, preset_name: String) -> Physique:
+	creature.params.apply_preset(preset_name)
+	creature.reset(Vector2.ZERO, 0.0)
+	for _i in 4:
+		creature._physics_process(TICK)
+	var measured := Physique.new()
+	measured.update(creature.body, creature.spine, creature.anatomy.tissue, creature.params)
+	return measured
 
 
 ## A press starts one strike. If that strike connects while the button remains
@@ -128,8 +361,18 @@ func _check_bite_contract(player: Creature, target: Creature) -> void:
 	_check(player.is_bite_latched(), "connected bite released itself while click stayed held")
 	_check(player.is_lunging() and is_equal_approx(player.bite_time, APEX),
 		"held bite drifted away from full extension")
-	_check(is_equal_approx(target.anatomy.tissue.integrity(), latched_integrity),
-		"holding one bite applied tissue damage more than once")
+	# Jaws that stay shut keep working — that is what makes a hold a hold rather
+	# than a freeze frame. What holding must still never do is re-run the
+	# *strike*: one press is one lunge, one cooldown and one hit frame, however
+	# long it is held, and the chewing that follows is the grip's doing.
+	var chewed: float = target.anatomy.tissue.integrity()
+	_check(chewed < latched_integrity,
+		"jaws held shut on a victim never chewed into it")
+	_check(chewed > latched_integrity - 0.4,
+		"a held bite stripped %.0f%% of a creature in under a second — that is a grinder, not chewing"
+			% ((latched_integrity - chewed) * 100.0))
+	_check(is_equal_approx(player.bite_time, APEX),
+		"chewing restarted the strike animation instead of working the jaws")
 	_check(player.bite_cooldown_remaining <= 0.0,
 		"latch test did not actually outlast the cooldown")
 	_check(not player.request_bite(Vector2(100.0, 0.0)),

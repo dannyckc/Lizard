@@ -84,6 +84,18 @@ extends Resource
 @export_range(-1.0, 1.0, 0.01) var front_foot_bias: float = 0.30
 @export_range(-1.0, 1.0, 0.01) var rear_foot_bias: float = -0.25
 
+# -------------------------------------------------------------- physique ----
+@export_group("Physique")
+## How heavy the creature is for its size. Mass itself is not a parameter — it is
+## the drawn silhouette's volume times this times how much tissue is left, so a
+## broader body is a heavier body and a chewed-open one is a lighter one. 1.0 is
+## the default Lizard's build at mass 1.0.
+@export_range(0.2, 4.0, 0.01) var density: float = 1.0
+## Force per unit of cross-section the creature can put into locomotion. Strength
+## is this times mass^(2/3), so raising it makes a creature strong *for its size*
+## rather than simply large.
+@export_range(0.2, 4.0, 0.01) var muscle_power: float = 1.0
+
 # ------------------------------------------------------------- movement ----
 @export_group("Movement")
 @export_range(20.0, 600.0, 5.0) var move_speed: float = 190.0
@@ -116,6 +128,18 @@ extends Resource
 ## takes three bites on the same spot or a deeper one. Bone is 6.0 and yields at
 ## half rate, so it takes several more again.
 @export_range(0.2, 8.0, 0.05) var bite_damage: float = 2.6
+## How hard the jaws clamp, for a head of the reference size — the other half of
+## "bite strength", and the one that decides whether a hold survives the victim.
+## Measured against the load a grip hangs off it, which is the two masses and how
+## hard they are pulling apart, so this is directly "how much thrashing can these
+## jaws sit through". `bite_damage` is what one closing of them cuts; this is
+## whether they stay shut. Actual bite force also scales with the square of the
+## head's radius, so a broad-skulled creature bites harder at the same setting.
+@export_range(0.1, 12.0, 0.05) var jaw_power: float = 1.0
+## How often a latched bite closes its jaws again. The clock runs faster the
+## harder the two are pulling against each other, so this is the interval for a
+## victim that has stopped struggling.
+@export_range(0.1, 2.0, 0.01) var chew_interval: float = 0.55
 
 
 ## Drives the runtime tuning panel. Rows with "group" are section headers.
@@ -160,6 +184,10 @@ const SCHEMA: Array = [
 	{"prop": "front_foot_bias", "label": "Front foot bias", "min": -1.0, "max": 1.0, "step": 0.01},
 	{"prop": "rear_foot_bias", "label": "Rear foot bias", "min": -1.0, "max": 1.0, "step": 0.01},
 
+	{"group": "Physique"},
+	{"prop": "density", "label": "Density", "min": 0.2, "max": 4.0, "step": 0.01},
+	{"prop": "muscle_power", "label": "Muscle power", "min": 0.2, "max": 4.0, "step": 0.01},
+
 	{"group": "Movement"},
 	{"prop": "move_speed", "label": "Move speed", "min": 20.0, "max": 600.0, "step": 5.0},
 	{"prop": "acceleration", "label": "Acceleration", "min": 50.0, "max": 3000.0, "step": 10.0},
@@ -174,10 +202,20 @@ const SCHEMA: Array = [
 	{"prop": "bite_radius", "label": "Bite radius", "min": 2.0, "max": 50.0, "step": 1.0},
 	{"prop": "bite_cooldown", "label": "Bite cooldown", "min": 0.05, "max": 2.0, "step": 0.01},
 	{"prop": "bite_damage", "label": "Bite depth", "min": 0.2, "max": 8.0, "step": 0.05},
+	{"prop": "jaw_power", "label": "Jaw power", "min": 0.1, "max": 12.0, "step": 0.05},
+	{"prop": "chew_interval", "label": "Chew interval", "min": 0.1, "max": 2.0, "step": 0.01},
 ]
 
 
 ## Named starting points for tuning. Anything omitted keeps the default.
+##
+## The physique rows are worth reading as a set. Mass is not listed anywhere
+## because it is not a setting — the silhouette above each `density` already
+## decides most of it, and these three numbers only say what kind of animal that
+## silhouette is made of: how solid, how strong for its size, and how hard its
+## jaws shut. That is why the Gecko can be quicker than the Lizard while being
+## unable to hold anything, and why the Crocodile's jaws are in a different
+## league from its legs.
 const PRESETS: Dictionary = {
 	"Lizard": {},
 	"Gecko": {
@@ -187,6 +225,9 @@ const PRESETS: Dictionary = {
 		"arm_length": 30.0, "leg_length": 33.0, "stance_width": 1.25, "stance_reach": 0.72,
 		"stride_distance": 20.0, "step_duration": 0.18, "step_height": 7.0,
 		"move_speed": 230.0, "turn_speed_deg": 260.0,
+		"density": 0.85, "muscle_power": 1.25, "jaw_power": 0.55,
+		"bite_damage": 1.8, "bite_reach": 16.0, "bite_radius": 12.0,
+		"bite_cooldown": 0.3, "chew_interval": 0.4,
 	},
 	"Salamander": {
 		"segment_count": 22, "segment_length": 14.0, "max_bend_deg": 34.0,
@@ -197,6 +238,8 @@ const PRESETS: Dictionary = {
 		"arm_length": 26.0, "leg_length": 29.0, "stance_width": 1.35,
 		"stride_distance": 22.0, "step_duration": 0.30, "step_height": 6.0,
 		"move_speed": 150.0, "turn_speed_deg": 150.0, "turn_pivot": 70.0,
+		"density": 0.8, "muscle_power": 0.8, "jaw_power": 0.5,
+		"bite_damage": 1.6, "bite_radius": 14.0,
 	},
 	"Komodo": {
 		"segment_count": 18, "segment_length": 22.0, "max_bend_deg": 16.0,
@@ -207,6 +250,28 @@ const PRESETS: Dictionary = {
 		"stride_distance": 42.0, "step_duration": 0.42, "step_height": 14.0,
 		"move_speed": 130.0, "acceleration": 400.0,
 		"turn_speed_deg": 110.0, "turn_responsiveness": 5.0, "turn_pivot": 80.0,
+		"density": 1.15, "muscle_power": 1.1, "jaw_power": 2.4,
+		"bite_damage": 3.2, "bite_reach": 28.0, "bite_radius": 20.0,
+		"chew_interval": 0.5,
+	},
+	# The case the whole grip system is shaped around: heavy, unhurried, and
+	# carrying a head out of all proportion to its legs. Its `jaw_power` is an
+	# order of magnitude over the Gecko's and its skull is nearly twice the
+	# reference radius, which squares into the bite force — so nothing this
+	# prototype can spawn generates enough load to pull its jaws off, and a
+	# creature it has hold of goes where it goes.
+	"Crocodile": {
+		"segment_count": 20, "segment_length": 24.0, "max_bend_deg": 14.0,
+		"spine_stiffness": 0.94, "spine_damping": 0.55, "body_wave": 3.5,
+		"head_width": 22.0, "chest_width": 26.0, "waist_width": 21.0, "hip_width": 24.0,
+		"tail_tip_width": 2.0, "front_limb_t": 0.18, "rear_limb_t": 0.48,
+		"arm_length": 44.0, "leg_length": 50.0, "stance_width": 1.1, "stance_reach": 0.74,
+		"stride_distance": 40.0, "step_duration": 0.44, "step_height": 9.0,
+		"move_speed": 120.0, "acceleration": 340.0,
+		"turn_speed_deg": 95.0, "turn_responsiveness": 4.5, "turn_pivot": 90.0,
+		"density": 1.45, "muscle_power": 1.15, "jaw_power": 7.5,
+		"bite_damage": 3.6, "bite_reach": 32.0, "bite_radius": 21.0,
+		"bite_cooldown": 0.6, "chew_interval": 0.45,
 	},
 }
 

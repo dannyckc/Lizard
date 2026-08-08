@@ -28,7 +28,7 @@ godot --path . --editor   # open the editor
 | `A` `D` / left/right arrows | turn the body left/right |
 | move mouse | shift and look the head toward the cursor; the mouse never steers the body |
 | left click | bite (anatomical hit + cooldown) |
-| hold left click | latch a connected bite until release |
+| hold left click | keep hold of what you bit — drag it, chew it, or be dragged by it |
 | `Shift` | sprint |
 | `F1` | show/hide the tuning panel |
 | `F2` | toggle debug draw |
@@ -43,10 +43,11 @@ system will drive when it lands.
 A stationary second creature starts ahead of the player as the first combat
 slice. A click throws the head forward in a lunge and the bite resolves at full
 extension, eating into a lattice of body cells layered skin over muscle over
-bone. If the button remains held when the bite connects, the jaws stay latched
-at full extension until release. Tissue that comes off falls into the world as
-meat and can be eaten. Bodies are solid, so the two creatures can be walked into
-rather than through.
+bone. If the button remains held when the bite connects, the jaws *keep hold*:
+the two creatures are joined at that point and whoever has the weight and the
+strength decides where the pair goes from there. Tissue that comes off falls
+into the world as meat and can be eaten. Bodies are solid, so the two creatures
+can be walked into rather than through.
 
 ## How it works
 
@@ -55,16 +56,18 @@ reason the thing is stable without a global solver — nothing downstream can ev
 invalidate something upstream.
 
 ```
-input ──▶ head position ──▶ contacts ──▶ spine ──▶ body shape ──▶ limbs
+input ──▶ head position ──▶ contacts + grip ──▶ spine ──▶ body shape ──▶ limbs
 ```
 
 | File | Responsibility |
 |---|---|
 | [MovementInput.gd](scripts/MovementInput.gd) | devices → an abstract `{throttle, turn, sprint, aim}` command |
-| [Creature.gd](scripts/creature/Creature.gd) | motion integration plus body and limb contact queries; drives the four systems below in order |
+| [Creature.gd](scripts/creature/Creature.gd) | motion integration, body/limb contact and grip resolution; drives the systems below in order |
 | [Constraints.gd](scripts/creature/Constraints.gd) | the two projection primitives everything is built from |
 | [Spine.gd](scripts/creature/Spine.gd) | the particle chain and its relaxation solve |
 | [BodyShape.gd](scripts/creature/BodyShape.gd) | outline, head, eyes, limb sockets, tail — all derived from the spine |
+| [Physique.gd](scripts/creature/Physique.gd) | mass, strength and bite force, read off the drawn body and the surviving tissue |
+| [Grip.gd](scripts/creature/Grip.gd) | one set of jaws holding onto another creature, as a tether in its body space |
 | [AnatomyState.gd](scripts/creature/AnatomyState.gd) | anatomical hit-testing — which creature, and which structure of it |
 | [TissueGrid.gd](scripts/creature/TissueGrid.gd) | the body-space cell lattice: skin over muscle over bone, and what a bite does to it |
 | [ScrapField.gd](scripts/world/ScrapField.gd) | tissue knocked loose, as meat lying in the world |
@@ -141,10 +144,10 @@ creatures apart at arm's length.
 
 Three decisions make it fit the one-way tick chain rather than fight it:
 
-- **Each creature resolves its own half of every contact and never writes to
-  another's state.** Both parties run the same pass, so separation remains
-  symmetric without one creature reaching into another creature's simulation
-  state.
+- **Each creature resolves its own share of every contact and never writes to
+  another's state.** Both parties run the same pass and compute the same split,
+  so exactly one full correction is applied between them without either creature
+  reaching into the other's simulation state.
 - **The narrow phase compares capsule pairs, not spine points.** This catches a
   narrow body crossing halfway along a long segment, where no endpoint lies
   inside the other silhouette and a point-probe solver reports a false clear.
@@ -164,6 +167,22 @@ scaled by how squarely it opposes travel. Head-on that stops the creature dead;
 along a flank it is nearly zero, so bodies slide past each other freely. Heading
 is deliberately untouched, so a creature pressed against another can always turn
 away and leave.
+
+#### ...and weight decides who yields
+
+The share is not half any more. It is the *other* body's fraction of the pair's
+mass, so a Gecko walking into a Crocodile does nearly all of the moving and the
+Crocodile barely notices, while the Crocodile walking into the Gecko pushes it
+across the world ahead of itself. The same number scales the speed a contact
+sheds, which is what stops a heavy creature being brought to a halt by something
+it should be able to shoulder aside.
+
+Two properties are what make this a change of one line's meaning rather than a
+new system. The two shares are `m_other / (m_a + m_b)` computed independently by
+each party, so they still sum to exactly one — the separation stays complete and
+symmetric with no cross-creature writes. And equal masses give 0.5 each, which is
+the constant this replaced, so two creatures of the same build behave precisely
+as they did before mass existed.
 
 ### Gait
 
@@ -384,9 +403,9 @@ reached. There is no sideways mouth wedge in the top-down silhouette; a brief
 world-space **Bite** cue marks the exact impact point instead.
 
 If that hit connects while the button is still held, the strike clock stays on
-its apex and the jaws remain clamped until release. The tissue is damaged once,
-on the original hit frame; holding is a latch, not an automatic repeat attack.
-Misses recover normally.
+its apex and the jaws stay shut — and the two creatures are now physically joined
+at the point the bite landed. See **Holding on** below. Misses recover normally,
+and holding a miss never manufactures a grip.
 
 The throw is fed to **the spine's head point, not to `head_pos`**. That is the
 load-bearing detail, twice over. The body has to follow it through the
@@ -400,13 +419,146 @@ Cursor look is applied after that body solve by rotating only the head point
 around the solved neck, within the configured bend limit. The rest of the spine
 is therefore identical regardless of cursor position during ordinary movement:
 W/S own translation and A/D own body heading, while the mouse owns only the
-final head pose and the direction of a bite lunge.
+final head pose and the direction of a bite lunge. While the jaws have hold of
+something, the head is aimed by *that* instead of by the cursor — the pair keeps
+moving relative to each other, so the drawn head has to keep tracking the flesh
+it is holding or it would slide off the place the physics is anchored to.
+
+### Weight, strength and bite force
+
+Three physical quantities, and **not one of them is a slider**. They are read off
+the creature that is already being solved every tick:
+
+```
+mass       = density × silhouette volume × tissue integrity
+strength   = muscle_power × mass^(2/3)
+bite force = jaw_power × (head radius / 13)² × surviving head tissue
+```
+
+Volume is the drawn body: a chain of discs, one per cross-section, along the
+lengths the spine actually holds, with a round cap at each end and the tail
+clipped exactly where the silhouette clips it. So the thing you can see is the
+thing it weighs, and widening a body in the tuning panel makes it heavier without
+a second slider to remember. Off the shipped presets that lands at:
+
+| | mass | strength | bite force |
+|---|---|---|---|
+| Gecko | 0.46 | 0.74 | 0.47 |
+| Salamander | 0.94 | 0.77 | 0.36 |
+| Lizard | 1.00 | 1.00 | 1.00 |
+| Komodo | 5.62 | 3.48 | 4.60 |
+| Crocodile | 11.19 | 5.75 | 21.48 |
+
+Two consequences fall out of that shape and neither needed a rule of its own.
+
+**Damage is not just cosmetic any more.** The integrity term is the same lattice
+number the biomass readout shows, so a creature eaten half open is lighter, gets
+shoved further in every contact, and is weaker at everything its strength buys.
+Its jaws weaken too, on the surviving *head* tissue specifically — chew a
+predator's skull open and its bite goes with it.
+
+**Both derived quantities are areas, and mass is a volume.** Strength is
+literally `mass^(2/3)`; bite force is the head's cross-section, which grows the
+same way. So a big creature is stronger and bites harder outright while being
+weaker *per kilo* — the square-cube law, and the whole reason a Gecko latched
+onto a Crocodile can barely walk while the Crocodile tows the Gecko without
+slowing down. One exponent, rather than a table of who-beats-whom.
+
+Bite force is sized off the head rather than off the body because the head is the
+part that does the biting and the part you can see doing it: a broad skull reads
+as a hard bite before any number is involved.
+
+### Holding on
+
+A latched bite used to be a static hold — the biter's speed was zeroed and the
+victim was never even told. It is now **one inextensible tether** between the
+biter's jaw point and a point bound into the victim's *body space*, resolved by
+exactly the machinery body contacts already use: a rigid translation of each
+complete creature, in shares set by their masses, in the same phase of the tick.
+
+That is the whole mechanism. Everything the interaction reads as is what it does
+under different numbers:
+
+| | what actually happens |
+|---|---|
+| **latching** | the tether exists; the pair is joined at one point |
+| **dragging** | uneven masses — the light body takes nearly the whole correction and is towed behind jaws that barely move |
+| **being dragged** | the same tether, seen from the other end |
+| **struggling** | both creatures pulling; the tether's slack is the measured disagreement |
+| **losing your grip** | that disagreement, as a force, exceeding the jaws' bite force |
+| **chewing** | the jaws closing again, on a clock, at whatever depth their force has left over |
+
+The bind is stored in body space for the same reason tissue damage is: the pose
+is rebuilt from scratch every tick and a hold recorded in world coordinates would
+be a hold on nothing by the next one. Load is measured as `√(reduced mass) ×
+separation speed` — the root because a set of jaws gets a proportionally bigger
+hold of a bigger body at the same time as the body becomes harder to hold.
+
+Four details carry the rest of it:
+
+- **The tether only pulls.** Pushing is the contact pass's job. A rope that could
+  also push would spend its life fighting it.
+- **A gripping pair does not collide.** Two constraints acting on the same pair,
+  at the same point, in opposite directions is not a tuning problem — jaws that
+  have hold of something are *inside* it, which is exactly the state the contact
+  pass exists to forbid. Measured, the pair buzzed and the stretch the load is
+  read from ran away to fifteen times what the two were actually doing. So while
+  a hold is in force these two have one rule between them and it is the jaws'.
+  Both parties reach that conclusion from the same grip, so neither ever stops
+  colliding with the other while the other does not, and everything else in the
+  world still collides with both.
+- **A load slows locomotion but never turning.** Speed and acceleration are
+  scaled by `strength / (strength + towed mass)`; heading is untouched, exactly
+  as it is under a body contact. That is deliberate and it is what makes the
+  fight legible: however overmatched a creature is, thrashing stays available —
+  and thrashing is precisely what loads a set of jaws, because the load is
+  measured from how fast the two are coming apart. **Turning is the escape.**
+- **Chewing and struggling are one clock read twice.** The harder the two pull
+  against each other, the sooner the jaws come round again *and* the less of
+  their force is left to drive deep. A victim that has stopped fighting is chewed
+  through in a few deep bites; one that keeps thrashing saws itself open on the
+  same jaws. `strain`, twice — not two systems.
+
+A chew goes through the same world resolver as the opening bite and the mouthful
+a grip takes with it when it is torn off, so all three shed meat, pick their
+target and can report a miss by one path.
+
+Jaws that eat clean through the flesh they were holding **take hold of the next**
+rather than opening — they search the victim's body for the nearest surviving
+tissue within their gape. Without that a strong bite would lose its grip *faster*
+than a weak one, since the better it chews the sooner the cell it was bound to is
+gone. Re-seating is what turns a latch into chewing *in*: the wound deepens under
+jaws that stay shut, and the hold ends only when the load pulls them off, the
+button comes up, or there is nothing left within them to hold.
+
+Jaws pulled off take a mouthful with them, and cannot silently take hold again
+until the button is released — one press is one hold, the same way it is already
+one lunge and one cooldown.
+
+Which of those outcomes you get is decided by the three numbers and nothing else.
+Measured, across the shipped presets:
+
+Victim displacement over five seconds, or when the jaws came off:
+
+| | biter drags it away | victim runs | victim thrashes on the spot |
+|---|---|---|---|
+| Crocodile on Gecko | tows it 529 px | holds; it makes 11 px | holds, still chewing |
+| Komodo on Lizard | tows it 466 px | holds; it makes 25 px | holds, still chewing |
+| Lizard on Lizard | tows it 306 px | towed 295 px along with it | **torn off at 2.9 s** |
+| Lizard on Komodo | moves it 19 px | dragged 470 px behind it | **torn off at 0.7 s** |
+| Gecko on Crocodile | moves it 1 px | **torn off at 0.6 s** | **torn off at 0.6 s** |
+
+Read the diagonal: the same tether, the same three numbers, and a Crocodile is
+unshakeable while a Gecko cannot keep hold of anything it did not already
+outweigh.
 
 ## Tuning
 
 Press `F1` for live sliders (generated from `CreatureParams.SCHEMA` — add a
-property plus one schema row and it appears automatically). Four presets ship in
-the panel: **Lizard**, **Gecko**, **Salamander**, **Komodo**.
+property plus one schema row and it appears automatically). Five presets ship in
+the panel: **Lizard**, **Gecko**, **Salamander**, **Komodo**, **Crocodile**.
+Mass is not among the sliders — it is on the HUD readout instead, because it is
+something the creature *has* rather than something you set.
 
 The parameters worth reaching for first:
 
@@ -424,6 +576,10 @@ The parameters worth reaching for first:
 | Wider / tighter leg sweep | `limb_swing_deg`, `limb_max_reach` |
 | Bites that bite deeper | `bite_damage` up (hit points of penetration: skin is 0.4, muscle 5.5, bone 6.0 at half rate) |
 | Crisper, more legible wounds | `bite_radius` down |
+| Heavier for the same silhouette | `density` up — and remember the width sliders already move mass |
+| Strong for its size (drags more, is dragged less) | `muscle_power` up |
+| Jaws that will not be shaken off | `jaw_power` up — this is grip, not penetration |
+| Faster or slower chewing while latched | `chew_interval` down / up |
 
 Four couplings are easy to trip over:
 
@@ -447,6 +603,13 @@ Four couplings are easy to trip over:
   two limb girdles turns it about its centre instead, which is both what a real
   quadruped does and much less work for the hind legs.
 
+Two more couplings arrive with the physique, and both are the same trap in
+different clothes: **the silhouette is an input to combat now.** Widening the body
+raises mass, which raises strength and every contact share that reads it; widening
+the head raises bite force by the *square* of the change. So retuning a creature's
+look retunes what it can hold and what can hold it, and `density`, `muscle_power`
+and `jaw_power` are corrections on top of that rather than the whole of it.
+
 `constraint_iterations` and `fabrik_iterations` are cost/quality dials; the
 defaults (6 and 6) are already past the point of visible improvement.
 
@@ -468,7 +631,9 @@ they land; bone survives several times longer than the flesh beside it; damage
 outlives both a procedural rebuild *and* a change of segment count; and the
 lunge extends, resolves at its apex, shows its Bite cue only on impact, and
 leaves the creature standing exactly where it started. It also checks that shed
-tissue is aggregated into weighty pieces rather than cell-sized particles.
+tissue is aggregated into weighty pieces rather than cell-sized particles, and
+that a held bite chews — into the victim, at a rate that is neither nothing nor a
+grinder, without ever re-running the strike animation or the cooldown.
 
 It also asserts the skeleton is still a *frame* — bone under less than half the
 body, at least three free-standing crossbars over the torso with flesh either
@@ -494,6 +659,25 @@ foreleg placed through another torso bends clear without changing either bone's
 length; and a creature with nobody near it is not displaced at all. Each fails
 loudly if the contact pass is removed.
 
+The physique checks are all *relational*, because the numbers themselves are
+derived and will move whenever the presets are retuned. Mass follows build across
+the five of them and a Komodo is at least three times a Lizard; the heavier
+creature is stronger outright but weaker per unit of mass, which is the only
+thing that says the square-cube exponent is still in there; a Crocodile's jaws are
+in a different league from a Komodo's. Doubling a torso's width alone has to move
+mass — otherwise mass is really a slider spelled differently — and chewing a
+creature open has to take mass and strength back off it.
+
+Then the grip, one assertion per outcome the three numbers are supposed to
+produce: a Crocodile tows a Gecko and keeps chewing it after eating clean through
+what it first took hold of; the same jaws are not shaken off by a thrashing one;
+reversed, a Gecko moves a Crocodile almost nowhere and keeps little of its own top
+speed while trying; a Gecko is torn off a thrashing Crocodile, is left holding
+nothing while still holding the button, and leaves a wound behind; and a bite
+under load goes in shallower than the same bite when free. Weight gets its own
+pair: two identical creatures still split a contact exactly down the middle, and a
+Crocodile shoves a Gecko several times further than a Gecko shoves a Crocodile.
+
 `SimTest` drives each preset through idle → walk → turn → pivot → idle and
 asserts that segment lengths hold, bends stay inside the limit, IK bones keep
 their length, the gait never lifts both diagonals at once, a resting creature's
@@ -515,10 +699,20 @@ Deliberate, in the interest of a stable and readable prototype:
 - Creatures collide with each other, but nothing else does: no terrain, no
   physical ground contact — "lift" is faked as a screen-space offset plus a
   shadow gap, since top-down has no vertical axis.
-- Contacts have no mass behind them. Both parties resolve an equal half, so
-  nothing can shove anything: leaning on another creature nudges it at about
-  4 px/s, which is the accelerate-then-brake cycle leaking through rather than a
-  modelled push.
+- Contacts have weight behind them but no momentum. Mass decides who yields and
+  how much speed a contact sheds, so a heavy creature can shoulder a light one
+  aside — but nothing is transferred: a creature that stops pushing stops moving
+  whatever it was carrying, and there is no impact, recoil or knockback.
+- A creature can only be held by one set of jaws at a time. A second grip on the
+  same victim is formed and resolved, but only the first one found decides how
+  much locomotion that victim keeps.
+- A grip binds to the torso axis even when the jaws close on a limb, because
+  limbs are kinematic and cannot transmit a pull to the body they hang off. Biting
+  a leg therefore holds the animal, on a longer tether, rather than holding the
+  leg.
+- While a grip is in force the two creatures do not collide with each other, so a
+  biter driving hard into its victim can overlap it. Nothing else stops
+  colliding, in either direction.
 - Growth is gone for now. Food is still eaten and counted, `size_scale` is still
   threaded through every system, but nothing writes to it — it is left as the
   hook a real growth system will drive rather than a multiplier to be
