@@ -28,6 +28,13 @@ signal bite_started(mark: BiteMark)
 signal tissue_damaged(integrity: float)
 ## Chunks of skin and muscle a bite tore off, for the world to scatter.
 signal tissue_shed(chunks: Array, origin: Vector2)
+## Parts of this animal that are no longer joined to it — `TissueGrid.Piece`, one
+## per surviving piece. Not meat: these arrive intact, and the world has to keep
+## them that way until something eats them.
+signal part_severed(pieces: Array)
+## A piece of meat that has finished going down these jaws. The world owns it, so
+## the world is what takes it out and says what it was worth.
+signal swallowed(part: CarrionField.Part)
 ## Physical foot contact. The creature reports motion; the habitat decides how
 ## far that contact carries as sound.
 signal foot_landed(at: Vector2, intensity: float)
@@ -223,6 +230,16 @@ const TEAR_DEPTH: float = (TissueGrid.SKIN_HP + TissueGrid.FAT_HP
 const MOUTHFUL_SPAN: float = 0.7
 
 # --- chewing ------------------------------------------------------------------
+# --- carrying ------------------------------------------------------------------
+## How far along the body a swallowed piece travels before it is inside the
+## animal, as a fraction of the whole. A short way: what is being shown is a
+## mouthful going down a throat, not something transiting an entire lizard.
+const SWALLOW_TRAVEL: float = 0.26
+## Most a mouthful going down may add to the width of the body it is passing
+## through, as a fraction of that width. Bounded, because a throat is tissue and
+## tissue stretches only so far.
+const SWALLOW_SWELL: float = 0.55
+
 ## How long the jaws stay shut on their bind after the button comes up. A press
 ## inside this window is the same jaws closing again on the same flesh — a chew —
 ## rather than a fresh strike. Chewing is therefore a repeated action, as biting
@@ -267,6 +284,10 @@ var _grip_lockout: bool = false
 ## zero only between a release and the moment the hold actually ends, which is
 ## the window a chew is taken in.
 var _regrasp_remaining: float = 0.0
+## The meat in these jaws, or null. The other thing a set of jaws can be shut on,
+## and kept apart from `grip` because holding a piece of meat is possession while
+## holding an animal is an argument — see Mouthful.
+var mouthful: Mouthful = null
 ## Seconds until jaws that are already holding something will close again.
 var _chew_cooldown: float = 0.0
 ## A chew taken this tick, queued for the solved pose exactly as a strike is.
@@ -376,6 +397,7 @@ func reset(at: Vector2 = Vector2.ZERO, facing: float = 0.0) -> void:
 	_chew_requested = false
 	grip = null
 	_held_by = null
+	_drop_mouthful()
 	# Reset is an authority from outside the simulation, not a move inside it, so
 	# it is the one place a creature reaches into another's state: a body teleported
 	# back to its spawn is no longer the body anybody had hold of, and leaving the
@@ -461,6 +483,10 @@ func _physics_process(delta: float) -> void:
 	# so the jaws genuinely reach the flesh and the body is left alone to keep
 	# walking, standing or turning through the strike.
 	spine.pose_head(head_look_dir, seg_len, lunge_offset)
+	# Before the body is built, because what a mouthful going down does is distend
+	# the body it is going down: it is a term in the width profile and not a lump
+	# drawn over the top of one.
+	_read_swallow()
 	body.build(spine, params, size_scale)
 	# `move_dir` is the body's facing and intentionally never flips in reverse.
 	# The gait only needs a signed fallback for the instant a socket is moving
@@ -474,7 +500,7 @@ func _physics_process(delta: float) -> void:
 		var footfall: float = (0.07 + minf(0.11, absf(speed) / 1600.0)) * size_scale
 		foot_landed.emit(contact, footfall)
 	anatomy.update(self, delta)
-	_shed_detached()
+	_release_severed()
 	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
 	_update_bounds()
 	# Last of the derived state, because it is a consequence of all of it: a body
@@ -496,10 +522,13 @@ func _physics_process(delta: float) -> void:
 		bite_time = -1.0
 		lunge_offset = 0.0
 
-	# Last, because everything it does is a consequence of the pose that has just
+	# Last, because everything they do is a consequence of the pose that has just
 	# been solved: what the jaws are now pulling against, whether they can still
-	# hold it, and whether they have come round to close again.
+	# hold it, and whether they have come round to close again. The two are
+	# mutually exclusive — a set of jaws is shut on an animal or on a piece of meat,
+	# never both — so their order between themselves does not arise.
 	_advance_grip(delta)
+	_advance_mouthful(delta)
 
 
 ## The moment a creature stops driving itself.
@@ -522,6 +551,8 @@ func collapse() -> void:
 		return
 	alive = false
 	_release_grip()
+	# A dead mouth drops what is in it. Nothing else would be true of a mouth.
+	_drop_mouthful()
 	bite_held = false
 	bite_latched = false
 	bite_time = -1.0
@@ -553,16 +584,20 @@ func collapse() -> void:
 ## leg, a foot, a tail or a head came off, because the lattice was never told
 ## which of those a cell belonged to when it decided the cell had come away.
 ##
-## The detached piece becomes scrap rather than a body of its own. That is the
-## honest granularity for a world whose independent physical objects are scraps:
-## it lands, it settles, it can be eaten, and it is no longer attached to anything.
-func _shed_detached() -> void:
+## What comes off is a *part*, not a spray of meat, and that distinction is the
+## whole of what this now says. Nothing has been done to the tissue in it: every
+## cell arrives with the hit points it was standing with, still stacked skin over
+## fat over muscle over bone. A leg that has come off is a leg. It stops being one
+## the same way a leg on a living animal stops being one, which is by something
+## biting it — so the conversion into meat is not performed here, or anywhere, and
+## nobody has to remember not to perform it.
+func _release_severed() -> void:
 	if anatomy.tissue.detached_count <= 0:
 		return
-	var chunks: Array = []
-	anatomy.tissue.shed_detached(chunks)
-	if not chunks.is_empty():
-		tissue_shed.emit(chunks, bounds_center)
+	var pieces: Array = []
+	anatomy.tissue.take_detached(pieces)
+	if not pieces.is_empty():
+		part_severed.emit(pieces)
 
 
 ## Moves any limb the animal is no longer holding out.
@@ -660,7 +695,7 @@ func _dead_process(delta: float) -> void:
 	ragdoll.step(delta, body, gait.limbs, params, size_scale,
 		Callable(self, "_limb_contact_push"))
 	anatomy.update(self, delta)
-	_shed_detached()
+	_release_severed()
 	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
 	_update_bounds()
 
@@ -728,12 +763,17 @@ func is_lunging() -> bool:
 ## would shoulder its target out of reach with its own face and then close on
 ## the gap it had just made.
 ##
-## Jaws already holding something are shut on it, however the animation reads.
+## Jaws already holding something are shut on it, however the animation reads —
+## unless what they are holding will not fit in them, and then they are held open
+## around it by exactly as much of it as will not go in. That is not an eating
+## animation; it is a division, and it is why a mouth with a whole leg in it gapes
+## and the same mouth with an ankle in it does not.
 func mouth_gape() -> float:
+	var propped: float = mouthful.props_open(gape_radius()) if mouthful != null else 0.0
 	if bite_time < 0.0 or _impact_done or is_bite_latched():
-		return 0.0
+		return propped
 	if bite_time < LUNGE_WINDUP:
-		return smoothstep(0.0, 1.0, bite_time / LUNGE_WINDUP)
+		return maxf(propped, smoothstep(0.0, 1.0, bite_time / LUNGE_WINDUP))
 	return 1.0
 
 
@@ -1534,12 +1574,12 @@ func set_bite_held(held: bool) -> void:
 		return
 	if held:
 		bite_held = true
-		if grip != null and grip.is_alive() and _regrasp_remaining > 0.0:
+		if _jaws_shut() and _regrasp_remaining > 0.0:
 			_regrasp_remaining = 0.0
 			_chew_requested = true
 		return
 	bite_held = false
-	if grip != null and grip.is_alive():
+	if _jaws_shut():
 		_regrasp_remaining = GRIP_REGRASP_WINDOW
 		return
 	_regrasp_remaining = 0.0
@@ -1549,12 +1589,20 @@ func set_bite_held(held: bool) -> void:
 	_grip_lockout = false
 
 
+## Whether these jaws are currently shut on anything at all — an animal or a piece
+## of meat. The button means the same thing in both cases, which is why they are
+## asked as one question: held is holding on, working it is working the jaws, and
+## letting go is letting go.
+func _jaws_shut() -> bool:
+	return (grip != null and grip.is_alive()) or mouthful != null
+
+
 ## Whether these jaws are shut on something. True through the parting window as
 ## well as while the button is down: the hold has not ended until the jaws have
 ## actually opened, and everything downstream — the clamped head, the suspended
 ## contact pass, the tether — has to agree about when that is.
 func is_bite_latched() -> bool:
-	return bite_latched and grip != null and (bite_held or _regrasp_remaining > 0.0)
+	return bite_latched and _jaws_shut() and (bite_held or _regrasp_remaining > 0.0)
 
 
 ## Whether something else has hold of this creature. Refreshed once per tick, so
@@ -1757,6 +1805,151 @@ func _advance_grip(delta: float) -> void:
 		_tear_out()
 
 
+# ------------------------------------------------------------------ eating ----
+
+## Carries, chews and swallows whatever piece of meat is in the jaws.
+##
+## The three are not three things here. Carrying is placing a piece the jaws have
+## hold of; chewing is closing them on it, which goes down the ordinary world bite
+## path and therefore erodes it and sheds meat exactly as closing on anything does;
+## and swallowing is what a chew *is* once what is left will fit. Which of the two
+## a chew turns out to be is one comparison, made below, and it is the only place
+## in the whole feature where eating decides anything.
+func _advance_mouthful(delta: float) -> void:
+	if mouthful == null:
+		return
+	mouthful.advance(delta)
+	var part: CarrionField.Part = mouthful.part
+	# Meat is possession, so it is lost by being taken rather than by being pulled
+	# away: whoever has it in their jaws has it, and these jaws no longer do.
+	if part == null or part.is_spent() or part.carrier != self:
+		_drop_mouthful()
+		return
+	if mouthful.is_down():
+		mouthful = null
+		bite_latched = false
+		_regrasp_remaining = 0.0
+		part.release()
+		swallowed.emit(part)
+		return
+	# A swallow finishes whatever the button does. Opening your mouth halfway
+	# through is not a way to un-eat something.
+	if mouthful.going_down < 0.0 and not (bite_held or _regrasp_remaining > 0.0):
+		_drop_mouthful()
+		return
+
+	_place_mouthful(delta)
+	if mouthful.going_down >= 0.0:
+		return
+	if not _chew_requested:
+		return
+	_chew_requested = false
+	if _chew_cooldown > 0.0:
+		return
+	_chew_cooldown = maxf(params.chew_interval, 0.05)
+	_work_mouthful()
+
+
+## Puts the piece where the jaws have it.
+##
+## Nothing here is an animation. The target is the jaw point, drawn back along the
+## mouth's own axis by however far the mouthful has been worked in — a jolt while
+## it is being chewed, the length of a throat while it is going down — and the
+## piece is moved toward it by as much of the pull as its weight lets through. A
+## creature that can lift what it is holding is carrying it; one that cannot is
+## dragging it; and the difference between those is the mass in the divisor.
+func _place_mouthful(delta: float) -> void:
+	if body == null or spine == null or spine.size() == 0:
+		return
+	var fwd: Vector2 = spine.forwards[0]
+	var jaw: Vector2 = jaw_point() + fwd * mouthful.draw_in(body.head_radius)
+	var load: float = mouthful.part.mass() * HAUL_COST
+	var grasp: float = physique.strength / maxf(physique.strength + load, 0.0001)
+	mouthful.part.carry(mouthful.hold, jaw, grasp,
+		gape_radius() + CarrionField.TETHER_SLACK, delta)
+
+
+## One closing of the jaws on what they are already holding.
+##
+## Either the piece goes down or it is worked on, and the test is the only thing
+## separating a Crocodile taking a Gecko's leg whole from a Gecko gnawing at a
+## Crocodile's for a minute: how far the meat reaches from the hold, against how
+## much mouth there is. Food size, food shape, mouth size and bite position all
+## arrive in that one comparison, and none of them is named in it.
+##
+## A chew that does not swallow goes out through the same signal a strike does, so
+## the world resolves it, erodes the piece and scatters what came off with no idea
+## that it was chewing rather than biting.
+func _work_mouthful() -> void:
+	var gape: float = gape_radius()
+	if mouthful.fits(gape):
+		mouthful.begin_swallow()
+		return
+	bite_started.emit(bite_mark(mouthful.part.to_world(mouthful.hold), bite_depth()))
+	# The world has resolved that closing by the time the emit returns, so what
+	# follows is the jaws finding their new hold in the crater they just made:
+	# onto tissue that is still there, and a step further into the piece. Working a
+	# mouthful in is what makes a long piece eaten end-first rather than nibbled
+	# forever at the place it was first grabbed.
+	if mouthful == null:
+		return
+	mouthful.chew()
+	mouthful.reseat()
+	mouthful.work_in(gape)
+
+
+func _drop_mouthful() -> void:
+	if mouthful == null:
+		return
+	if mouthful.part != null and mouthful.part.carrier == self:
+		mouthful.part.release()
+	mouthful = null
+	bite_latched = false
+	_regrasp_remaining = 0.0
+	_chew_requested = false
+
+
+## Closes the jaws on a piece of meat and records where on it they closed.
+##
+## The hold is re-seated onto real tissue immediately, because jaws that shut over
+## the hole a previous mouthful left would be holding a point in the air — and
+## every reading below is measured from the hold.
+func _take_mouthful(meat: CarrionField.Part) -> void:
+	var taken := Mouthful.new()
+	taken.part = meat
+	taken.hold = meat.to_local(jaw_point())
+	taken.reseat()
+	meat.hold_by(self)
+	mouthful = taken
+	bite_latched = true
+	# The strike that took hold was itself one closing of these jaws, so the next
+	# one waits out the same interval a chew does.
+	_chew_cooldown = maxf(params.chew_interval, 0.05)
+
+
+## Hands the body the mouthful currently going down it, as a place and a size.
+##
+## Read off the swallow rather than tracked alongside it: where the piece has got
+## to is how far through the swallow it is, and how much it distends the throat is
+## how much bigger than that throat it is. A piece that fits comfortably makes no
+## bulge at all, which is correct and needed no exception.
+func _read_swallow() -> void:
+	if body == null:
+		return
+	body.swallow_at = 0.0
+	body.swallow_size = 0.0
+	if mouthful == null:
+		return
+	var down: float = mouthful.gullet()
+	if down <= 0.0:
+		return
+	body.swallow_at = SWALLOW_TRAVEL * down
+	var girth: float = mouthful.reach() / maxf(body.head_radius, 0.001)
+	# Rises and subsides as the piece passes, because that is what is happening:
+	# the tissue is stretched around it and closes again behind it.
+	body.swallow_size = clampf(girth, 0.0, 1.0) * SWALLOW_SWELL * sin(PI * down)
+
+
 ## How hard one closing of these jaws drives, in the tissue lattice's hit points.
 ##
 ## Full `bite_damage` for a free strike, which is what every bite in the game was
@@ -1933,6 +2126,11 @@ func _haul_factor() -> float:
 		towed += grip.victim.physique.mass
 	if _held_by != null and _held_by.is_alive():
 		towed += _held_by.biter.physique.mass
+	# Meat weighs what it weighs. A severed thigh off something large is a real
+	# load, and the same rule that makes towing a Komodo hard makes dragging one's
+	# leg away hard — because it is the same rule and the same currency.
+	if mouthful != null and mouthful.part != null:
+		towed += mouthful.part.mass()
 	if towed <= 0.0:
 		return 1.0
 	return clampf(physique.strength / (physique.strength + towed * HAUL_COST),
@@ -1965,14 +2163,24 @@ func apply_bite(mark: BiteMark) -> float:
 ## flesh and the button is still down". A chew routes through here too: the grip
 ## already knows its victim, so what the resolver adds is the one thing it cannot
 ## know for itself — whether there was still anything there to bite.
-func resolve_bite(connected: bool, target: Creature = null, hit: AnatomyState.Hit = null) -> void:
+## `meat` is set when what the jaws reached furthest into was a severed part rather
+## than an animal. Meat is taken rather than gripped: there is nothing to wrestle,
+## so the whole of closing on it is holding it.
+func resolve_bite(connected: bool, target: Creature = null, hit: AnatomyState.Hit = null,
+		meat: CarrionField.Part = null) -> void:
 	bite_connected = connected
-	if grip != null:
+	if grip != null or mouthful != null:
 		# A chew that closes on nothing is a chew that closes on nothing, and the
 		# same goes for a tear. Neither ends the hold: what the jaws have hold of is
 		# the bind, and the only things that end that are the flesh under it being
 		# gone with nothing left to re-seat on, the load pulling them off, and the
 		# jaws being given long enough to open.
+		return
+	if meat != null:
+		if bite_held and not _grip_lockout:
+			_take_mouthful(meat)
+		else:
+			bite_latched = false
 		return
 	if not (connected and bite_held) or target == null or _grip_lockout:
 		bite_latched = false

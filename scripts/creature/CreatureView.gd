@@ -419,26 +419,36 @@ func _flush_flat(offset: Vector2, color: Color) -> void:
 ## through them, which is the whole reason no case here has to know anything about
 ## damage. A cell is drawn as whatever is currently on top of it.
 func _cell_color(patch: TissueGrid.Patch, cell: int) -> Color:
-	var base: int = cell * TissueGrid.LAYERS
-	var skin: float = patch.hp[base + TissueGrid.SKIN]
+	return tissue_color(patch.hp, cell * TissueGrid.LAYERS, _fat_capacity(patch, cell))
+
+
+## The same reading, off nothing but a depth stack and how much fat that
+## particular cell was built with.
+##
+## Static because meat off a creature has to be drawn in the creature's own inks.
+## A severed leg is not lit differently, coloured differently or abstracted once it
+## is on the ground — it is the same tissue in the same state, and the one way to
+## guarantee it keeps looking like it is to leave exactly one place that decides.
+static func tissue_color(hp: PackedFloat32Array, base: int, fat_capacity: float) -> Color:
+	var skin: float = hp[base + TissueGrid.SKIN]
 	if skin > 0.0:
 		# Skin holds together as a membrane until it actually tears. A slight warm
 		# shift communicates strain without dissolving it into fat cell by cell.
 		return COL_BODY_HEAD.lerp(Color("2b211b"), (1.0 - skin / TissueGrid.SKIN_HP) * 0.24)
-	var fat: float = patch.hp[base + TissueGrid.FAT]
+	var fat: float = hp[base + TissueGrid.FAT]
 	if fat > 0.0:
 		# Measured against this cell's own fat rather than the global maximum: the
 		# plan lays down more over the trunk than over a foot, and a full flank and
 		# a full ankle should both read as full.
-		return COL_FAT.lerp(COL_FAT_DEEP, 1.0 - fat / maxf(_fat_capacity(patch, cell), 0.0001))
-	var muscle: float = patch.hp[base + TissueGrid.MUSCLE]
+		return COL_FAT.lerp(COL_FAT_DEEP, 1.0 - fat / maxf(fat_capacity, 0.0001))
+	var muscle: float = hp[base + TissueGrid.MUSCLE]
 	if muscle > 0.0:
 		return COL_MUSCLE.lerp(COL_MUSCLE_DEEP, 1.0 - muscle / TissueGrid.MUSCLE_HP)
-	var bone: float = patch.hp[base + TissueGrid.BONE]
+	var bone: float = hp[base + TissueGrid.BONE]
 	if bone > 0.0:
 		return COL_BONE.lerp(COL_BONE_WORN, 1.0 - bone / TissueGrid.BONE_HP)
 	return COL_ORGAN.lerp(COL_ORGAN_SPENT,
-		1.0 - patch.hp[base + TissueGrid.ORGAN] / TissueGrid.ORGAN_HP)
+		1.0 - hp[base + TissueGrid.ORGAN] / TissueGrid.ORGAN_HP)
 
 
 ## How much fat this particular cell was built with — the plan's profile at that

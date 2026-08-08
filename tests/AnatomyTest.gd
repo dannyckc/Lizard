@@ -64,6 +64,7 @@ func _run_checks() -> void:
 	_check_severance_needs_every_tissue(subject)
 	_check_broken_limb_dangles(subject)
 	_check_tail_comes_off(subject)
+	_check_a_severed_head_takes_the_brain(subject)
 	_check_a_cut_sheds_only_what_is_past_it(subject)
 	_finish()
 
@@ -512,13 +513,17 @@ func _check_severed_limb_leaves(c: Creature) -> void:
 	_restore(c)
 	var tissue: TissueGrid = c.anatomy.tissue
 	var patch: TissueGrid.Patch = tissue.patch("RR")
-	var shed: Array = []
-	c.tissue_shed.connect(func(chunks: Array, _at: Vector2) -> void: shed.append_array(chunks))
+	var pieces: Array = []
+	var handle: Callable = func(taken: Array) -> void: pieces.append_array(taken)
+	c.part_severed.connect(handle)
 
 	# Eat the whole proximal cross-section away — the cells that join the limb to
 	# the animal, and nothing else.
 	for row in BodyPlan.LIMB_ROWS:
 		_bite_cell(c, "RR", row, 6.0, 8)
+	# Measured with the cut made and the limb not yet told: everything still
+	# standing in the patch is what should walk into the world, to the hit point.
+	var standing: float = _flesh_in(patch)
 	# Twice: the gait is solved before the anatomy is re-read within a tick, so
 	# the limb comes off on the first and the gait is told on the second.
 	c._physics_process(TICK)
@@ -529,7 +534,22 @@ func _check_severed_limb_leaves(c: Creature) -> void:
 	_check(_limb(c, "RR").severed, "the gait was not told the limb had come off")
 	_check(patch.gone_count == patch.cells,
 		"a severed limb left %d cells still attached" % (patch.cells - patch.gone_count))
-	_check(not shed.is_empty(), "a limb came off without anything entering the world")
+	_check(pieces.size() == 1,
+		"a limb coming off produced %d pieces where it should have produced one"
+			% pieces.size())
+	# ...and it came off *intact*. Nothing destroyed it, so nothing about it is
+	# spent: the tissue that walked into the world is the tissue the leg was
+	# standing with a tick earlier, bone included. What turns it into meat is
+	# something biting it, which nothing has yet.
+	if pieces.size() == 1:
+		var piece: TissueGrid.Piece = pieces[0]
+		_check(absf(piece.flesh - standing) < 0.001,
+			"a severed limb arrived with %.1f of the %.1f it was standing with"
+				% [piece.flesh, standing])
+		_check(_layer_in(piece, TissueGrid.BONE) > 0.0 and _layer_in(piece, TissueGrid.SKIN) > 0.0,
+			"a severed limb arrived without its bone and skin — it was ground up, not cut off")
+		_check(piece.share > 0.0 and piece.share < 1.0,
+			"a severed limb reported %.2f of the whole animal" % piece.share)
 	# Gone means gone, through the machinery that was already there.
 	_check(tissue.limb_solid("RR", 0) <= 0.0 and tissue.limb_solid("RR", 2) <= 0.0,
 		"a severed limb still occupies space")
@@ -540,6 +560,7 @@ func _check_severed_limb_leaves(c: Creature) -> void:
 	_check(not c.anatomy.state.limb("RL").severed, "the wrong limbs came off")
 	_walk(c, 120)
 	_check(c.alive, "losing one leg killed the creature")
+	c.part_severed.disconnect(handle)
 	_restore(c)
 
 
@@ -600,9 +621,9 @@ func _check_broken_limb_dangles(c: Creature) -> void:
 	_restore(c)
 	var state: BodyState = c.anatomy.state
 	var patch: TissueGrid.Patch = c.anatomy.tissue.patch("RR")
-	var shed: Array = []
-	var handle: Callable = func(chunks: Array, _at: Vector2) -> void: shed.append_array(chunks)
-	c.tissue_shed.connect(handle)
+	var pieces: Array = []
+	var handle: Callable = func(taken: Array) -> void: pieces.append_array(taken)
+	c.part_severed.connect(handle)
 
 	_break_limb_bone(c, "RR")
 	_walk(c, 2)
@@ -615,8 +636,8 @@ func _check_broken_limb_dangles(c: Creature) -> void:
 		"a limb hanging by flesh reported only %.2f of it still joined on" % region.attached)
 	_check(patch.gone_count < patch.cells,
 		"a limb that was only broken was emptied as though it had been severed")
-	_check(shed.is_empty(),
-		"a broken limb shed %d pieces into the world without coming off" % shed.size())
+	_check(pieces.is_empty(),
+		"a broken limb put %d pieces into the world without coming off" % pieces.size())
 
 	# It bears nothing and is asked for nothing.
 	_check(region.load <= 0.05,
@@ -658,7 +679,7 @@ func _check_broken_limb_dangles(c: Creature) -> void:
 	_check(hurt.joints[0].distance_to(hurt.joints[2]) <= hurt.total_length + 0.01,
 		"the dangling limb was pulled out past its own bones")
 
-	c.tissue_shed.disconnect(handle)
+	c.part_severed.disconnect(handle)
 	_restore(c)
 
 
@@ -669,9 +690,9 @@ func _check_tail_comes_off(c: Creature) -> void:
 	_restore(c)
 	var tissue: TissueGrid = c.anatomy.tissue
 	var patch: TissueGrid.Patch = tissue.patch(TissueGrid.BODY_KEY)
-	var shed: Array = []
-	var handle: Callable = func(chunks: Array, _at: Vector2) -> void: shed.append_array(chunks)
-	c.tissue_shed.connect(handle)
+	var pieces: Array = []
+	var handle: Callable = func(taken: Array) -> void: pieces.append_array(taken)
+	c.part_severed.connect(handle)
 
 	# Straight through the animal at the root of the tail: every row of one column,
 	# vertebra included.
@@ -689,7 +710,8 @@ func _check_tail_comes_off(c: Creature) -> void:
 			% state.regions[BodyPlan.TAIL].attached)
 	_check(patch.gone[beyond] != 0,
 		"the tail was severed but the tissue behind the cut stayed on the body")
-	_check(not shed.is_empty(), "a tail came off without anything entering the world")
+	_check(pieces.size() == 1,
+		"a tail coming off produced %d pieces, not one" % pieces.size())
 	# Gone means gone, through the same machinery a limb uses.
 	_check(tissue.body_solid(0.95, 1.0) <= 0.0 and tissue.body_solid(0.95, -1.0) <= 0.0,
 		"a severed tail still occupies space")
@@ -700,7 +722,39 @@ func _check_tail_comes_off(c: Creature) -> void:
 	_walk(c, 120)
 	_check(c.alive, "losing its tail killed the creature")
 
-	c.tissue_shed.disconnect(handle)
+	c.part_severed.disconnect(handle)
+	_restore(c)
+
+
+## The same walk, on the one part whose loss the animal cannot survive — and it
+## does not survive it for a reason nothing states: the brain is cells in the
+## head, so a head that leaves takes its brain with it, and a body with no brain
+## has already been unable to hold itself up since long before any of this existed.
+func _check_a_severed_head_takes_the_brain(c: Creature) -> void:
+	_restore(c)
+	var tissue: TissueGrid = c.anatomy.tissue
+	_check(tissue.organ(BodyPlan.BRAIN) > 0.99, "the creature started without a brain")
+
+	# Clean through the neck: the first torso column, every row of it, vertebra and
+	# all. Nothing is aimed at the skull and nothing touches it.
+	for row in BodyPlan.BODY_ROWS:
+		_bite_cell(c, TissueGrid.BODY_KEY, BodyPlan.HEAD_COLS * BodyPlan.BODY_ROWS + row,
+			6.0, 20)
+	for _i in 4:
+		c._physics_process(TICK)
+
+	var head: TissueGrid.Patch = tissue.patch(TissueGrid.BODY_KEY)
+	var standing: int = 0
+	for col in BodyPlan.HEAD_COLS:
+		for row in BodyPlan.BODY_ROWS:
+			standing += 1 if head.gone[col * BodyPlan.BODY_ROWS + row] == 0 else 0
+	_check(standing == 0, "%d cells of head stayed on a body it was cut off from" % standing)
+	_check(c.anatomy.state.regions[BodyPlan.HEAD].severed,
+		"a head cut clean off was still reported attached")
+	_check(tissue.organ(BodyPlan.BRAIN) <= 0.0,
+		"the brain stayed behind when the head it sits in left (%.2f)"
+			% tissue.organ(BodyPlan.BRAIN))
+	_check(not c.alive, "a decapitated creature was still driving itself")
 	_restore(c)
 
 
@@ -716,9 +770,9 @@ func _check_a_cut_sheds_only_what_is_past_it(c: Creature) -> void:
 	var tissue: TissueGrid = c.anatomy.tissue
 	var state: BodyState = c.anatomy.state
 	var patch: TissueGrid.Patch = tissue.patch("FL")
-	var shed: Array = []
-	var handle: Callable = func(chunks: Array, _at: Vector2) -> void: shed.append_array(chunks)
-	c.tissue_shed.connect(handle)
+	var pieces: Array = []
+	var handle: Callable = func(taken: Array) -> void: pieces.append_array(taken)
+	c.part_severed.connect(handle)
 
 	# Straight through the shin, well short of the foot.
 	var cut: int = 4
@@ -739,7 +793,8 @@ func _check_a_cut_sheds_only_what_is_past_it(c: Creature) -> void:
 	_check(above > 0, "cutting through a shin took the thigh above it as well")
 	_check(past == 0,
 		"%d cells of foot survived a limb cut through above them" % past)
-	_check(not shed.is_empty(), "a limb came apart without anything entering the world")
+	_check(pieces.size() == 1,
+		"a limb coming apart at the shin produced %d pieces, not one" % pieces.size())
 	_check(tissue.limb_solid("FL", 2) <= 0.0, "a detached foot still occupies space")
 	_check(tissue.limb_solid("FL", 0) > 0.0, "the whole limb left when only its shin was cut")
 	# What is left is a stump, wholly joined on — and hanging, because the bone it
@@ -751,7 +806,7 @@ func _check_a_cut_sheds_only_what_is_past_it(c: Creature) -> void:
 	_walk(c, 90)
 	_check(c.alive, "cutting through one shin killed the creature")
 
-	c.tissue_shed.disconnect(handle)
+	c.part_severed.disconnect(handle)
 	_restore(c)
 
 
@@ -783,6 +838,22 @@ func _bite_cell(c: Creature, patch_key: String, cell: int, depth: float,
 	var shed: Array = []
 	for _i in times:
 		tissue.bite(BiteMark.mouthful(patch.centre_of(cell), Vector2.RIGHT, 0.8, depth), shed)
+
+
+## Every hit point standing in a patch.
+func _flesh_in(patch: TissueGrid.Patch) -> float:
+	var total: float = 0.0
+	for i in patch.hp.size():
+		total += patch.hp[i]
+	return total
+
+
+## Every hit point of one tissue in a piece that has come away.
+func _layer_in(piece: TissueGrid.Piece, layer: int) -> float:
+	var total: float = 0.0
+	for cell in piece.cells:
+		total += piece.hp[cell * TissueGrid.LAYERS + layer]
+	return total
 
 
 ## Chews one cell down to its bone and stops there, whatever the bone costs.

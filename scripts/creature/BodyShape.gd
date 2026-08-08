@@ -26,6 +26,20 @@ var eye_left: Vector2 = Vector2.ZERO
 var eye_right: Vector2 = Vector2.ZERO
 var eye_radius: float = 2.0
 
+## A mouthful travelling down the gullet: how far along the body it currently is,
+## and how much of the body's own width it adds where it is.
+##
+## Written into the width profile rather than painted over the top of it, so the
+## distension is the body — the lattice tessellates the swollen cross-sections, the
+## silhouette bulges, the collision capsules widen, and what the creature weighs
+## goes briefly up because there is briefly more of it. A lump drawn on the outside
+## of a body would be none of those things.
+var swallow_at: float = 0.0
+var swallow_size: float = 0.0
+## How far along the body a swallow's distension reaches either side of itself.
+## Narrow, because what is passing is a discrete object rather than a wave.
+const SWALLOW_SPREAD: float = 0.11
+
 ## "FL" / "FR" / "RL" / "RR" -> Spine.Frame positioned at the limb socket.
 var anchors: Dictionary = {}
 ## Index of the last spine point included in the silhouette (tail clipping).
@@ -49,7 +63,8 @@ func build(spine: Spine, p: CreatureParams, scale: float) -> void:
 	widths.resize(n)
 	for i in n:
 		var t: float = float(i) / float(n - 1)
-		widths[i] = maxf(_catmull_rom(knots, t) * p.body_width * scale, 0.6)
+		widths[i] = maxf(_catmull_rom(knots, t) * p.body_width * scale
+			* (1.0 + _swallow_at(t)), 0.6)
 
 	# The tail is just the spine past the hips, so making it optional is a
 	# matter of clipping the silhouette early rather than resizing the chain.
@@ -105,6 +120,19 @@ func build(spine: Spine, p: CreatureParams, scale: float) -> void:
 	_set_anchor(spine, p, "FR", p.front_limb_t, -1.0)
 	_set_anchor(spine, p, "RL", p.rear_limb_t, 1.0)
 	_set_anchor(spine, p, "RR", p.rear_limb_t, -1.0)
+
+
+## How much a mouthful going down adds to the width at one station. A smooth hump
+## centred on where the piece has got to, so the swelling travels with it and the
+## tissue either side of it is drawn taut rather than stepped.
+func _swallow_at(t: float) -> float:
+	if swallow_size <= 0.0:
+		return 0.0
+	var away: float = absf(t - swallow_at) / SWALLOW_SPREAD
+	if away >= 1.0:
+		return 0.0
+	var falloff: float = 1.0 - away * away
+	return swallow_size * falloff * falloff
 
 
 func _set_anchor(spine: Spine, p: CreatureParams, key: String, t: float, side: float) -> void:

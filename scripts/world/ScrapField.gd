@@ -70,10 +70,13 @@ func _ready() -> void:
 ## Pulls a bite's worth of shed tissue a short distance outward from `origin`.
 ## Broad pieces carry more inertia and barely tumble; this is a heavy tear, not
 ## a particle spray.
-## `source` is the creature it came off, which is the one creature that may not
-## then eat it.
-func scatter(chunks: Array, origin: Vector2, source: Node) -> void:
-	var source_id: int = source.get_instance_id() if source != null else 0
+##
+## `source_id` is the creature it came off, which is the one creature that may not
+## then eat it. An id rather than a reference because meat outlives the animal it
+## was, and because by the time some of it arrives here it has been chewed off a
+## severed leg that was itself lying in a third creature's mouth — whose flesh it
+## is has not changed through any of that.
+func scatter(chunks: Array, origin: Vector2, source_id: int) -> void:
 	for chunk in chunks:
 		var scrap := Scrap.new()
 		scrap.pos = chunk.pos

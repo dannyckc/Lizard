@@ -52,6 +52,8 @@ func _physics_process(_delta: float) -> bool:
 		_take_hold()  # the grip overlay, which only draws while jaws are latched
 	if ticks == 45:
 		_scar_target()  # exercise the skin, muscle, bone and cavity cell draws
+	if ticks == 60:
+		_sever_target()  # exercise the carrion field's cell, shadow and grain draws
 	if ticks == 120:
 		main.get_node("Creature").params.tail_enabled = false  # exercise tail clipping
 	if ticks >= 240:
@@ -64,13 +66,17 @@ func _physics_process(_delta: float) -> bool:
 		# an empty read draws nothing at all and would smoke-test clean.
 		var smell: SmellSense = (main.get_node("Creature/Senses") as CreatureSenses).smell
 		var sounds: Array[SoundField.SoundWave] = (main.get_node("SoundField") as SoundField).waves
-		print("render smoke OK — %d draws / %d ticks | speed %.0f px/s | travelled %.0f px | outline %d verts | feet moved: %s | gripped: %s | target integrity %.2f | %d scraps | %d scent / %d marks"
+		var carrion: CarrionField = main.get_node("CarrionField")
+		print("render smoke OK — %d draws / %d ticks | speed %.0f px/s | travelled %.0f px | outline %d verts | feet moved: %s | gripped: %s | target integrity %.2f | %d scraps | %d parts | %d scent / %d marks"
 			% [draws, ticks, c.speed, c.head_pos.length(), c.body.outline.size(),
 				str(stepped), str(gripped), target.anatomy.tissue.integrity(),
-				main.get_node("ScrapField").scraps.size(),
+				main.get_node("ScrapField").scraps.size(), carrion.parts.size(),
 				(main.get_node("ScentField") as ScentField).traces.size(), smell.marks.size()])
 		if smell.marks.is_empty():
 			print("RENDER SMOKE FAIL — the smell layer drew nothing")
+			quit(1)
+		if carrion.parts.is_empty():
+			print("RENDER SMOKE FAIL — the carrion field had no part to draw")
 			quit(1)
 		if sounds.is_empty():
 			print("RENDER SMOKE FAIL — the hearing layer had no wavefront to draw")
@@ -111,3 +117,15 @@ func _scar_target() -> void:
 	for point in points:
 		for _repeat in 6:
 			target.apply_bite(BiteMark.mouthful(point, Vector2.RIGHT, 9.0, 3.0))
+
+
+## Eats one leg off at the socket so a severed part enters the world and its cell,
+## shadow and grain passes are drawn for the rest of the run.
+func _sever_target() -> void:
+	var target: Creature = main.get_node("TargetCreature")
+	var patch: TissueGrid.Patch = target.anatomy.tissue.patch("RR")
+	var shed: Array = []
+	for row in BodyPlan.LIMB_ROWS:
+		for _repeat in 8:
+			target.anatomy.tissue.bite(BiteMark.mouthful(
+				patch.centre_of(row), Vector2.RIGHT, 0.8, 6.0), shed)

@@ -28,8 +28,8 @@ godot --path . --editor   # open the editor
 | `A` `D` / left/right arrows | turn the body left/right; switching sides sheds the old swing at the brake rate, so the flip answers immediately |
 | move mouse | shift and look the head toward the cursor; the mouse never steers the body |
 | left click | bite (anatomical hit + cooldown) |
-| hold left click | keep hold of what you bit — drag it, or be dragged by it |
-| click again while holding | chew: shut the same jaws on the same flesh once more |
+| hold left click | keep hold of what you bit — a creature, or a severed part; drag it, carry it off, or be dragged by it |
+| click again while holding | chew: shut the same jaws on the same flesh once more. On a piece of meat this works it in, and swallows it once what is left will fit |
 | `Shift` | sprint |
 | `F1` | show/hide the tuning panel |
 | `F2` | toggle debug draw |
@@ -49,9 +49,11 @@ bitten, held, towed and eaten. A click throws the head forward in a lunge and th
 extension, eating into a lattice of body cells layered skin over muscle over
 bone. If the button remains held when the bite connects, the jaws *keep hold*:
 the two creatures are joined at that point and whoever has the weight and the
-strength decides where the pair goes from there. Tissue that comes off falls
-into the world as meat and can be eaten. Bodies are solid, so the two creatures
-can be walked into rather than through.
+strength decides where the pair goes from there. Tissue a bite destroys falls into
+the world as meat and can be eaten; a part that comes *off* — a leg, a tail, a head
+— stays a part, and has to be bitten, carried off and chewed down before it will go
+down. Bodies are solid, so the two creatures can be walked into rather than
+through.
 
 ## How it works
 
@@ -77,6 +79,8 @@ input ──▶ head position ──▶ contacts + grip ──▶ spine ──�
 | [BiteMark.gd](scripts/creature/BiteMark.gd) | the footprint one closing of the jaws leaves — the only description of a bite anything downstream gets |
 | [TissueGrid.gd](scripts/creature/TissueGrid.gd) | the body-space cell lattice: skin over muscle over bone, and what a bite does to it |
 | [ScrapField.gd](scripts/world/ScrapField.gd) | tissue knocked loose, as meat lying in the world |
+| [CarrionField.gd](scripts/world/CarrionField.gd) | parts of animals lying in the world — still anatomy, until something bites them |
+| [Mouthful.gd](scripts/creature/Mouthful.gd) | a piece of meat in a set of jaws: carrying it, working it in, and getting it down |
 | [Fabrik.gd](scripts/creature/Fabrik.gd) | generic FABRIK chain solver |
 | [Limb.gd](scripts/creature/Limb.gd) | one arm/leg: bones + step-cycle state |
 | [Gait.gd](scripts/creature/Gait.gd) | where feet want to be, when they pick up, where they land |
@@ -690,10 +694,63 @@ eating one lucky place in it.
 Nothing in the walk knows what it is looking at, which is the whole return on
 doing it this way. **A leg, a shin, a tail and a head all come off through the
 same line**, because none of them was ever named — the cut decides how much
-leaves, and it takes tissue the bite never touched along with it. What comes away
-is emptied into the world as meat, and *empty* is a state everything already
-understands completely: an empty cell is not drawn, does not collide, cannot be
-bitten and reports no reach.
+leaves, and it takes tissue the bite never touched along with it. What is left
+behind is *empty*, and empty is a state everything already understands completely:
+an empty cell is not drawn, does not collide, cannot be bitten and reports no
+reach.
+
+One piece per surviving component, not one per severance. A closing that takes a
+leg off at the shoulder and knocks the end off a tail has parted the animal into
+three, and the components the walk already found are what make those two separate
+things on the ground rather than one impossible object.
+
+#### What comes off is a leg, not meat
+
+A part that has come away has had *nothing done to it*. It arrives with every hit
+point it was standing with a tick earlier — skin over fat over muscle over bone,
+in the same cells, in the same pose — because being severed is not damage. It is
+the same tissue, somewhere else.
+
+So it enters the world through `CarrionField` rather than `ScrapField`, and the
+difference between those two is a difference in kind rather than in size. A scrap
+is meat: tissue a bite already destroyed, with no structure left to lose, which is
+why walking over one eats it. A part is anatomy lying on the ground — it is bitten,
+eroded and shed through the *same* code the body it came off is, because the rule
+for how flesh gives under a bite cannot depend on whose flesh it is. `erode_stack`
+and `coalesce_shed` are shared verbatim between the two, and a severed leg is drawn
+through the same colour read as the leg it was, so it is not restyled by having
+come off.
+
+The rule this buys is a rule about nothing: **a severed part is never converted
+into anything**, and nobody anywhere has to remember not to convert it. It becomes
+meat when a mouth makes it meat.
+
+#### Picking it up, and dragging it
+
+Jaws that close on a part take it. That is a `Mouthful` and deliberately not a
+`Grip`: a grip is a contest between two animals with a winner to work out, and
+meat does not pull back. What replaces all of that machinery is possession.
+
+A held part is *placed* by the jaws, and a loose one is *integrated* by the field
+— the same division the rig already makes between a limb the gait is striding and
+a limb nothing is holding out. Whether being placed reads as carrying or as
+dragging is one division: the creature's strength against the piece's weight, in
+the same Lizard units every other mass in the simulation is quoted in. A piece it
+can lift is back at its mouth within a tick and rides wherever the head goes; a
+piece it cannot is always behind where it was asked to be, and being always behind
+*is* being dragged. There is no threshold and no second path. The same weight goes
+into `_haul_factor`, so towing a Komodo's thigh costs what towing a Komodo costs,
+for the same reason and through the same line.
+
+The pull is split between shifting the piece and turning it exactly as a rigid
+body splits an impulse off its centre of mass — and not symmetrically. Along the
+arm from the hold to the centre it is pure translation, because there is no way to
+rotate a thing toward yourself; across the arm it mostly swings, and the further
+out the jaws have hold the more mostly. **That asymmetry is where bite position
+enters the animation without anything animating it.** A leg taken by the ankle is
+hauled along its own length and slews freely across it, so it trails and swings
+after the animal; the same leg taken across its middle has no lever and is carried
+level. Neither is posed and neither is a case.
 
 #### Attached and held up are different questions
 
@@ -717,6 +774,42 @@ already inside both limits is left alone by them. A limb hanging off a socket th
 is walking away from it is outside them every tick, and was being left a couple of
 pixels long every time. Bones are now the last thing applied — the fold and the
 sprawl are taste, the length of a bone is not.
+
+#### Eating is two numbers
+
+Biting, chewing and swallowing are not three modes with transitions between them.
+There is no state machine anywhere in `Mouthful`. They are three readings of the
+same two numbers — **where the jaws have hold of the piece**, and **how far the
+piece reaches from there**:
+
+* The piece **props the jaws open** by however much of it will not fit inside
+  them. `reach / gape`, clamped. That is what biting a thing too big for your
+  mouth looks like, and it is a division rather than an animation.
+* A chew that cannot swallow **works the piece in**: it goes out through the
+  ordinary bite signal, so the world erodes the piece and scatters what came off
+  with no idea it was chewing rather than biting, and then the jaws re-seat a step
+  deeper into what survived. Repeat and a long piece is eaten end-first instead of
+  being gnawed forever at the spot it was first grabbed.
+* Once what is left reaches no further than the mouth is deep, the next closing
+  **swallows** it, because there is nothing left to stop it going down.
+
+So a Crocodile bolts a Lizard's foot in one closing and a Gecko gnaws at a
+Crocodile's thigh for a long time, and neither of those is written anywhere. Food
+size, food shape, mouth size and bite position all arrive in that one comparison,
+and none of them is named in it.
+
+A swallow is visible in the body it passes down. The distension is written into
+the width profile *before* the body is built, so it is not a lump drawn over a
+silhouette: the lattice tessellates the swollen cross-sections, the collision
+capsules widen, and the creature briefly weighs more because there is briefly more
+of it. The swelling travels back with the piece and the tissue closes behind it.
+
+Chewing a piece through divides it, on the same rule that made it in the first
+place — cells still joined to each other by surviving tissue are one thing and
+cells that are not are another. The jaws keep whichever half they were holding and
+the rest falls where it was. Nothing there knows what it is cutting either: a leg
+chewed through at the ankle drops its foot for the identical reason the animal
+dropped the leg.
 
 #### A healthy creature pays nothing
 
@@ -1189,8 +1282,8 @@ the other senses.
 
 ## Tests
 
-Eleven headless checks cover controls, movement feel, simulation, rendering, UI,
-combat, sight, smell, hearing, anatomy and the bodies in the habitat:
+Twelve headless checks cover controls, movement feel, simulation, rendering, UI,
+combat, sight, smell, hearing, anatomy, feeding and the bodies in the habitat:
 
 ```sh
 godot --headless --path . --script tests/ControlsTest.gd # input/head-look isolation
@@ -1204,7 +1297,22 @@ godot --headless --path . --script tests/HearingTest.gd  # arrival/occlusion/eve
 godot --headless --path . --script tests/CombatTest.gd    # bite/anatomy slice
 godot --headless --path . --script tests/RagdollTest.gd   # the dead body
 godot --headless --path . --script tests/AnatomyTest.gd   # structure -> function -> gait
+godot --headless --path . --script tests/FeedingTest.gd   # severed parts, carrying, eating
 ```
+
+`FeedingTest` is weighted toward the seams rather than the parts. That a severed
+limb enters the world with the tissue it was standing with to the hit point and
+the scrap field stays empty; that it can lie there for four seconds and still be a
+leg, and that one closing of a set of jaws is the whole difference; that the same
+piece made sixty thousand times heavier answers the jaws a third as readily,
+costs its carrier half its travel, and still cannot get further away than the mouth
+can reach; that a piece too big props the jaws open and the same piece chewed down
+lets them close; that chewing works the hold in so the reach falls; that what fits
+goes down, feeds the animal by the tissue in it and stops being in the world; that
+the throat distends around it, travels with it and closes behind it; that chewing
+straight through the middle leaves two pieces with the jaws holding one; and that
+meat is still your own meat after being severed, carried across the world by
+somebody else and chewed into scraps there.
 
 `SmellTest` checks the two halves separately and then the seam. On the world
 side: a deposit leaves one trace, a source renewing in place stays one smell
@@ -1382,10 +1490,21 @@ Deliberate, in the interest of a stable and readable prototype:
   how much speed a contact sheds, so a heavy creature can shoulder a light one
   aside — but nothing is transferred: a creature that stops pushing stops moving
   whatever it was carrying, and there is no impact, recoil or knockback.
-- A severed part — a leg, a tail, a head — becomes scrap rather than a body of its
-  own: it lands, settles and can be eaten, but it is not separately simulated as
-  an articulated piece. That is the granularity the world has — scraps are its
-  independent physical objects — and not a claim that a detached leg should be one.
+- A severed part is a rigid body, not an articulated one. It keeps the exact pose
+  it was solved in on the tick it came away and moves as one piece from then on, so
+  a leg torn off mid-stride stays bent at that knee forever. It has no rig to bend:
+  the two-bone chain that posed it belongs to the animal, and the piece has left.
+- A severed part does not collide with anything. It lies where it fell and
+  creatures walk over it, exactly as scraps do. It can be bitten and carried, but
+  it cannot be tripped over or shouldered aside.
+- Nothing eats without being driven. A part lying in the world is picked up and
+  chewed by working the same button a bite uses, so the whole feeding loop is the
+  player's; the habitat's other body has no AI to want it. Scraps and pellets are
+  still swallowed by proximity, which is the one thing that happens by itself.
+- A swallowed part is worth its own tissue while a scrap is worth one, so a piece
+  eaten whole feeds considerably more than the same piece chewed into scraps and
+  picked up. That is a balance number rather than a mechanism, and the scrap side
+  of it is the one that predates this.
 - A part still hanging by soft tissue dangles from its socket rather than from the
   break itself, because the rig underneath it is a two-bone chain from the socket
   and has no joint where the bone actually parted. A limb broken at the shin

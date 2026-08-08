@@ -114,6 +114,49 @@ class Shed extends RefCounted:
 	var row: int = 0
 
 
+## One connected piece of an animal that is no longer joined to the rest of it.
+##
+## Not meat, and the distinction is the whole of why this class exists. A `Shed`
+## chunk is tissue a bite destroyed and threw clear — it has already stopped being
+## anatomy. This is anatomy that is merely somewhere else: every cell of it arrives
+## with exactly the hit points it had a moment ago, still stacked skin over fat
+## over muscle over bone, still holding whatever organ it grew around. A severed
+## leg is a leg. What turns it into meat is the same thing that turns a living leg
+## into meat, which is something biting it.
+##
+## Carried in the lattice's own terms and in world space, because that is all the
+## lattice knows. What the world makes of it — where its centre is, what it weighs,
+## how it lies on the ground — is the world's business.
+class Piece extends RefCounted:
+	var cells: int = 0
+	## Four world corners per cell, wound as `Patch.corners_of` winds them: the
+	## pose the tissue was standing in on the tick it came away.
+	var corners: PackedVector2Array = PackedVector2Array()
+	## Remaining hit points, `cell * LAYERS + layer` — the same depth stack the
+	## body stored, handed over untouched rather than summarised.
+	var hp: PackedFloat32Array = PackedFloat32Array()
+	## Fat each cell was laid down with, so a piece off a well-padded animal still
+	## reads as one once nothing is left to ask.
+	var fat_full: PackedFloat32Array = PackedFloat32Array()
+	## Which cells of the piece touch which, as a start index per cell into
+	## `link_to`. Carried rather than re-derived because adjacency here is a fact
+	## about the lattice these cells came out of, and once they have left it there
+	## is nothing to ask.
+	var link_start: PackedInt32Array = PackedInt32Array()
+	var link_to: PackedInt32Array = PackedInt32Array()
+	## Where in the animal each cell was. Kept for one purpose only: meat chewed off
+	## the piece later has to join into chunks by the same adjacency a bite on a
+	## living body joins by, and once the cells have left the lattice there is
+	## nothing else to ask.
+	var cell_key: PackedStringArray = PackedStringArray()
+	var cell_col: PackedInt32Array = PackedInt32Array()
+	var cell_row: PackedInt32Array = PackedInt32Array()
+	## Tissue standing in it, and that as a fraction of the whole animal — which is
+	## how much of the animal's weight walked off with it.
+	var flesh: float = 0.0
+	var share: float = 0.0
+
+
 ## A rectangular cell lattice over one anatomical structure.
 ##
 ## Cells are addressed `col * rows + row`. Corners are shared between
@@ -321,6 +364,9 @@ var fat_reference: float = 0.0
 ## The same for the two organs, which are single structures rather than regions.
 var organ_hp: PackedFloat32Array = PackedFloat32Array()
 var organ_full: PackedFloat32Array = PackedFloat32Array()
+## Everything this animal was built out of. What a piece leaving is measured
+## against, so how much of itself a body has lost is one division.
+var full_hp: float = 0.0
 
 ## Bumped whenever any cell loses anything. The functional layer recomputes off
 ## this rather than per tick: an animal nobody has bitten is a body whose
@@ -356,9 +402,15 @@ var _joins: Dictionary = {}
 ## the creature and a bite must not allocate per cell.
 var _component: PackedInt32Array = PackedInt32Array()
 var _attached_revision: int = -1
+## Where each cell ended up in the piece currently being handed over, or -1. Held
+## rather than allocated, for the same reason `_component` is.
+var _piece_index: PackedInt32Array = PackedInt32Array()
 
 ## Reused corner buffer, so a bite allocates nothing per cell it tests.
 var _quad := PackedVector2Array([Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO])
+## What one closing took out of each layer of one cell, so erosion reports its
+## working without returning an array per cell.
+var _taken := PackedFloat32Array()
 
 
 func _init(p_plan: BodyPlan = null, p_fat_reserve: float = 1.0) -> void:
@@ -377,6 +429,7 @@ func _init(p_plan: BodyPlan = null, p_fat_reserve: float = 1.0) -> void:
 	organ_full.resize(BodyPlan.ORGAN_NAMES.size())
 	_region_attached.resize(BodyPlan.REGIONS)
 	_region_standing.resize(BodyPlan.REGIONS)
+	_taken.resize(LAYERS)
 	# Before `reset`, which finishes by walking it: a lattice has to be able to say
 	# what is joined to what from the moment it exists, or the first thing to ask
 	# is told the animal is in pieces.
@@ -398,8 +451,10 @@ func reset() -> void:
 	region_full.fill(0.0)
 	organ_full.fill(0.0)
 	fat_reference = 0.0
+	full_hp = 0.0
 	for key in patches:
 		_fill(patches[key])
+		full_hp += patches[key].full_hp
 	region_hp = region_full.duplicate()
 	organ_hp = organ_full.duplicate()
 	revision += 1
@@ -412,13 +467,12 @@ func patch(key: String) -> Patch:
 
 ## Whole-creature integrity: 1.0 intact, down to 0.0 stripped to nothing.
 func integrity() -> float:
-	var full: float = 0.0
+	if full_hp <= 0.0:
+		return 1.0
 	var left: float = 0.0
 	for key in patches:
-		var p: Patch = patches[key]
-		full += p.full_hp
-		left += p.remaining_hp
-	return left / full if full > 0.0 else 1.0
+		left += patches[key].remaining_hp
+	return left / full_hp
 
 
 func patch_integrity(key: String) -> float:
@@ -623,20 +677,29 @@ func bite(mark: BiteMark, shed: Array) -> float:
 			if depth <= 0.0:
 				continue
 			removed += _erode(p, cell, depth, at, loose)
-	_coalesce_shed(loose, shed)
+	coalesce_shed(loose, shed)
 	return removed
 
 
-func _erode(p: Patch, cell: int, budget: float, at: Vector2, shed: Array) -> float:
-	var base: int = cell * LAYERS
-	var region_base: int = int(p.region[cell]) * LAYERS
-	var organ: int = int(p.organ[cell])
+## Spends one closing's worth of penetration down one cell's depth stack, outside
+## in, and reports what it took out of each layer in `taken`.
+##
+## Static, and given nothing but a run of hit points, because this is what flesh
+## does under a bite rather than what a creature does. The same rule has to hold
+## for a leg still on an animal and for that same leg once it is lying on the
+## ground in somebody else's jaws, or a piece of meat would change its nature by
+## coming off. Everything the two callers do differently — region totals, organs,
+## which layers come away in pieces — they do with the answer rather than inside
+## it.
+static func erode_stack(hp: PackedFloat32Array, base: int, budget: float,
+		taken: PackedFloat32Array) -> float:
+	taken.fill(0.0)
 	var removed: float = 0.0
 	for layer in LAYERS:
 		if budget <= 0.0:
 			break
 		var idx: int = base + layer
-		var have: float = p.hp[idx]
+		var have: float = hp[idx]
 		if have <= 0.0:
 			continue
 		var take: float = minf(budget, have)
@@ -652,28 +715,53 @@ func _erode(p: Patch, cell: int, budget: float, at: Vector2, shed: Array) -> flo
 			budget = 0.0  # nothing gets past bone until the bone itself is gone
 		else:
 			budget -= take
-		p.hp[idx] = have - take
+		hp[idx] = have - take
+		taken[layer] = take
 		removed += take
+	return removed
+
+
+## The chunk one destroyed soft layer of one cell throws clear.
+##
+## Soft tissue comes away in pieces; bone is ground down in place, and an organ is
+## pulped where it lies rather than thrown clear of a body whose skull or ribcage a
+## bite has only just got through. Shared with loose meat, which sheds by exactly
+## the same rule for exactly the same reason `erode_stack` is shared.
+static func shed_layer(layer: int, at: Vector2, extent: float, angle: float) -> Shed:
+	if layer == BONE or layer == ORGAN:
+		return null
+	var chunk := Shed.new()
+	chunk.pos = at
+	chunk.layer = layer
+	chunk.size = maxf(extent * 0.9, 1.5)
+	chunk.mass = chunk.size * chunk.size
+	chunk.angle = angle
+	return chunk
+
+
+func _erode(p: Patch, cell: int, budget: float, at: Vector2, shed: Array) -> float:
+	var base: int = cell * LAYERS
+	var removed: float = erode_stack(p.hp, base, budget, _taken)
+	if removed <= 0.0:
+		return 0.0
+	var region_base: int = int(p.region[cell]) * LAYERS
+	var organ: int = int(p.organ[cell])
+	for layer in LAYERS:
+		var take: float = _taken[layer]
+		if take <= 0.0:
+			continue
 		region_hp[region_base + layer] = maxf(region_hp[region_base + layer] - take, 0.0)
 		if layer == ORGAN and organ != BodyPlan.NO_ORGAN:
 			organ_hp[organ] = maxf(organ_hp[organ] - take, 0.0)
-		# Soft tissue comes away in pieces; bone is ground down in place, and an
-		# organ is pulped where it lies rather than thrown clear of a body whose
-		# skull or ribcage a bite has only just got through.
-		if p.hp[idx] <= 0.0 and layer != BONE and layer != ORGAN:
-			var chunk := Shed.new()
-			chunk.pos = at
-			chunk.layer = layer
-			chunk.size = maxf(p.extent_of(cell) * 0.9, 1.5)
-			chunk.mass = chunk.size * chunk.size
-			chunk.angle = p.angle_of(cell)
+		if p.hp[base + layer] > 0.0:
+			continue
+		var chunk: Shed = shed_layer(layer, at, p.extent_of(cell), p.angle_of(cell))
+		if chunk != null:
 			chunk.patch_key = p.key
 			chunk.col = cell / p.rows
 			chunk.row = cell % p.rows
 			shed.append(chunk)
 
-	if removed <= 0.0:
-		return 0.0
 	revision += 1
 	p.remaining_hp = maxf(p.remaining_hp - removed, 0.0)
 	if p.touched[cell] == 0:
@@ -718,6 +806,7 @@ func _build_address_space() -> void:
 		for cell in _patch_list[index].cells:
 			_patch_of[_base[index] + cell] = index
 	_component.resize(_cell_total)
+	_piece_index.resize(_cell_total)
 
 	# The sockets. A limb's proximal column is welded to the girdle cells the plan
 	# says it hangs from, and that is the whole of what makes a limb part of the
@@ -867,52 +956,42 @@ func region_attachment(region: int) -> float:
 ## reach — so a piece leaving needs nothing else written anywhere to stop existing
 ## everywhere at once.
 ##
-## Bone and organ come away with the rest rather than being ground down, because
-## nothing is grinding: the piece is not being destroyed, it is leaving.
-func shed_detached(shed: Array) -> float:
+## What leaves is a `Piece` and not a spray of `Shed` chunks, and that is the one
+## substantive thing this says. Tissue that has been *destroyed* is meat; tissue
+## that has merely stopped being joined on has had nothing done to it at all, and
+## is handed over with every hit point it was standing with a moment ago — bone
+## and organ included, because nothing here is grinding. The piece is not being
+## destroyed, it is leaving.
+##
+## One piece per surviving component rather than one per severance: a bite that
+## takes a leg off at the shoulder and knocks the end off a tail in the same
+## closing has parted the animal into three, and grouping by the components the
+## attachment walk already found is what makes those two separate things on the
+## ground instead of one impossible object.
+func take_detached(pieces: Array) -> float:
 	if detached_count <= 0:
 		return 0.0
-	var loose: Array = []
-	var removed: float = 0.0
-	for p in _patch_list:
-		var lost: float = 0.0
+	# Nothing has damaged the lattice since the walk ran, so its components are
+	# still the answer to which loose cells are loose *together*.
+	var groups: Dictionary = {}
+	for index in _patch_list.size():
+		var p: Patch = _patch_list[index]
+		var base: int = _base[index]
 		for cell in p.cells:
 			if p.gone[cell] != 0 or p.attached[cell] != 0:
 				continue
-			var base: int = cell * LAYERS
-			var region_base: int = int(p.region[cell]) * LAYERS
-			var organ: int = int(p.organ[cell])
-			for layer in LAYERS:
-				var have: float = p.hp[base + layer]
-				if have <= 0.0:
-					continue
-				p.hp[base + layer] = 0.0
-				lost += have
-				region_hp[region_base + layer] = maxf(region_hp[region_base + layer] - have, 0.0)
-				if layer == ORGAN and organ != BodyPlan.NO_ORGAN:
-					organ_hp[organ] = maxf(organ_hp[organ] - have, 0.0)
-				# One piece per surviving soft layer, exactly as a bite produces, so
-				# the pieces coalesce by layer downstream and a limb comes off as skin
-				# and meat rather than as one undifferentiated lump.
-				if layer == BONE or layer == ORGAN or not p.live:
-					continue
-				var chunk := Shed.new()
-				chunk.pos = p.centre_of(cell)
-				chunk.layer = layer
-				chunk.size = maxf(p.extent_of(cell) * 0.9, 1.5)
-				chunk.mass = chunk.size * chunk.size
-				chunk.angle = p.angle_of(cell)
-				chunk.patch_key = p.key
-				chunk.col = cell / p.rows
-				chunk.row = cell % p.rows
-				loose.append(chunk)
-			if p.touched[cell] == 0:
-				p.touched[cell] = 1
-				p.damaged.append(cell)
-			p.retire(cell)
-		if lost > 0.0:
-			p.remaining_hp = maxf(p.remaining_hp - lost, 0.0)
-			removed += lost
+			var id: int = _component[base + cell]
+			var members: PackedInt32Array = groups.get(id, PackedInt32Array())
+			members.append(base + cell)
+			groups[id] = members
+
+	var removed: float = 0.0
+	for id in groups:
+		var piece: Piece = _take_piece(groups[id])
+		if piece == null:
+			continue
+		removed += piece.flesh
+		pieces.append(piece)
 	# Everything that had come away has now gone, so nothing is left detached until
 	# the next cut makes something so. The walk agrees on the following tick; this
 	# is only what stops the loop above being re-run in the meantime.
@@ -920,14 +999,116 @@ func shed_detached(shed: Array) -> float:
 	if removed <= 0.0:
 		return 0.0
 	revision += 1
-	_coalesce_shed(loose, shed)
 	return removed
+
+
+## Lifts one component's worth of cells out of the lattice and into a piece.
+##
+## The cells are copied over whole and then emptied, in that order, so the piece
+## carries the body's own numbers rather than a summary of them: what the animal
+## loses is exactly what lands on the ground, down to the hit point.
+func _take_piece(members: PackedInt32Array) -> Piece:
+	var piece := Piece.new()
+	piece.cells = members.size()
+	if piece.cells <= 0:
+		return null
+	piece.corners.resize(piece.cells * 4)
+	piece.hp.resize(piece.cells * LAYERS)
+	piece.fat_full.resize(piece.cells)
+	piece.link_start.resize(piece.cells + 1)
+	piece.cell_key.resize(piece.cells)
+	piece.cell_col.resize(piece.cells)
+	piece.cell_row.resize(piece.cells)
+	_piece_index.fill(-1)
+	for i in piece.cells:
+		_piece_index[members[i]] = i
+
+	var links := PackedInt32Array()
+	for i in piece.cells:
+		var global: int = members[i]
+		var index: int = _patch_of[global]
+		var p: Patch = _patch_list[index]
+		var cell: int = global - _base[index]
+		var col: int = cell / p.rows
+		var base: int = cell * LAYERS
+		piece.cell_key[i] = p.key
+		piece.cell_col[i] = col
+		piece.cell_row[i] = cell % p.rows
+
+		# The pose the tissue was standing in on the tick it stopped being part of
+		# an animal. Nothing will rebuild these corners again — that is what having
+		# come off *is* — so this is the shape the piece keeps.
+		p.corners_of(cell, _quad)
+		for k in 4:
+			piece.corners[i * 4 + k] = _quad[k]
+		piece.fat_full[i] = FAT_HP * fat_reserve \
+			* plan.fat_at(p.key, col, p.row_centre(cell % p.rows))
+
+		var region_base: int = int(p.region[cell]) * LAYERS
+		var organ: int = int(p.organ[cell])
+		var lost: float = 0.0
+		for layer in LAYERS:
+			var have: float = p.hp[base + layer]
+			piece.hp[i * LAYERS + layer] = have
+			if have <= 0.0:
+				continue
+			p.hp[base + layer] = 0.0
+			lost += have
+			region_hp[region_base + layer] = maxf(region_hp[region_base + layer] - have, 0.0)
+			if layer == ORGAN and organ != BodyPlan.NO_ORGAN:
+				organ_hp[organ] = maxf(organ_hp[organ] - have, 0.0)
+		piece.flesh += lost
+		p.remaining_hp = maxf(p.remaining_hp - lost, 0.0)
+
+		piece.link_start[i] = links.size()
+		_append_piece_links(global, links)
+		if p.touched[cell] == 0:
+			p.touched[cell] = 1
+			p.damaged.append(cell)
+		p.retire(cell)
+
+	piece.link_start[piece.cells] = links.size()
+	piece.link_to = links
+	piece.share = piece.flesh / full_hp if full_hp > 0.0 else 0.0
+	return piece
+
+
+## The neighbours of one cell that left in the same piece it did. Read off the
+## same adjacency the attachment walk uses, sockets included, so a piece that took
+## a shoulder and the leg hanging from it knows the two are joined.
+func _append_piece_links(global: int, links: PackedInt32Array) -> void:
+	var index: int = _patch_of[global]
+	var p: Patch = _patch_list[index]
+	var local: int = global - _base[index]
+	var row: int = local % p.rows
+	if row > 0:
+		_append_member(global - 1, links)
+	if row < p.rows - 1:
+		_append_member(global + 1, links)
+	if local >= p.rows:
+		_append_member(global - p.rows, links)
+	if local < p.cells - p.rows:
+		_append_member(global + p.rows, links)
+	if _joins.has(global):
+		for other in _joins[global] as PackedInt32Array:
+			_append_member(other, links)
+
+
+func _append_member(global: int, links: PackedInt32Array) -> void:
+	var at: int = _piece_index[global]
+	if at >= 0:
+		links.append(at)
 
 
 ## Joins orthogonally adjacent cells from the same tissue layer and anatomical
 ## patch into one torn piece. The lattice remains useful collision/damage data,
 ## but it no longer dictates the scale of the visible meat.
-func _coalesce_shed(loose: Array, shed: Array) -> void:
+##
+## Static, and shared with loose meat for the same reason `erode_stack` is: a
+## mouthful chewed off a severed leg is a mouthful of leg, and it should arrive in
+## the world at the same scale as one bitten off the animal that was still wearing
+## it.
+static func coalesce_shed(loose: Array, shed: Array) -> void:
 	if loose.is_empty():
 		return
 	var joined := PackedByteArray()

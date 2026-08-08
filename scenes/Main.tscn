@@ -3,6 +3,7 @@
 [ext_resource type="Script" path="res://scripts/Main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/FoodField.gd" id="2_food"]
 [ext_resource type="Script" path="res://scripts/world/ScrapField.gd" id="6_scrap"]
+[ext_resource type="Script" path="res://scripts/world/CarrionField.gd" id="14_carrion"]
 [ext_resource type="Script" path="res://scripts/creature/Creature.gd" id="3_creature"]
 [ext_resource type="Script" path="res://scripts/creature/CreatureView.gd" id="4_view"]
 [ext_resource type="Script" path="res://scripts/creature/CreatureParams.gd" id="5_params"]
@@ -28,6 +29,9 @@ script = ExtResource("2_food")
 
 [node name="ScrapField" type="Node2D" parent="."]
 script = ExtResource("6_scrap")
+
+[node name="CarrionField" type="Node2D" parent="."]
+script = ExtResource("14_carrion")
 
 [node name="ScentField" type="Node" parent="."]
 script = ExtResource("10_scent")

@@ -18,6 +18,7 @@ const COL_GRID := Color(INK, 0.13)
 
 @onready var food_field: FoodField = $FoodField
 @onready var scrap_field: ScrapField = $ScrapField
+@onready var carrion: CarrionField = $CarrionField
 @onready var scent_field: ScentField = $ScentField
 @onready var sound_field: SoundField = $SoundField
 @onready var creature: Creature = $Creature
@@ -52,7 +53,9 @@ func _ready() -> void:
 	for node in get_tree().get_nodes_in_group("creatures"):
 		var each := node as Creature
 		each.bite_started.connect(_on_creature_bite_started.bind(each))
-		each.tissue_shed.connect(_on_tissue_shed.bind(node))
+		each.tissue_shed.connect(_on_tissue_shed.bind(each))
+		each.part_severed.connect(_on_part_severed.bind(each))
+		each.swallowed.connect(_on_swallowed.bind(each))
 		each.foot_landed.connect(_on_foot_landed.bind(each))
 	food_field.refresh(creature.head_pos)
 	_build_ui()
@@ -204,6 +207,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				food_field.pellets.clear()
 				food_field.refresh(creature.head_pos)
 				scrap_field.clear()
+				carrion.clear()
 				bite_cue.clear()
 				scent_field.clear()
 				sound_field.clear()
@@ -266,8 +270,15 @@ func _on_species_selected(preset_name: String) -> void:
 ## something has less force to cut with, and a keen dentition concentrates what
 ## it does have. Neither is anything the world needs to know: it is handed one
 ## footprint and stamps it.
+## Jaws already holding meat are resolved against that meat and nothing else, for
+## the same reason a chew on a living victim never re-targets: what these jaws are
+## closing on is what is in them.
 func _on_creature_bite_started(mark: BiteMark, biter: Creature) -> void:
 	bite_cue.show_mark(mark)
+	if biter.mouthful != null:
+		_chew_mouthful(mark, biter)
+		return
+
 	var best_target: Creature = null
 	var best_hit: AnatomyState.Hit = null
 	for node in get_tree().get_nodes_in_group("creatures"):
@@ -279,8 +290,26 @@ func _on_creature_bite_started(mark: BiteMark, biter: Creature) -> void:
 			best_target = candidate
 			best_hit = hit
 
+	# Meat on the ground competes for the same bite on the same terms, and can win
+	# it: a leg lying across a body is what the jaws reached furthest into, so a
+	# leg is what they close on. Scored in the same currency by the same rule,
+	# which is the only reason the comparison means anything.
+	var meat: CarrionField.Part = carrion.reach_of(mark.center, mark.radius)
+	if meat != null and best_hit != null \
+			and carrion.depth_into(meat, mark.center) >= best_hit.score:
+		meat = null
+	if meat != null:
+		best_target = null
+		best_hit = null
+
 	var connected: bool = false
-	if best_target != null:
+	if meat != null:
+		connected = _bite_meat(meat, mark, biter)
+		# A piece bitten clean through is two pieces, whether or not anything was
+		# holding it. What the jaws are over stays the piece they then take.
+		if connected:
+			carrion.split(meat, meat.to_local(mark.center))
+	elif best_target != null:
 		connected = best_target.apply_bite(mark) > 0.0
 	if connected:
 		# Spilled blood is left at the place it was spilled and belongs to nobody
@@ -289,7 +318,37 @@ func _on_creature_bite_started(mark: BiteMark, biter: Creature) -> void:
 		scent_field.deposit(mark.center, ScentField.Kind.BLOOD)
 	sound_field.emit_sound(mark.center, (0.52 if connected else 0.34) * biter.size_scale,
 		SoundField.Kind.BITE, biter)
-	biter.resolve_bite(connected, best_target if connected else null, best_hit)
+	biter.resolve_bite(connected, best_target if connected else null, best_hit,
+		meat if connected else null)
+
+
+## One closing of a set of jaws on a severed part.
+##
+## This is the only place a part turns into meat, and it does it by being bitten —
+## the same erosion, the same shed chunks, the same scatter. What comes off is
+## owned by the animal the part came off rather than by whoever is chewing it, so
+## a creature still cannot be fed by its own tissue however many mouths it has
+## passed through.
+func _bite_meat(meat: CarrionField.Part, mark: BiteMark, biter: Creature) -> bool:
+	var chunks: Array = []
+	var removed: float = carrion.bite(meat, mark, chunks)
+	if not chunks.is_empty():
+		scrap_field.scatter(chunks, mark.center, meat.source_id)
+	sound_field.emit_sound(mark.center, 0.30 * biter.size_scale,
+		SoundField.Kind.FEED, biter)
+	return removed > 0.0
+
+
+## A chew on the piece already in the jaws. Split afterwards, because a piece bitten
+## through the middle is two pieces — the same rule that made it in the first place,
+## applied to it.
+func _chew_mouthful(mark: BiteMark, biter: Creature) -> void:
+	var meat: CarrionField.Part = biter.mouthful.part
+	var connected: bool = _bite_meat(meat, mark, biter)
+	if connected:
+		scent_field.deposit(mark.center, ScentField.Kind.BLOOD)
+		carrion.split(meat, biter.mouthful.hold)
+	biter.resolve_bite(connected, null, null, null)
 
 
 func _on_foot_landed(at: Vector2, intensity: float, source: Creature) -> void:
@@ -301,7 +360,21 @@ func _on_foot_landed(at: Vector2, intensity: float, source: Creature) -> void:
 
 
 func _on_tissue_shed(chunks: Array, origin: Vector2, source: Creature) -> void:
-	scrap_field.scatter(chunks, origin, source)
+	scrap_field.scatter(chunks, origin, source.get_instance_id())
+
+
+## A creature has come apart. The pieces enter the world as anatomy, not as meat —
+## see CarrionField — and the only thing that happens to them here is that they
+## start lying somewhere and smelling of blood.
+func _on_part_severed(pieces: Array, source: Creature) -> void:
+	carrion.receive(pieces, source)
+	scent_field.deposit(source.bounds_center, ScentField.Kind.BLOOD)
+
+
+func _on_swallowed(part: CarrionField.Part, eater: Creature) -> void:
+	eater.feed(carrion.swallow(part))
+	sound_field.emit_sound(eater.body.head.pos, 0.42 * eater.size_scale,
+		SoundField.Kind.FEED, eater)
 
 
 ## Sparse one-pixel registration dots from the design's specimen-sheet field.
