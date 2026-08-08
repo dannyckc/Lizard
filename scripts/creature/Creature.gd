@@ -33,9 +33,24 @@ signal tissue_shed(chunks: Array, origin: Vector2)
 @export var spawn_position: Vector2 = Vector2.ZERO
 @export var spawn_heading: float = 0.0
 
+## Whether anything is driving this body. Until there is an AI, everything placed
+## in the habitat is a carcass — see the dead tick below.
+##
+## It is a property of the body rather than of who happens to be steering it, so
+## the day something does drive one the only change here is that this becomes
+## true; nothing else in the class is conditional on the player specifically.
+@export var alive: bool = true
+## Deterministic shape of a carcass's slump. Left at 0 one is derived from where
+## the body was placed, so a given body lies the same way every run while two of
+## them never lie identically.
+@export var rest_seed: int = 0
+
 var spine: Spine
 var body: BodyShape
 var gait: Gait
+## Owns the limbs while `alive` is false, exactly where Gait owns them while it is
+## true. Null on a living creature.
+var ragdoll: Ragdoll = null
 var anatomy: AnatomyState = AnatomyState.new()
 ## Mass, strength and bite force, read off the solved body and the lattice each
 ## tick. Not settings — see Physique. Refreshed at the end of the tick with the
@@ -95,6 +110,10 @@ const CONTACT_EPSILON: float = 0.0001
 ## reject creature pairs before the capsule-pair contact walk.
 var bounds_center: Vector2 = Vector2.ZERO
 var bounds_radius: float = 0.0
+## Spine coordinate of the most recent body contact returned by the narrow
+## phase. A living body resolves that contact as a rigid correction; a free dead
+## spine can accept it where it actually landed and bend around the impact.
+var _contact_spine_t: float = 0.0
 
 # --- bite state -------------------------------------------------------------
 ## The strike is an animation with a hit frame, not an instant event. A click
@@ -180,6 +199,21 @@ const TEAR_DEPTH: float = (TissueGrid.SKIN_HP + TissueGrid.MUSCLE_HP) * 1.15
 ## button works the jaws.
 const GRIP_REGRASP_WINDOW: float = 0.25
 
+# ------------------------------------------------------------------ dead ----
+## Inertia a carcass keeps between ticks. Well under `spine_damping`, which is
+## the give of a body holding itself together; this is ground friction under one
+## that is not, and its whole job is to bring the body to rest and keep it there.
+const DEAD_DAMPING: float = 0.42
+## Share of a dead body's contact correction carried by its centre of mass. The
+## rest lands at the actual spine station and bends it. A purely local correction
+## can be absorbed as shape change, making a corpse fold in place instead of
+## yielding to a shove; a purely rigid one is the plank-like response the
+## ragdoll path exists to avoid.
+const DEAD_CONTACT_TRANSLATION: float = 0.55
+## How sharply a pull on a carcass falls off along the spine, per station away
+## from where the pull acts. See `_drag_at`.
+const DRAG_FALLOFF: float = 0.55
+
 var bite_cooldown_remaining: float = 0.0
 var bite_connected: bool = false
 ## True from a world-space left-button press until its matching release. A
@@ -236,18 +270,50 @@ func _ready() -> void:
 ## Rebuilds the structures that depend on segment count. Cheap enough to call
 ## from a slider callback.
 func rebuild() -> void:
+	# One generator across both halves of a carcass, so the slump of its spine and
+	# the sprawl of its limbs are different draws describing one body rather than
+	# the same few numbers used twice.
+	var rng: RandomNumberGenerator = null if alive else _rest_rng()
 	spine = Spine.new()
-	spine.rebuild(params.segment_count, params.segment_length * size_scale, head_pos, heading)
+	var seg_len: float = params.segment_length * size_scale
+	if alive:
+		spine.rebuild(params.segment_count, seg_len, head_pos, heading)
+	else:
+		spine.rebuild_slumped(params.segment_count, seg_len, head_pos, heading,
+			deg_to_rad(params.max_bend_deg), rng)
 	body = BodyShape.new()
 	gait = Gait.new()
 	gait.setup()
 	body.build(spine, params, size_scale)
-	gait.update(0.0, body, move_dir, 0.0, params, size_scale)
+	if alive:
+		ragdoll = null
+		gait.update(0.0, body, move_dir, 0.0, params, size_scale)
+	else:
+		ragdoll = Ragdoll.new()
+		ragdoll.settle(body, gait.limbs, params, size_scale, rng)
 	# Existing damage is kept — it lives in body space precisely so a structural
 	# rebuild cannot wash it off — but its world geometry is now stale.
 	anatomy.update(self)
 	physique.update(body, spine, anatomy.tissue, params)
 	_update_bounds()
+
+
+## The generator a carcass's resting shape is drawn from.
+##
+## Seeded off where the body actually is rather than off the clock, so it lies
+## the same way every run — a body that rearranged itself on reload would not read
+## as something that had come to rest at all — while two bodies lying anywhere
+## apart lie differently without anyone having to author either pose.
+##
+## Where it *is*, not `spawn_position`, and the difference is not academic: the
+## authored placement is a property of the scene file that `reset` never touches,
+## so a body moved anywhere at runtime would go on wearing the pose it was built
+## with at its old address.
+func _rest_rng() -> RandomNumberGenerator:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = rest_seed if rest_seed != 0 \
+		else hash(Vector3(head_pos.x, head_pos.y, heading))
+	return rng
 
 
 func reset(at: Vector2 = Vector2.ZERO, facing: float = 0.0) -> void:
@@ -291,6 +357,15 @@ func reset(at: Vector2 = Vector2.ZERO, facing: float = 0.0) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	# Segment count is the only structural parameter; everything else is read live
+	# each tick, so tuning sliders take effect immediately. Checked before the
+	# branch because it is the one thing both kinds of body need.
+	if spine == null or spine.size() != params.segment_count:
+		rebuild()
+	if not alive:
+		_dead_process(delta)
+		return
+
 	bite_cooldown_remaining = maxf(bite_cooldown_remaining - delta, 0.0)
 	_chew_cooldown = maxf(_chew_cooldown - delta, 0.0)
 	# Jaws let go by running out of the window they were given, not by the button
@@ -299,11 +374,6 @@ func _physics_process(delta: float) -> void:
 		_regrasp_remaining = maxf(_regrasp_remaining - delta, 0.0)
 		if _regrasp_remaining <= 0.0:
 			_release_grip()
-
-	# Segment count is the only structural parameter; everything else is read
-	# live each tick, so tuning sliders take effect immediately.
-	if spine == null or spine.size() != params.segment_count:
-		rebuild()
 
 	_held_by = _find_grip_on_self()
 
@@ -361,6 +431,48 @@ func _physics_process(delta: float) -> void:
 	# been solved: what the jaws are now pulling against, whether they can still
 	# hold it, and whether they have come round to close again.
 	_advance_grip(delta)
+
+
+## One tick of a body nobody is driving.
+##
+## The live chain runs input -> head -> contacts -> spine -> body -> limbs. A
+## carcass has no input and no head to place, so the very same chain simply
+## starts further down it: what moves this body is other bodies pushing it and
+## whatever has hold of it, its spine is a free chain rather than one pinned to a
+## driven head, and its limbs hang off the sockets instead of walking. Nothing is
+## reordered and nothing is skipped that anything downstream depends on — the
+## silhouette, the tissue lattice, the physique and the bounds are all rebuilt
+## from this tick's pose exactly as they are for a living creature, which is why
+## a carcass can still be collided with, bitten, held and eaten.
+##
+## Weight needs no code of its own here. `physique` is read off the drawn body and
+## the surviving tissue whether or not anything is driving it, and the contact and
+## grip passes below already split every correction by mass — so a heavy carcass
+## is shouldered aside less and towed more slowly for exactly the reason a heavy
+## creature is, through exactly the same line.
+func _dead_process(delta: float) -> void:
+	if spine == null or body == null or ragdoll == null:
+		return
+	_held_by = _find_grip_on_self()
+	_resolve_contacts()
+	_resolve_grip()
+
+	spine.step_free(params, params.segment_length * size_scale, DEAD_DAMPING)
+	# The head is no longer placed, so `head_pos` follows the body instead of
+	# leading it. Everything that reads it — the first capsule of the contact
+	# walk, the broad phase, the jaws — then describes where this body actually
+	# is rather than where nothing is steering it to.
+	head_pos = spine.points[0]
+	head_look_dir = spine.forwards[0]
+	head_look_angle = head_look_dir.angle()
+	move_dir = head_look_dir
+
+	body.build(spine, params, size_scale)
+	ragdoll.step(delta, body, gait.limbs, params, size_scale,
+		Callable(self, "_limb_contact_push"))
+	anatomy.update(self)
+	physique.update(body, spine, anatomy.tissue, params)
+	_update_bounds()
 
 
 ## Advances the strike clock and resolves it to a forward displacement.
@@ -550,7 +662,13 @@ func _resolve_contacts() -> void:
 		if push.length_squared() > deepest.length_squared():
 			deepest = push
 			deepest_share = share
-		_translate_contact(push.limit_length(MAX_CONTACT_PUSH) * share)
+		var correction: Vector2 = push.limit_length(MAX_CONTACT_PUSH) * share
+		if alive:
+			_translate_contact(correction)
+		else:
+			var local: Vector2 = correction * (1.0 - DEAD_CONTACT_TRANSLATION)
+			_translate_contact(correction * DEAD_CONTACT_TRANSLATION)
+			_drag_at(spine.sample(_contact_spine_t).pos, local)
 	_brake_into(deepest, deepest_share)
 
 
@@ -615,6 +733,7 @@ func _push_out_of_creature(other: Creature) -> Vector2:
 				continue
 			deepest = overlap
 			out = normal * overlap
+			_contact_spine_t = (float(i) + uv.x) / float(maxi(spine.size() - 1, 1))
 	return out
 
 
@@ -631,6 +750,11 @@ func _translate_contact(offset: Vector2) -> void:
 		for limb in gait.limbs:
 			if limb.socket_tracked:
 				limb.prev_anchor += offset
+	# A carcass's limbs are particles rather than IK targets, so they have to be
+	# carried by the same shift. Left behind by one, the length constraints would
+	# snap them back into place on the following tick.
+	if ragdoll != null and gait != null:
+		ragdoll.translate(gait.limbs, offset)
 
 
 ## Tissue reach for one point along a contact capsule. The explicit head cap
@@ -953,6 +1077,35 @@ func bind_hp(bind: Vector2) -> float:
 	return anatomy.tissue.body_hp(clampf(bind.x * span / last, 0.0, 1.0), bind.y)
 
 
+## World-space reconstruction of a point bound to one of the articulated limb
+## primitives reported by AnatomyState. Segment 0 is socket->joint, segment 1 is
+## joint->foot, and segment 2 is the foot itself.
+func limb_point(key: String, segment: int, u: float) -> Vector2:
+	var limb: Limb = _limb_by_key(key)
+	if limb == null:
+		return head_pos
+	match segment:
+		0:
+			return limb.joints[0].lerp(limb.joints[1], clampf(u, 0.0, 1.0))
+		1:
+			return limb.joints[1].lerp(limb.joints[2], clampf(u, 0.0, 1.0))
+		_:
+			return limb.joints[2]
+
+
+func limb_bind_solid(key: String, segment: int) -> float:
+	return anatomy.tissue.limb_solid(key, clampi(segment, 0, 2))
+
+
+func _limb_by_key(key: String) -> Limb:
+	if gait == null:
+		return null
+	for limb in gait.limbs:
+		if limb.key == key:
+			return limb
+	return null
+
+
 func _width_at(t: float) -> float:
 	var n: int = body.widths.size()
 	if n < 2:
@@ -995,6 +1148,8 @@ func feed(amount: int = 1) -> void:
 ## click always means at most one attack even when cooldown is tuned shorter
 ## than the lunge animation.
 func request_bite(_aim_world: Vector2) -> bool:
+	if not alive:
+		return false
 	if bite_cooldown_remaining > 0.0 or _bite_requested or bite_time >= 0.0:
 		return false
 	_bite_requested = true
@@ -1015,6 +1170,10 @@ func can_bite() -> bool:
 ## again on the same bind. So a held button is a grip, working the button is
 ## chewing, and letting go is letting go.
 func set_bite_held(held: bool) -> void:
+	# A carcass's jaws are as limp as the rest of it. It can be bitten and held;
+	# it cannot bite or hold.
+	if not alive:
+		return
 	if held:
 		bite_held = true
 		if grip != null and grip.is_alive() and _regrasp_remaining > 0.0:
@@ -1052,11 +1211,11 @@ func is_being_gripped() -> bool:
 ## with it — its own, or somebody else's closed on it.
 ##
 ## Deliberately the same shape as the contact pass beside it: measure the current
-## error, translate the complete creature by the fraction of it this body's mass
-## makes it responsible for, and never write anything to the other party. Both
-## sides run this against the same grip, so between them the slack is taken up
-## once. A tether that only pulls and a contact that only pushes then coexist at
-## almost the same point instead of oscillating against each other.
+## error, correct this creature by the fraction of it its mass makes it
+## responsible for, and never write anything to the other party. Living bodies
+## translate as a whole; carcasses accept the correction at the held anatomical
+## point. Both sides run this against the same grip, so between them the slack is
+## taken up once.
 ##
 ## Dragging is not implemented anywhere. It is what this does when the masses are
 ## uneven: the light body gets nearly the whole correction and is towed along
@@ -1090,8 +1249,82 @@ func _take_up_slack(held: Grip, other: Creature, direction: float) -> void:
 	var slack: Vector2 = held.slack()
 	if slack == Vector2.ZERO:
 		return
-	_translate_contact(
-		slack.limit_length(MAX_CONTACT_PUSH) * _contact_share(other) * direction)
+	var offset: Vector2 = slack.limit_length(MAX_CONTACT_PUSH) \
+		* _contact_share(other) * direction
+	if alive:
+		_translate_contact(offset)
+	else:
+		_drag_grip(held, offset)
+
+
+## Applies a tether correction to the anatomical structure in the jaws. Torso
+## holds enter the free spine directly. Limb holds first articulate the particles
+## on that bone; only the socket's share and any pull beyond the chain's maximum
+## reach pass into the spine, so a foot folds and straightens before it tows the
+## whole carcass.
+func _drag_grip(held: Grip, offset: Vector2) -> void:
+	if not held.holds_limb() or ragdoll == null or gait == null:
+		_drag_at(held.anchor(), offset)
+		return
+	var limb: Limb = _limb_by_key(held.limb_key)
+	if limb == null:
+		_drag_at(held.anchor(), offset)
+		return
+
+	var socket_share: Vector2 = ragdoll.haul(
+		gait.limbs, held.limb_key, held.limb_segment, held.limb_u, offset)
+	if socket_share != Vector2.ZERO:
+		_drag_at(limb.joints[0], socket_share)
+
+	var max_reach: float
+	match held.limb_segment:
+		0:
+			max_reach = limb.lengths[0] * held.limb_u
+		1:
+			max_reach = limb.lengths[0] + limb.lengths[1] * held.limb_u
+		_:
+			max_reach = limb.total_length
+	var reach: Vector2 = held.anchor() - limb.joints[0]
+	var distance: float = reach.length()
+	if distance > max_reach and distance > 0.0001:
+		_drag_at(limb.joints[0], reach * ((distance - max_reach) / distance))
+
+
+## Takes up a pull on a carcass where the pull actually acts, and lets the free
+## chain carry it the rest of the way.
+##
+## A living creature answers the same correction with `_translate_contact`, which
+## moves the whole body as one rigid piece. That is not a stylistic choice there:
+## its head is placed by input and re-pinned every tick, so a correction applied
+## halfway down the spine is unpicked by the very next solve and the disagreement
+## comes back out as flailing. Nothing re-pins this one — every point of it is
+## simulated — so the honest thing is also the available one, and a body dragged
+## by the jaws trails behind them instead of sliding after them in formation.
+##
+## Feathered over the neighbouring stations rather than applied to the single
+## nearest particle, so it enters the chain as a haul on a region of flesh; a tug
+## on one point is something the distance constraint then spends the next several
+## ticks undoing. It is deliberately *not* normalised — the station the jaws are
+## on takes the whole correction, because that is the one the tether measures its
+## slack from, and the rest of the body is brought along by the constraint solve
+## over the ticks that follow. That lag is the trailing.
+func _drag_at(at: Vector2, offset: Vector2) -> void:
+	if offset == Vector2.ZERO or spine == null:
+		return
+	var n: int = spine.size()
+	var nearest: int = 0
+	var best: float = INF
+	for i in n:
+		var d: float = spine.points[i].distance_squared_to(at)
+		if d < best:
+			best = d
+			nearest = i
+	for i in n:
+		var weight: float = pow(DRAG_FALLOFF, absf(float(i - nearest)))
+		if weight < 0.02:
+			continue
+		spine.haul(i, offset * weight)
+	head_pos = spine.points[0]
 
 
 ## The consequences of the hold, resolved against the pose that has just been
@@ -1212,7 +1445,7 @@ func _regrip() -> bool:
 				best = candidate
 	if best_distance > reach:
 		return false
-	grip.bind = best
+	grip.bind_body(best)
 	grip.rest_length = best_distance + GRIP_SLACK
 	return true
 
@@ -1356,13 +1589,16 @@ func _form_grip(target: Creature, hit: AnatomyState.Hit) -> void:
 	var held := Grip.new()
 	held.biter = self
 	held.victim = target
-	held.bind = target.body_bind(hit.world_point if hit != null else jaw)
+	if hit != null and hit.kind == AnatomyState.LIMB:
+		held.bind_limb(hit.limb_key, hit.limb_segment, hit.limb_u)
+	else:
+		held.bind_body(target.body_bind(hit.world_point if hit != null else jaw))
 	# Rest length is the gap the jaws actually closed at, plus their own play. A
 	# fresh grip is therefore already satisfied and pulls nothing: it exists to
 	# take up slack that appears *after* it, which is what stops it wrestling the
 	# contact pass holding the two bodies apart at that same point, and what keeps
 	# a biter's own spine settling under a clamped head from towing it forward.
-	held.rest_length = jaw.distance_to(target.body_point(held.bind)) + GRIP_SLACK
+	held.rest_length = jaw.distance_to(held.anchor()) + GRIP_SLACK
 	grip = held
 	bite_latched = true
 	# The strike that took hold was itself one closing of these jaws, so the next

@@ -41,8 +41,11 @@ growth has been taken out until there is a real system for it. `size_scale` is
 still threaded through every system, pinned at 1.0, as the single value that
 system will drive when it lands.
 
-A stationary second creature starts ahead of the player as the first combat
-slice. A click throws the head forward in a lunge and the bite resolves at full
+A second body lies ahead of the player as the first combat slice. Nothing drives
+it: until there is an AI, everything placed in the habitat is a **carcass**, and
+it is simulated as one rather than parked as a living creature with its hands in
+its pockets — see **Bodies in the habitat** below. It can still be walked into,
+bitten, held, towed and eaten. A click throws the head forward in a lunge and the bite resolves at full
 extension, eating into a lattice of body cells layered skin over muscle over
 bone. If the button remains held when the bite connects, the jaws *keep hold*:
 the two creatures are joined at that point and whoever has the weight and the
@@ -75,6 +78,7 @@ input ──▶ head position ──▶ contacts + grip ──▶ spine ──�
 | [Fabrik.gd](scripts/creature/Fabrik.gd) | generic FABRIK chain solver |
 | [Limb.gd](scripts/creature/Limb.gd) | one arm/leg: bones + step-cycle state |
 | [Gait.gd](scripts/creature/Gait.gd) | where feet want to be, when they pick up, where they land |
+| [Ragdoll.gd](scripts/creature/Ragdoll.gd) | the limbs of a body nobody is driving — Gait's opposite number |
 | [CreatureView.gd](scripts/creature/CreatureView.gd) | all drawing, including the debug overlay |
 | [CreatureParams.gd](scripts/creature/CreatureParams.gd) | every tunable number, plus the schema the UI is generated from |
 
@@ -184,6 +188,137 @@ each party, so they still sum to exactly one — the separation stays complete a
 symmetric with no cross-creature writes. And equal masses give 0.5 each, which is
 the constant this replaced, so two creatures of the same build behave precisely
 as they did before mass existed.
+
+### Bodies in the habitat
+
+Until an AI lands, a body placed in the world is a **dead** body, and `alive` on
+the creature is what says so. It is a property of the body rather than of who
+happens to be steering it, so the day something does drive one the only change is
+that the flag becomes true.
+
+A carcass is not a special case bolted onto the side. It runs *the same chain*,
+starting further down it:
+
+```
+live      input ──▶ head ──▶ contacts + grip ──▶ spine ──▶ body ──▶ limbs
+carcass                     contacts + grip ──▶ spine ──▶ body ──▶ limbs
+```
+
+Nothing is reordered and nothing downstream is skipped, which is precisely why a
+carcass is still a body in the world: the silhouette, the tissue lattice, the
+physique and the bounds are all rebuilt from this tick's pose exactly as they are
+for a living creature, so it can be collided with, bitten, held, towed and eaten
+through the machinery that already existed.
+
+**Weight needed no code at all.** `Physique` is read off the drawn body and the
+surviving tissue whether or not anything is driving it, and the contact and grip
+passes already split every correction by mass — so a heavy carcass is shouldered
+aside less and towed more slowly for exactly the reason a heavy creature is,
+through exactly the same line.
+
+Three things did need writing, and each replaces a system whose entire job was
+being alive.
+
+#### A free spine, not a pinned one
+
+[`Spine.step()`](scripts/creature/Spine.gd) is built for a chain whose head is
+placed by input: point 0 is authoritative, every pass walks strictly front to
+back, and only ever the *child* of a joint is moved. `step_free()` is not that
+with the pin taken out, and the difference is the whole reason it is a separate
+solve. There is no authoritative point on a carcass, and a solve that kept one
+would quietly make it the anchor the rest of the body hangs off — pulled by the
+tail, such a body swings about its own snout instead of following. So both halves
+of every distance constraint move, and the passes alternate direction so neither
+end accumulates the residue of the other.
+
+The bend projection is symmetric too. Rotating only the child works for the live
+head-to-tail solve, but alternating that rule on a free chain gives each sweep a
+different authority. After a shove, the two passes can chase a bend correction
+around the body forever as a steady spin. The free solve instead shares the
+rotation between both outer particles and preserves the triplet's centroid, so
+the anatomical limit cannot manufacture angular motion.
+
+What is gone is what a live creature does and a dead one does not: the
+undulation, and the head pose. What is left is inertia, ground friction as heavy
+damping, and the same two anatomical invariants — segment length and bend
+limit — which hold whether the animal is alive or not.
+
+#### It arrives lying down
+
+`rebuild()` lays a spine out dead straight, and that is the correct start for a
+creature about to be dragged around by its head. It is exactly the wrong one
+here, and not for cosmetic reasons: **a straight chain already satisfies every
+constraint**, and nothing bends a spine with no head driving it, so a carcass
+that spawned straight would stay a plank forever. The curve has to be there from
+the beginning.
+
+`rebuild_slumped()` draws one, once, from a generator seeded off where the body
+actually is — so a given body lies the same way every run while two bodies
+anywhere apart lie differently, without anyone authoring either pose. Two
+components, because either alone is unconvincing: one slow arc over the whole
+length weighted through the trunk, which is the body having folded as it went
+down, and a small per-joint wander on top of it. Every turn is kept inside
+`max_bend`, so the pose a carcass starts in is already legal and the first
+constraint pass has nothing to unpick.
+
+Settling at build time rather than collapsing on the first tick is a deliberate
+trade. A collapse is only ever seen by someone already watching the moment a body
+spawns; a player who walks up a minute later has to find something that reads as
+having been dead the whole time.
+
+#### Limbs that are limp, not just still
+
+Every limb pose in a live creature is the answer to a question about locomotion:
+`Gait` decides where a foot wants to be, when it is overdue and where it should
+land, and `Fabrik` puts the bones there. [`Ragdoll`](scripts/creature/Ragdoll.gd)
+is its opposite number and asks none of them. Its limbs are two-bone chains
+hanging off the sockets, carried wherever the body is carried and settling under
+friction wherever that leaves them — no ideal position, no stride threshold, no
+step, no lift.
+
+Three things are kept from the live solve rather than replaced, because each is
+anatomy and not gait: the bones keep their exact lengths, the joint folds the way
+that joint folds ([`Limb.seed_joint`](scripts/creature/Limb.gd), now shared with
+the gait rather than duplicated in it), and the foot stays inside the fan the
+limb can physically reach. A dead leg is limp. It is not detached, it is not
+double-jointed, and it does not lie through its own ribcage.
+
+Gravity, in a view with no vertical axis, is two facts together: the limb has no
+lift, and it has no tone. `lift` is held at zero — a dead foot is on the ground
+and its shadow is tight under it — and nothing anywhere holds a limb out, so what
+is drawn is only ever what the constraints and the friction left. Measured, that
+leaves a limb resting at about half its length from its socket, against the
+`stance_reach` of 0.78 a walking one holds itself at.
+
+#### A towed carcass trails
+
+The one behaviour that could not be had by leaving the live correction alone.
+`_translate_contact` moves a whole body rigidly, and that is not a stylistic
+choice: a living creature's head is placed by input and re-pinned every tick, so
+a correction applied halfway down its spine is unpicked by the very next solve
+and the disagreement comes back out as flailing. Nothing re-pins this one, so the
+honest thing is also the available one. `_drag_at` applies the pull where the
+pull acts — feathered over the neighbouring stations, so it enters the chain as a
+haul on a region of flesh rather than a tug on one particle — and the free chain
+carries it the rest of the way. The station the jaws are on takes the whole
+correction, because that is the one the tether measures its slack from; the rest
+of the body is brought along by the constraint solve over the ticks that follow,
+and **that lag is the trailing**.
+
+Living-body contacts stay rigid because their driven head would immediately
+unpick a local correction. A carcass has no such pin, so its share is split
+between centre-of-mass translation and a correction at the spine station the
+narrow phase actually found, feathered into its neighbours. The same mass split
+and no-cross-creature-write rule still decide how far it yields. The blend lets
+it bend around a shoulder or jaws pressing into it without merely folding in
+place when it should also be shoved aside.
+
+A grip also retains the structure named by the anatomy hit. Torso holds remain
+bound into spine/body coordinates. A hold on an upper leg, lower leg or foot is
+reconstructed from that limb's live joints and pulls those particles first. Once
+the limb reaches its anatomical extension, the socket passes the remaining pull
+into the free spine, so the leg flops and straightens before the body trails after
+it.
 
 ### Gait
 
@@ -666,7 +801,8 @@ defaults (6 and 6) are already past the point of visible improvement.
 
 ## Tests
 
-Five headless checks cover controls, simulation, rendering, UI and combat:
+Six headless checks cover controls, simulation, rendering, UI, combat and the
+bodies in the habitat:
 
 ```sh
 godot --headless --path . --script tests/ControlsTest.gd # input/head-look isolation
@@ -674,7 +810,25 @@ godot --headless --path . --script tests/SimTest.gd      # simulation invariants
 godot --headless --path . --script tests/RenderSmoke.gd  # every draw path
 godot --headless --path . --script tests/UIInteractionTest.gd # HUD interactions
 godot --headless --path . --script tests/CombatTest.gd    # bite/anatomy slice
+godot --headless --path . --script tests/RagdollTest.gd   # the dead body
 ```
+
+`RagdollTest` asserts the four things a carcass claims to be. That it is *found*
+at rest and not standing to attention: a slumped spine, limbs sprawled short of
+the walking stance, and no foot at any height. That being limp costs it none of
+its anatomy — exact segment lengths, exact bone lengths, no bend past the limit,
+held over thousands of ticks of a solver with no pinned point in it, which is
+where a free chain would otherwise stretch. That it is still a body in the world:
+weighed, walked into rather than through, and shoved by its mass-weighted share.
+And that pushes and torso towing deform it instead of sliding it rigidly, while a
+post-impact angular check ensures the free solver cannot turn constraint error
+into perpetual spinning. A limb case additionally verifies that a bite on a foot
+stays on the foot, articulates the leg, and transmits a taut pull through the
+socket into the spine.
+
+Its determinism check earns its place: it caught the resting pose being seeded
+off `spawn_position`, which `reset` never touches — so a body moved anywhere at
+runtime went on wearing the pose it was built with at its old address.
 
 `CombatTest` covers the tissue rules that are easy to regress: bites eat
 outside-in and never touch a layer through an intact one; they damage only where
@@ -765,6 +919,13 @@ Deliberate, in the interest of a stable and readable prototype:
   how much speed a contact sheds, so a heavy creature can shoulder a light one
   aside — but nothing is transferred: a creature that stops pushing stops moving
   whatever it was carrying, and there is no impact, recoil or knockback.
+- Nothing in the habitat is alive. A body placed there is simulated as a carcass
+  rather than parked as a living creature, which is honest about the missing AI
+  but is still the absence of one: it never gets up, never reacts, and the only
+  things that move it are other bodies and the jaws holding it.
+- A carcass settles into its resting pose at build time rather than falling into
+  it, so a body cannot be watched dying. When something can actually be killed,
+  that is the moment this has to become a real collapse.
 - A creature can only be held by one set of jaws at a time. A second grip on the
   same victim is formed and resolved, but only the first one found decides how
   much locomotion that victim keeps.

@@ -108,7 +108,9 @@ func _physics_process(_delta: float) -> void:
 	# this is resolved over every creature rather than only the player's.
 	for node in get_tree().get_nodes_in_group("creatures"):
 		var scavenger := node as Creature
-		if scavenger == null or scavenger.body == null:
+		# A dead mouth is not a mouth. Meat coming to rest against a carcass would
+		# otherwise quietly disappear into it.
+		if scavenger == null or scavenger.body == null or not scavenger.alive:
 			continue
 		var scavenged: int = scrap_field.consume(
 			scavenger.body.head.pos, scavenger.mouth_radius(), scavenger)

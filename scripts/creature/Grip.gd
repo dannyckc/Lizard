@@ -1,13 +1,11 @@
 ## A set of jaws holding onto another creature — the whole of what a latched
 ## bite is.
 ##
-## Physically it is one inextensible tether between the biter's jaw point and a
-## point bound into the victim's *body space*, resolved by exactly the machinery
-## body contacts already use: a rigid translation of each complete creature, in
-## shares set by their masses, applied in the same phase of the tick. A contact
-## only ever pushes and a grip only ever pulls, and the two act at almost the
-## same place, so a tether that could also push would spend its life fighting the
-## separation pass instead of holding on.
+## Physically it is one inextensible tether between the biter's jaw point and an
+## anatomical point on the victim. Torso holds live in body space; limb holds
+## retain the limb, bone and station reported by the anatomy query. Living bodies
+## resolve the tether through their existing rigid mass share, while a carcass
+## can feed it into its free spine or limb particles at the held point.
 ##
 ## Everything the interaction reads as — latching, being towed, thrashing free,
 ## chewing — falls out of that one constraint and the masses either side of it.
@@ -41,6 +39,13 @@ var victim: Creature
 ## reason: the pose is rebuilt from scratch every tick, so a hold recorded in
 ## world space would be a hold on nothing by the next one.
 var bind: Vector2 = Vector2.ZERO
+## Limb binding, when the jaws closed on a movable limb rather than the torso.
+## The anatomy query already distinguishes these structures; retaining that
+## answer here is what makes a pull on a foot articulate the leg instead of
+## silently being converted into a pull on the nearest point of the spine.
+var limb_key: String = ""
+var limb_segment: int = -1
+var limb_u: float = 0.0
 ## Jaw-to-flesh distance the tether treats as already satisfied — the play in the
 ## jaws, plus whatever gap they actually closed at.
 var rest_length: float = 0.0
@@ -63,7 +68,26 @@ func is_alive() -> bool:
 
 ## Where the jaws are holding, in world space.
 func anchor() -> Vector2:
+	if holds_limb():
+		return victim.limb_point(limb_key, limb_segment, limb_u)
 	return victim.body_point(bind)
+
+
+func holds_limb() -> bool:
+	return not limb_key.is_empty() and limb_segment >= 0
+
+
+func bind_body(at: Vector2) -> void:
+	bind = at
+	limb_key = ""
+	limb_segment = -1
+	limb_u = 0.0
+
+
+func bind_limb(key: String, segment: int, u: float) -> void:
+	limb_key = key
+	limb_segment = clampi(segment, 0, 2)
+	limb_u = clampf(u, 0.0, 1.0)
 
 
 ## Vector from the jaws to the flesh they are holding, zero while there is still
@@ -122,4 +146,6 @@ func tissue_strength() -> float:
 ## ordinary aftermath of a tear, and without it a set of jaws would go on pulling
 ## against flesh that is already in them and part it again every tick.
 func bind_is_hollow() -> bool:
+	if holds_limb():
+		return victim.limb_bind_solid(limb_key, limb_segment) <= 0.0
 	return victim.bind_solid(bind) <= 0.0 or victim.bind_hp(bind) <= 0.0

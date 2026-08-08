@@ -35,6 +35,7 @@ script = ExtResource("3_creature")
 params = SubResource("Resource_target_params")
 spawn_position = Vector2(360, 0)
 spawn_heading = 3.14159265
+alive = false
 
 [node name="View" type="Node2D" parent="TargetCreature"]
 script = ExtResource("4_view")

@@ -34,6 +34,14 @@ func _run_checks() -> void:
 		_finish()
 		return
 
+	# The body in the habitat is placed dead — see Creature.alive — so everything
+	# below has to say which of the two things it is testing. Combat is a contest
+	# between two living creatures, so this slice revives it and puts it back on
+	# its mark; the carcass's own behaviour is RagdollTest's subject.
+	_check(not target.alive, "the habitat's body was not placed as a carcass")
+	target.alive = true
+	target.reset(target.spawn_position, target.spawn_heading)
+
 	_check(target.head_pos.is_equal_approx(Vector2(360.0, 0.0)),
 		"target did not use its simulation-space spawn position")
 	var stationary_mark: Vector2 = target.head_pos

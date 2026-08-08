@@ -13,8 +13,21 @@
 ## Constraints run last because they are the invariants: whatever the forces
 ## did, the body must still have the right segment lengths and legal bends by
 ## the time anything else looks at it.
+##
+## A body that nobody is driving has no head to pin, so `step_free` below solves
+## the same chain with no authoritative point at all. See its comment for why
+## that cannot simply be `step` with the pin removed.
 class_name Spine
 extends RefCounted
+
+## How much of the anatomical bend limit a slumped layout may use up at one
+## joint. Kept short of the whole so the pose the carcass starts in is already
+## legal and the first constraint pass has nothing to unpick.
+const SLUMP_BEND_FRACTION: float = 0.55
+## Per-joint wander in a slumped layout, as a fraction of that same budget. The
+## slow arc alone reads as a body bent deliberately; this is what makes it read
+## as flesh that is not uniform.
+const SLUMP_WANDER: float = 0.35
 
 ## Position/orientation sampled at a fractional point along the chain.
 class Frame extends RefCounted:
@@ -47,6 +60,40 @@ func rebuild(count: int, seg_len: float, origin: Vector2, heading: float) -> voi
 		points[i] = p
 		prev[i] = p
 		wave_offsets[i] = Vector2.ZERO
+	_compute_frames()
+
+
+## Lays the chain out as a body that has come to rest rather than one standing to
+## attention.
+##
+## `rebuild` produces a dead-straight chain, which is the right start for a
+## creature about to be dragged around by its head and exactly the wrong one for
+## a carcass. Nothing downstream ever bends a spine with no head driving it: the
+## constraints are satisfied by a straight chain, so a straight one stays straight
+## forever and reads as a plank. The curve has to be there from the start.
+##
+## It is drawn once, from a seeded generator, and `step_free` then simply holds
+## it — a dead thing has no posture system, it has the shape it came to rest in.
+## Two components, because either alone is unconvincing: one slow arc over the
+## whole length, which is the body having folded as it went down, and a small
+## per-joint wander on top of it.
+func rebuild_slumped(count: int, seg_len: float, origin: Vector2, heading: float,
+		max_bend: float, rng: RandomNumberGenerator) -> void:
+	rebuild(count, seg_len, origin, heading)
+	var n: int = points.size()
+	var limit: float = max_bend * SLUMP_BEND_FRACTION
+	var arc: float = rng.randf_range(-1.0, 1.0)
+	var direction: Vector2 = Vector2.RIGHT.rotated(heading + PI)
+	var at: Vector2 = origin
+	for i in range(1, n):
+		# The arc is weighted through the trunk and eases off toward both ends, so
+		# the body folds where a body folds rather than coiling evenly end to end.
+		var t: float = float(i) / float(n - 1)
+		var turn: float = limit * (arc * sin(t * PI) + rng.randf_range(-SLUMP_WANDER, SLUMP_WANDER))
+		direction = direction.rotated(clampf(turn, -limit, limit))
+		at += direction * seg_len
+		points[i] = at
+		prev[i] = at
 	_compute_frames()
 
 
@@ -129,6 +176,94 @@ func step(delta: float, head_pos: Vector2, p: CreatureParams, speed_norm: float,
 	_compute_frames()
 
 
+## Advances the spine of a body with nothing driving it.
+##
+## This is not `step` with the pin taken out, and the difference is the whole
+## reason it is a separate solve. `step` is built for a chain whose head is placed
+## by input: point 0 is authoritative, every pass walks strictly front to back,
+## and only ever the *child* of a joint is moved — so corrections flow away from
+## the head and the head stays exactly where input put it. None of that applies
+## here. There is no authoritative point on a carcass, and a solve that kept one
+## would quietly make it the anchor the rest of the body hangs off: pulled by the
+## tail, such a body swings about its own snout instead of following. So both
+## halves of every distance constraint move, and the passes alternate direction so
+## neither end of the chain accumulates the residue of the other.
+##
+## What is gone is what a live creature does and a dead one does not: the
+## undulation, and the head pose. What is left is inertia, ground friction as
+## heavy `damping`, and the same two anatomical invariants — segment length and
+## bend limit — which hold whether the animal is alive or not.
+func step_free(p: CreatureParams, seg_len: float, damping: float) -> void:
+	var n: int = points.size()
+	if n < 3:
+		return
+
+	for i in n:
+		var vel: Vector2 = (points[i] - prev[i]) * damping
+		prev[i] = points[i]
+		points[i] = points[i] + vel
+
+	var max_bend: float = deg_to_rad(p.max_bend_deg)
+	var passes: int = maxi(p.constraint_iterations, 1)
+	for it in range(passes):
+		if it % 2 == 0:
+			for i in range(1, n):
+				_solve_distance_symmetric(i - 1, i, seg_len)
+				if i >= 2:
+					_solve_angle_symmetric(i - 2, i - 1, i, max_bend)
+		else:
+			for i in range(n - 1, 0, -1):
+				_solve_distance_symmetric(i - 1, i, seg_len)
+				if i <= n - 3:
+					_solve_angle_symmetric(i, i + 1, i + 2, max_bend)
+
+	_compute_frames()
+
+
+## Distance constraint that moves both ends by half the error each.
+##
+## `Constraints.solve_distance` treats its anchor as immovable, which is exactly
+## what a head-driven chain wants and exactly what a free one must not have — see
+## `step_free`. Full strength rather than `spine_stiffness`, because the give that
+## parameter buys is muscle tone holding a body together against its own motion,
+## and a carcass has neither the tone nor the motion.
+func _solve_distance_symmetric(a: int, b: int, rest: float) -> void:
+	var delta: Vector2 = points[b] - points[a]
+	var distance: float = delta.length()
+	if distance < 0.00001:
+		delta = Vector2.RIGHT
+		distance = 1.0
+	var correction: Vector2 = delta * ((distance - rest) / distance * 0.5)
+	points[a] += correction
+	points[b] -= correction
+
+
+## Bend projection for a chain with no pinned end. The live solver rotates only
+## the child because its correction must flow away from the authoritative head.
+## Doing that from alternating ends of a free chain gives the two sweeps opposite
+## authorities: after a local shove they can chase the same bend error around the
+## body forever, producing a constant rigid rotation even with zero stored
+## velocity. Here both outer particles share the angular correction and the
+## triplet is translated back onto its original centroid. The joint reaches the
+## same anatomical limit without choosing an end or injecting net translation.
+func _solve_angle_symmetric(a: int, b: int, c: int, max_bend: float) -> void:
+	var incoming: Vector2 = points[b] - points[a]
+	var outgoing: Vector2 = points[c] - points[b]
+	if incoming.length_squared() < 0.000001 or outgoing.length_squared() < 0.000001:
+		return
+	var delta: float = wrapf(outgoing.angle() - incoming.angle(), -PI, PI)
+	if absf(delta) <= max_bend:
+		return
+	var correction: float = clampf(delta, -max_bend, max_bend) - delta
+	var centroid: Vector2 = (points[a] + points[b] + points[c]) / 3.0
+	points[a] = points[b] + (points[a] - points[b]).rotated(-correction * 0.5)
+	points[c] = points[b] + (points[c] - points[b]).rotated(correction * 0.5)
+	var shift: Vector2 = centroid - (points[a] + points[b] + points[c]) / 3.0
+	points[a] += shift
+	points[b] += shift
+	points[c] += shift
+
+
 ## Moves one body point without giving it velocity.
 ##
 ## `prev` is shifted by the same amount for exactly the reason step 2 above
@@ -138,7 +273,20 @@ func step(delta: float, head_pos: Vector2, p: CreatureParams, speed_norm: float,
 ## against another would push itself off it and oscillate. Point 0 is refused
 ## because it is placed, not simulated — the head is corrected at its source.
 func displace(i: int, offset: Vector2) -> void:
-	if i <= 0 or i >= points.size():
+	if i <= 0:
+		return
+	haul(i, offset)
+
+
+## The same move, with the head allowed.
+##
+## `displace` refuses point 0 because on a driven creature the head is placed
+## rather than simulated, and correcting it anywhere but at its source would be
+## undone by the pin on the very next tick. A carcass has no such source — every
+## point of it is simulated — so a pull on one may land anywhere along the chain,
+## snout included.
+func haul(i: int, offset: Vector2) -> void:
+	if i < 0 or i >= points.size():
 		return
 	points[i] += offset
 	prev[i] += offset

@@ -99,6 +99,56 @@ func set_lengths(total: float) -> void:
 	lengths[1] = total_length * 0.48
 
 
+## The centre of the fan this limb swings through, in world space: partly
+## fore/aft by the pair's own bias, mostly out to the side, normalised so the
+## stance sits at the same reach no matter how the two are tuned against each
+## other.
+##
+## Anatomy rather than gait — it is where this limb hangs from this socket — so
+## a limb that is not walking needs it just as much as one that is.
+func set_rest_dir(a: Spine.Frame, p: CreatureParams) -> void:
+	var bias: float = p.front_foot_bias if pair == FRONT else p.rear_foot_bias
+	var dir: Vector2 = a.fwd * bias + a.perp * (side * p.stance_width)
+	if dir.length_squared() < 0.000001:
+		dir = a.perp * side
+	rest_dir = dir.normalized()
+
+
+## Places the elbow/knee before an IK solve, so the joint folds the way this
+## joint folds.
+##
+## FABRIK stays on whichever side of the root->target axis it starts on, so this
+## seed is what decides which way the limb bends and what stops it popping
+## between the two mirror solutions.
+##
+## For two bones the joint sits exactly where the circles around each end meet,
+## so it is placed there rather than nudged toward an approximate pole. That
+## matters because of where a clamped foot leaves the chain: hard against the
+## reach limit, with the bones nearly straight — and near-straight is precisely
+## where FABRIK crawls. From a partial seed six passes get the joint about seven
+## eighths of the way out and leave the foot overshooting its target, which reads
+## as the leg locking out rigid exactly when the creature is working hardest.
+## Seeded exactly, the first pass has nothing left to correct and returns on the
+## tolerance check; FABRIK still owns the general case and the out-of-range
+## fallback.
+func seed_joint(a: Spine.Frame, target: Vector2) -> void:
+	var root: Vector2 = a.pos
+	var l0: float = lengths[0]
+	var l1: float = lengths[1]
+	var axis: Vector2 = target - root
+	var span: float = axis.length()
+	var fold: float = signf(axis.cross(a.fwd * bend_sign))
+	if span <= 0.000001 or fold == 0.0:
+		return
+	var u: Vector2 = axis / span
+	# Distance along the axis to the joint, and its offset perpendicular to it.
+	# rot90 of the axis is always on the axis's positive-cross side, so `fold`
+	# alone selects the side the joint is meant to bend toward.
+	var along: float = clampf((span * span + l0 * l0 - l1 * l1) / (2.0 * span), -l0, l0)
+	var off: float = sqrt(maxf(l0 * l0 - along * along, 0.0))
+	joints[1] = root + u * along + Vector2(-u.y, u.x) * (fold * off)
+
+
 ## Measures how fast this socket is moving through the world, for the gait to
 ## size its stride and step timing from. `fallback` is used as the travel
 ## direction while the socket is essentially stationary.

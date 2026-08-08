@@ -65,14 +65,8 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		# lunging, and lengthens toward a full stride at top pace.
 		limb.stride = p.stride_distance * scale * (0.45 + 0.55 * limb.pace)
 
-		# Rest stance in the socket's own frame: partly forward/backward,
-		# mostly out to the side, normalised so it always sits at the same
-		# reach no matter how the biases are tuned.
-		var bias: float = p.front_foot_bias if limb.pair == Limb.FRONT else p.rear_foot_bias
-		var dir: Vector2 = a.fwd * bias + a.perp * (limb.side * p.stance_width)
-		if dir.length_squared() < 0.000001:
-			dir = a.perp * limb.side
-		limb.rest_dir = dir.normalized()
+		# Rest stance in the socket's own frame — the centre of the swing fan.
+		limb.set_rest_dir(a, p)
 
 		limb.joints[0] = a.pos
 		limb.ideal = a.pos + limb.rest_dir * (limb.total_length * p.stance_reach) \
@@ -278,37 +272,9 @@ func _solve_limb(limb: Limb, body: BodyShape, p: CreatureParams, swing: float,
 ## length or invents a second animation system.
 func _solve_limb_to(limb: Limb, a: Spine.Frame, target: Vector2,
 		p: CreatureParams) -> void:
-	var root: Vector2 = a.pos
-
-	# Place the knee before solving. FABRIK stays on whichever side of the
-	# root->target axis it starts on, so the seed is what decides which way the
-	# joint bends and stops it popping between the two mirror solutions.
-	#
-	# For two bones the knee is just where the circles around each end meet, so
-	# the seed is placed there exactly rather than nudged toward an approximate
-	# pole. That is worth doing because of where the reach clamp leaves the foot:
-	# hard against the limit, with the chain nearly straight — and near-straight
-	# is precisely where FABRIK crawls. From a partial seed six passes get the
-	# knee about seven eighths of the way out and leave the foot overshooting its
-	# target by a noticeable margin, which reads as the leg locking out rigid
-	# exactly when the creature is working hardest. Seeded exactly, the first
-	# pass has nothing left to correct and returns on the tolerance check;
-	# FABRIK still owns the general case and the out-of-range fallback.
-	var l0: float = limb.lengths[0]
-	var l1: float = limb.lengths[1]
-	var axis: Vector2 = target - root
-	var span: float = axis.length()
-	var fold: float = signf(axis.cross(a.fwd * limb.bend_sign))
-	if span > 0.000001 and fold != 0.0:
-		var u: Vector2 = axis / span
-		# Distance along the axis to the knee, and its offset perpendicular to
-		# it. rot90 of the axis is always on the axis's positive-cross side, so
-		# `fold` alone selects the side the joint is meant to bend toward.
-		var along: float = clampf((span * span + l0 * l0 - l1 * l1) / (2.0 * span), -l0, l0)
-		var off: float = sqrt(maxf(l0 * l0 - along * along, 0.0))
-		limb.joints[1] = root + u * along + Vector2(-u.y, u.x) * (fold * off)
-
-	limb.joints = Fabrik.solve(limb.joints, limb.lengths, root, target, p.fabrik_iterations, 0.05)
+	# The seed is what decides which way the joint bends — see Limb.seed_joint.
+	limb.seed_joint(a, target)
+	limb.joints = Fabrik.solve(limb.joints, limb.lengths, a.pos, target, p.fabrik_iterations, 0.05)
 
 
 ## True when the creature has at least one foot in the air.
