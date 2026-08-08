@@ -81,6 +81,11 @@ var speed_norm: float = 0.0
 const BRAKE_MULTIPLIER: float = 2.0
 const PIVOT_FADE_START: float = 0.08
 const PIVOT_FADE_END: float = 0.45
+## How much of a standing turn the legs carry the body through — see the swing
+## block in `_integrate_motion`. Deliberately short of the whole: the remainder
+## is what the head leads the turn by, and at 1.0 the body would rotate rigidly
+## with it and nothing would bend.
+const STANDING_TURN_ASSIST: float = 0.6
 
 ## The cursor articulates only the head around the solved neck. This angle is
 ## deliberately separate from `heading`, which remains the WASD-owned body
@@ -423,17 +428,26 @@ func _physics_process(delta: float) -> void:
 	# overlapping settle within a tick instead of alternating.
 	_resolve_grip()
 
-	# The lunge is fed to the spine rather than to `head_pos`, which stays the
-	# creature's honest position: the throw has to be something the body follows
-	# through the constraint solve — that is what makes it whip — and it must
-	# not accumulate into the motion integrator or a strike would teleport the
-	# creature forward by its own reach.
+	# The body is solved from `head_pos` alone, which stays the creature's honest
+	# position: the strike must not accumulate into the motion integrator or a
+	# bite would teleport the creature forward by its own reach.
 	var seg_len: float = params.segment_length * size_scale
-	spine.step(delta, head_pos + head_look_dir * lunge_offset, params, speed_norm, seg_len)
+	spine.step(delta, head_pos, params, speed_norm, seg_len)
 	_update_head_look(delta)
-	# Mouse look is posed after the body solve, so it can move and turn point 0
-	# without changing point 1 or anything downstream of it.
-	spine.pose_head(head_look_dir, seg_len)
+	# Mouse look and the lunge are posed after the body solve, in the one layer
+	# that can move point 0 without touching point 1 or anything downstream of it.
+	#
+	# The throw belongs here rather than in the pin above, and the difference is
+	# the whole of what a strike does to the body. Fed to the solver as the head's
+	# target, the reach is spent dragging the torso: the constraint pass follows
+	# the displaced head, so a bite aimed across the body hauls the spine round
+	# after the cursor — and because this line then re-seats the head one segment
+	# off the neck, none of the reach survived as reach. The creature turned
+	# around instead of lunging. Posed here it is what it says it is: the neck
+	# extends and the head arrives out in front of where the body already stood,
+	# so the jaws genuinely reach the flesh and the body is left alone to keep
+	# walking, standing or turning through the strike.
+	spine.pose_head(head_look_dir, seg_len, lunge_offset)
 	body.build(spine, params, size_scale)
 	# `move_dir` is the body's facing and intentionally never flips in reverse.
 	# The gait only needs a signed fallback for the instant a socket is moving
@@ -634,8 +648,17 @@ func _integrate_motion(delta: float) -> void:
 
 	# Turn rate falls off with speed so the arc stays wider than the body. At a
 	# standstill the full rate is available, which is what lets the creature
-	# pivot on the spot (together with the pivot offset below).
+	# pivot on the spot (together with the swing block below).
 	var turn_rate: float = deg_to_rad(p.turn_speed_deg) * (1.0 - p.turn_speed_falloff * speed_norm)
+	# Steering backwards is compromised by exactly what makes backing up slow:
+	# legs built to push a body forward are pushing it the other way, and they
+	# are steering it from the wrong end while they do. So a reversing creature
+	# gives up the same fraction of its turn rate that it gives up of its speed —
+	# one species trait covering both halves of the same handicap, rather than a
+	# second number saying the same thing. Without it a body backs into a circle
+	# tighter than it is long, which is the coil this replaced.
+	var backing: float = _reverse_fraction()
+	turn_rate *= lerpf(1.0, p.reverse_speed_factor, backing)
 	# Angular velocity eases toward the commanded rate rather than snapping, so
 	# the body has something to lag behind during a turn. Shedding the old swing —
 	# A switched to D, or both keys released — takes the same brake the linear
@@ -647,16 +670,27 @@ func _integrate_motion(delta: float) -> void:
 		turn_response *= BRAKE_MULTIPLIER
 	ang_vel = lerpf(ang_vel, desired_ang_vel, 1.0 - exp(-turn_response * delta))
 
-	# Turning at rest swings the head around a pivot behind it so the spine and
-	# feet visibly participate. Once the creature is travelling, linear motion
-	# already gives the turn an arc; keeping a second pivot offset there makes a
-	# direction change begin with an unnecessary sideways reposition. Fade that
-	# offset out early and let ordinary forward/reverse travel own the moving arc.
-	var pivot_blend: float = 1.0 - smoothstep(PIVOT_FADE_START, PIVOT_FADE_END, speed_norm)
-	var pivot_dist: float = p.turn_pivot * size_scale * pivot_blend
-	var pivot: Vector2 = head_pos - Vector2.RIGHT.rotated(heading) * pivot_dist
-	heading = wrapf(heading + ang_vel * delta, -PI, PI)
-	head_pos = pivot + Vector2.RIGHT.rotated(heading) * pivot_dist
+	# Turning swings the head around a station on the body, so the spine and the
+	# feet visibly participate rather than the heading simply being rewritten.
+	# Which station that is, and why, is `_turn_station`; `swing` is how much of
+	# it applies, fading out as travel takes over the arc.
+	var turn_delta: float = ang_vel * delta
+	var swing: float = maxf(
+		1.0 - smoothstep(PIVOT_FADE_START, PIVOT_FADE_END, speed_norm), backing)
+	var pivot: Vector2 = _turn_station(backing, swing)
+	heading = wrapf(heading + turn_delta, -PI, PI)
+	head_pos = pivot + (head_pos - pivot).rotated(turn_delta)
+	# How much of that swing the body is carried through rather than towed into.
+	# Walking forward it is none of it: the body is following its own track and
+	# the head leading is the whole mechanism. Backing up it is all of it — the
+	# body is being pushed, not pulled, so it turns as one piece. Turning on the
+	# spot it is most of it, because the legs are what walk a standing body
+	# around; short of all of it, because what the head leads by is exactly the
+	# part it is not carried through, and with none of it left over a chain that
+	# can only be towed drags itself sideways instead of turning.
+	var carried: float = maxf(backing, STANDING_TURN_ASSIST * swing)
+	if carried > 0.0 and spine != null:
+		spine.rotate_followers(pivot, turn_delta * carried)
 
 	# Forward speed: accelerate toward the commanded speed, coast down faster
 	# than we spin up so releasing the key feels responsive. Reverse is a
@@ -691,6 +725,52 @@ func _integrate_motion(delta: float) -> void:
 	if speed < 0.0 and spine != null:
 		spine.translate_followers(displacement)
 	speed_norm = clampf(absf(speed) / maxf(p.move_speed * size_scale, 1.0), 0.0, 1.0)
+
+
+## How much of what this creature is doing is backing up, 0..1 of its own reverse
+## top speed. Measured off travel rather than off the key, so a body that has
+## been commanded backward but is still coasting forward is still steering the
+## way it is actually moving.
+func _reverse_fraction() -> float:
+	var reverse_top: float = params.move_speed * params.reverse_speed_factor * size_scale
+	return clampf(-speed / maxf(reverse_top, 1.0), 0.0, 1.0)
+
+
+## The point on the body a turn swings the head around.
+##
+## A station on the flesh, not a distance measured back from the nose, and that
+## is the whole difference between turning and shuffling. A point pinned to the
+## head travels with the head, so every tick of turn re-places the head sideways
+## and the constraint solve tows the body after it: hold A and then D from a
+## standstill and the creature translates bodily across the ground while barely
+## changing which way it faces. Anchored to a spine point, that point stays where
+## it is. The head and neck swing about it, the joints take up the bend, and only
+## once they are at their anatomical limit does the rest of the body come round —
+## so a direction change starts at the front of the body, from where the body
+## already stands, and reversing the command simply swings that front end back
+## the other way.
+##
+## Which station it is, is the one thing that differs between walking forward and
+## backing up, and it is not a special case so much as the same rule reading the
+## direction of travel. Forward, it is `turn_pivot` behind the head: the
+## shoulders, more or less, which is what a standing quadruped pushes its front
+## end around. Backing up, the hind legs are doing the pushing and the hips are
+## what holds still, so it slides back to them — a reversing body turns about its
+## rear axle for the same reason a reversing car does. Left at the shoulders it
+## sweeps its whole length around its own nose, which is the tight spin this
+## replaced: the head's arc came out several times tighter than the body is long,
+## so nothing about the motion could read as walking a curve.
+##
+## Fades to the head itself as the creature gets going forward, because travel
+## already gives a moving turn its arc and a second swing centre there is felt as
+## a sideways reposition. Reverse keeps its station regardless of speed: there
+## the head is the trailing end, and travel arcs it the wrong way round.
+func _turn_station(backing: float, blend: float) -> Vector2:
+	if spine == null or spine.size() < 2 or blend <= 0.0:
+		return head_pos
+	var distance: float = lerpf(params.turn_pivot * size_scale,
+		spine.arc_length() * params.rear_limb_t, backing)
+	return head_pos.lerp(spine.station_behind_head(distance), blend)
 
 
 # ------------------------------------------------------------- collision ----

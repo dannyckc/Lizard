@@ -28,6 +28,10 @@ const SLUMP_BEND_FRACTION: float = 0.55
 ## slow arc alone reads as a body bent deliberately; this is what makes it read
 ## as flesh that is not uniform.
 const SLUMP_WANDER: float = 0.35
+## Shortest the neck may be drawn during the wind-up of a strike, as a fraction
+## of its rest length. A species with a long reach and a short spine could
+## otherwise rock its head back through its own shoulders.
+const MIN_NECK: float = 0.4
 ## Below this much motion in one tick a point is asleep and gives up its implied
 ## velocity — see step()'s rest pass. 0.005 px at 60 Hz is 0.3 px/s, far under
 ## perception; a body actually travelling moves hundreds of times this per tick.
@@ -339,16 +343,46 @@ func translate_followers(offset: Vector2) -> void:
 		prev[i] += offset
 
 
+## Swings the simulated body about a point, without giving it velocity.
+##
+## The rotational half of `translate_followers`, and it is here for the same
+## reason that one is. A chain dragged from its head can only ever be *towed*
+## into a turn, which is right while the head is leading: the lag is the body
+## following. It is wrong in the two cases where the head is not what is moving
+## the creature. Backing up, the head is the trailing end — swung on its own it
+## winds the front of the body around the pivot while the tail, which is the end
+## actually going somewhere, stays put, and the chain coils into itself. Turning
+## on the spot there is no travel to follow at all: the feet are planted and the
+## legs are walking the body around, so a body that could only be towed would
+## drag itself sideways across the ground instead of turning.
+##
+## `prev` is rotated about the same point so the implied velocity turns with the
+## body rather than being left pointing where the body used to be going.
+func rotate_followers(pivot: Vector2, angle: float) -> void:
+	if is_zero_approx(angle):
+		return
+	for i in range(1, points.size()):
+		points[i] = pivot + (points[i] - pivot).rotated(angle)
+		prev[i] = pivot + (prev[i] - pivot).rotated(angle)
+
+
 ## Articulates only the head around the solved neck. Locomotion pins and solves
 ## the complete chain first; applying look afterwards means cursor aim cannot
 ## tow the torso, alter the authoritative movement heading, or leak momentum
-## into the next tick. The first segment remains exactly its configured length.
-func pose_head(forward: Vector2, seg_len: float) -> void:
+## into the next tick.
+##
+## `reach` is how far past its rest length the neck is currently thrown — a
+## strike, and nothing else writes to it. It lives here for the same reason look
+## does: a lunge is the head leaving the body behind, so it has to be applied
+## where the body can no longer be dragged by it. The neck may extend freely and
+## is only stopped from being compressed into the chest by the wind-up, which is
+## the one direction the reach runs negative in.
+func pose_head(forward: Vector2, seg_len: float, reach: float = 0.0) -> void:
 	if points.size() < 2:
 		return
 	var direction: Vector2 = forward.normalized() \
 		if forward.length_squared() > 0.000001 else forwards[0]
-	points[0] = points[1] + direction * seg_len
+	points[0] = points[1] + direction * maxf(seg_len + reach, seg_len * MIN_NECK)
 	prev[0] = points[0]
 	_compute_frames()
 
@@ -390,6 +424,27 @@ func sample(t: float) -> Frame:
 	frame.fwd = fwd.normalized() if fwd.length_squared() > 0.000001 else forwards[i]
 	frame.perp = Vector2(-frame.fwd.y, frame.fwd.x)
 	return frame
+
+
+## The point on the chain `distance` pixels back from the head, measured along
+## the body rather than through it.
+##
+## Walked segment by segment instead of divided out of a rest length, because the
+## two disagree exactly when it matters: the caller wants a station on the flesh —
+## the shoulders, the hips — and on a body curled into a turn the straight-line
+## distance to those is well short of the arc. Past the tail it clamps to the tip.
+func station_behind_head(distance: float) -> Vector2:
+	var n: int = points.size()
+	if n < 2 or distance <= 0.0:
+		return points[0] if n > 0 else Vector2.ZERO
+	var travelled: float = 0.0
+	for i in range(1, n):
+		var span: float = points[i - 1].distance_to(points[i])
+		if travelled + span >= distance:
+			var f: float = (distance - travelled) / maxf(span, 0.00001)
+			return points[i - 1].lerp(points[i], f)
+		travelled += span
+	return points[n - 1]
 
 
 ## Total length of the chain, for camera framing and debug readouts.

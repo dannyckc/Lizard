@@ -108,13 +108,18 @@ extends Resource
 @export_range(0.0, 0.9, 0.01) var turn_speed_falloff: float = 0.55
 ## How quickly angular velocity reaches the commanded turn rate.
 @export_range(1.0, 20.0, 0.1) var turn_responsiveness: float = 12.0
-## The head swings around a point this far behind it, so the creature can
-## pivot on the spot instead of needing forward speed to change direction.
+## How far back along the body the station a standing turn swings about sits, so
+## the creature can pivot on the spot instead of needing forward speed to change
+## direction. Measured along the spine from the head, which puts it on the flesh
+## rather than at a point in the air behind the nose: the front end swings about
+## it and the rest of the body follows, instead of the whole creature being towed
+## sideways. Backing up it slides to the hips by itself — see `_turn_station`.
 @export_range(0.0, 160.0, 1.0) var turn_pivot: float = 46.0
 @export_range(1.0, 3.0, 0.05) var sprint_multiplier: float = 1.55
 ## Reverse top speed as a fraction of forward. Legs are built to push a body
 ## forward, so backing up is a deliberate retreat rather than a mirrored walk;
-## sprint never applies to it.
+## sprint never applies to it. It handicaps steering by the same fraction, for
+## the same reason: those legs are pushing the body around from the wrong end.
 @export_range(0.2, 1.0, 0.01) var reverse_speed_factor: float = 0.55
 
 # --------------------------------------------------------------- combat ----

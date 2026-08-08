@@ -21,12 +21,15 @@ func _process(_delta: float) -> bool:
 	checked = true
 	_check_reverse_keeps_facing()
 	_check_reverse_is_slower_than_forward()
+	_check_reverse_turn_stays_wider_than_the_body()
 	_check_turn_response()
 	_check_turn_switch_answers_promptly()
+	_check_turn_switch_stays_put()
 	_check_moving_turn_has_no_extra_sweep()
+	_check_strike_leaves_the_body_alone()
 
 	if failures.is_empty():
-		print("movement feel OK — reverse keeps facing and steering answers promptly")
+		print("movement feel OK — reverse keeps facing, turns start at the front, strikes throw only the head")
 		quit(0)
 	else:
 		for failure in failures:
@@ -90,6 +93,33 @@ func _check_reverse_is_slower_than_forward() -> void:
 	_destroy_creature(creature)
 
 
+## Backing up and steering at the same time has to describe an arc the body can
+## follow. Turning about the head instead swings the whole length around the
+## nose: the head carves a circle several times tighter than the creature is
+## long and the spine coils into it, which is neither backing up nor turning.
+func _check_reverse_turn_stays_wider_than_the_body() -> void:
+	var creature := _spawn_creature()
+	var reverse := MovementInput.Command.new()
+	reverse.throttle = -1.0
+	reverse.turn = 1.0
+	for _tick in 180:
+		creature.command = reverse
+		creature._physics_process(TICK)
+
+	var arc: float = creature.spine.arc_length()
+	var span: float = creature.head_pos.distance_to(
+		creature.spine.points[creature.spine.size() - 1])
+	var reverse_rate: float = deg_to_rad(creature.params.turn_speed_deg) \
+		* creature.params.reverse_speed_factor
+	_check(span > arc * 0.85,
+		"three seconds of reversing into a turn coiled the body (%.0f px across %.0f of spine)"
+			% [span, arc])
+	_check(absf(creature.ang_vel) <= reverse_rate + 0.01,
+		"reverse steered at %.0f deg/s, its own forward rate rather than a backing one"
+			% rad_to_deg(absf(creature.ang_vel)))
+	_destroy_creature(creature)
+
+
 func _check_turn_response() -> void:
 	var creature := _spawn_creature()
 	var turn := MovementInput.Command.new()
@@ -139,6 +169,40 @@ func _check_turn_switch_answers_promptly() -> void:
 	_destroy_creature(creature)
 
 
+## A standing creature that turns one way and then the other has to end up where
+## it started. It is the front of the body that changes direction — the head and
+## neck swing about a station on the spine and the rest follows — so the swing
+## must not turn into the whole creature shuffling sideways across the ground,
+## which is what a pivot pinned to the head produces.
+func _check_turn_switch_stays_put() -> void:
+	var creature := _spawn_creature()
+	var turn := MovementInput.Command.new()
+	turn.turn = -1.0
+	for _tick in 90:
+		creature.command = turn
+		creature._physics_process(TICK)
+
+	var mid: int = creature.spine.size() / 2
+	var facing: float = creature.spine.forwards[mid].angle()
+	var swept: float = 0.0
+	var start: Vector2 = _spine_centre(creature)
+	turn.turn = 1.0
+	for _tick in 30:
+		creature.command = turn
+		creature._physics_process(TICK)
+		var now: float = creature.spine.forwards[mid].angle()
+		swept += absf(wrapf(now - facing, -PI, PI))
+		facing = now
+
+	_check(start.distance_to(_spine_centre(creature)) < 30.0,
+		"switching a standing turn walked the body %.1f px across the ground"
+			% start.distance_to(_spine_centre(creature)))
+	_check(rad_to_deg(swept) > 30.0,
+		"the body only came round %.1f degrees in half a second of standing turn"
+			% rad_to_deg(swept))
+	_destroy_creature(creature)
+
+
 ## At walking speed, heading plus linear travel already describes the complete
 ## arc. A turn pivot left active here appears as a second sideways correction.
 func _check_moving_turn_has_no_extra_sweep() -> void:
@@ -161,6 +225,47 @@ func _check_moving_turn_has_no_extra_sweep() -> void:
 	_check(unexplained.length() < 0.5,
 		"a moving turn added %.2f px of pivot repositioning" % unexplained.length())
 	_destroy_creature(creature)
+
+
+## A strike throws the head, not the creature. The reach is the neck extending
+## past the body, so a bite aimed hard across the cursor must leave the torso
+## exactly where it was standing — it may not haul the spine round after the
+## mouse, which is what feeding the throw to the body solver did.
+func _check_strike_leaves_the_body_alone() -> void:
+	var creature := _spawn_creature()
+	var aim := MovementInput.Command.new()
+	aim.aim_active = true
+	aim.aim_world = creature.head_pos + Vector2.RIGHT.rotated(deg_to_rad(-70.0)) * 200.0
+	for _tick in 30:
+		creature.command = aim
+		creature._physics_process(TICK)
+
+	var torso: float = creature.spine.forwards[1].angle()
+	var tail: Vector2 = creature.spine.points[creature.spine.size() - 1]
+	var neck: float = creature.params.segment_length
+	creature.request_bite(aim.aim_world)
+	var reach: float = 0.0
+	for _tick in 40:
+		creature.command = aim
+		creature._physics_process(TICK)
+		reach = maxf(reach, creature.spine.points[0].distance_to(creature.spine.points[1]))
+
+	var swung: float = rad_to_deg(absf(wrapf(creature.spine.forwards[1].angle() - torso, -PI, PI)))
+	_check(swung < 5.0, "a strike swung the torso %.1f degrees round after the cursor" % swung)
+	_check(tail.distance_to(creature.spine.points[creature.spine.size() - 1]) < 5.0,
+		"a strike dragged the tail %.1f px"
+			% tail.distance_to(creature.spine.points[creature.spine.size() - 1]))
+	_check(reach > neck + creature.params.bite_reach * 0.8,
+		"the head was never thrown past the body (%.1f px of neck against %.1f at rest)"
+			% [reach, neck])
+	_destroy_creature(creature)
+
+
+func _spine_centre(creature: Creature) -> Vector2:
+	var sum := Vector2.ZERO
+	for i in creature.spine.size():
+		sum += creature.spine.points[i]
+	return sum / float(creature.spine.size())
 
 
 func _spawn_creature() -> Creature:
