@@ -136,9 +136,11 @@ extends Resource
 ## whether they stay shut. Actual bite force also scales with the square of the
 ## head's radius, so a broad-skulled creature bites harder at the same setting.
 @export_range(0.1, 12.0, 0.05) var jaw_power: float = 1.0
-## How often a latched bite closes its jaws again. The clock runs faster the
-## harder the two are pulling against each other, so this is the interval for a
-## victim that has stopped struggling.
+## The soonest jaws already holding something can close on it again. Chewing is
+## an action rather than a clock — a hold never bites by itself — so this is not
+## a rate but a floor under one: how fast this species can work its jaws while
+## they stay shut on their bind. `bite_cooldown` governs fresh strikes, which
+## have to be thrown as well as closed and are correspondingly slower.
 @export_range(0.1, 2.0, 0.01) var chew_interval: float = 0.55
 
 

@@ -126,8 +126,6 @@ const HAUL_COST: float = 1.0
 ## However overmatched, a creature can still shuffle. Zero here would be a
 ## creature frozen by a grip, which is the static hold this replaced.
 const HAUL_FLOOR: float = 0.05
-## How much sooner the jaws come round again per unit of strain.
-const CHEW_STRAIN_RATE: float = 1.6
 ## How much of the jaws' penetration is spent holding on, per unit of strain.
 const CHEW_STRAIN_COST: float = 0.75
 ## Floor under that, so jaws at the edge of losing their grip still do damage.
@@ -142,6 +140,45 @@ const GRIP_GAPE: float = 1.75
 ## like anything per-frame.
 const REGRIP_STATIONS: int = 32
 const REGRIP_LATERALS: Array[float] = [0.0, 0.5, -0.5, 0.9, -0.9]
+
+# --- tearing ------------------------------------------------------------------
+# The other way a hold ends, and the one the jaws win. Flesh has a tensile
+# strength of its own — see `Grip.tissue_strength` — and a pull past its yield
+# point draws it out of the body instead of moving the creature. Held long
+# enough, it parts, and the mouthful comes away in the jaws.
+#
+# Both this and the jaws coming off are measured against the same `load`, so
+# which of them happens is never chosen anywhere: it is whichever gives out
+# first. Jaws weaker than the flesh they are on are pulled off a body that stayed
+# in one piece; jaws stronger than it take a piece of it with them. That is the
+# whole of why a Crocodile strips meat off prey a Gecko can only be shaken from,
+# and no rule was written for either case.
+
+## Fraction of its strength at which flesh starts to give rather than merely take
+## up. Below this a pull is held indefinitely, however long it lasts.
+const TEAR_YIELD: float = 0.5
+## Seconds of pulling at one full strength over the yield point needed to part
+## the fibres. Larger is tougher meat everywhere.
+const TEAR_WORK: float = 1.1
+## How fast stretched tissue recovers once the pull comes off it, per second. A
+## victim that stops struggling before the tear stops being torn.
+const TEAR_RELAX: float = 0.45
+## How deep the mouthful a tear takes comes out, in the lattice's hit points.
+## Enough to clear skin and muscle at the centre of the jaws, so what comes away
+## is meat rather than a graze — bone still yields at its own reduced rate and
+## stops the tear at the skeleton, which is why a limb can be stripped but a
+## ribcage only bared. The margin over the flesh stack is what makes the cell it
+## was bound to genuinely empty afterwards rather than left with a sliver, which
+## the hold would otherwise go on pulling against at almost no strength at all.
+const TEAR_DEPTH: float = (TissueGrid.SKIN_HP + TissueGrid.MUSCLE_HP) * 1.15
+
+# --- chewing ------------------------------------------------------------------
+## How long the jaws stay shut on their bind after the button comes up. A press
+## inside this window is the same jaws closing again on the same flesh — a chew —
+## rather than a fresh strike. Chewing is therefore a repeated action, as biting
+## is, without costing a second control: holding still holds, and working the
+## button works the jaws.
+const GRIP_REGRASP_WINDOW: float = 0.25
 
 var bite_cooldown_remaining: float = 0.0
 var bite_connected: bool = false
@@ -161,6 +198,17 @@ var _held_by: Grip = null
 ## Cleared on button release, so jaws that lost their hold cannot silently take
 ## it again while the button is still down.
 var _grip_lockout: bool = false
+## Seconds the jaws will stay shut on their bind with the button already up. Non
+## zero only between a release and the moment the hold actually ends, which is
+## the window a chew is taken in.
+var _regrasp_remaining: float = 0.0
+## Seconds until jaws that are already holding something will close again.
+var _chew_cooldown: float = 0.0
+## A chew taken this tick, queued for the solved pose exactly as a strike is.
+var _chew_requested: bool = false
+## Set only for the synchronous emit a tear resolves through, so the world's one
+## bite path prices the mouthful being pulled out rather than a closing of jaws.
+var _tearing: bool = false
 ## Seconds into the current strike, or -1 while not striking.
 var bite_time: float = -1.0
 ## How far ahead of its resting position the lunge is currently holding the
@@ -222,6 +270,10 @@ func reset(at: Vector2 = Vector2.ZERO, facing: float = 0.0) -> void:
 	_bite_requested = false
 	_impact_done = false
 	_grip_lockout = false
+	_regrasp_remaining = 0.0
+	_chew_cooldown = 0.0
+	_chew_requested = false
+	_tearing = false
 	grip = null
 	_held_by = null
 	# Reset is an authority from outside the simulation, not a move inside it, so
@@ -234,11 +286,19 @@ func reset(at: Vector2 = Vector2.ZERO, facing: float = 0.0) -> void:
 			if other != null and other != self and other.grip != null and other.grip.victim == self:
 				other.grip = null
 				other.bite_latched = false
+				other._regrasp_remaining = 0.0
 	rebuild()
 
 
 func _physics_process(delta: float) -> void:
 	bite_cooldown_remaining = maxf(bite_cooldown_remaining - delta, 0.0)
+	_chew_cooldown = maxf(_chew_cooldown - delta, 0.0)
+	# Jaws let go by running out of the window they were given, not by the button
+	# coming up — see GRIP_REGRASP_WINDOW. Held down, the window is never running.
+	if _regrasp_remaining > 0.0 and not bite_held:
+		_regrasp_remaining = maxf(_regrasp_remaining - delta, 0.0)
+		if _regrasp_remaining <= 0.0:
+			_release_grip()
 
 	# Segment count is the only structural parameter; everything else is read
 	# live each tick, so tuning sliders take effect immediately.
@@ -879,6 +939,20 @@ func bind_solid(bind: Vector2) -> float:
 	return anatomy.tissue.body_solid(clampf(bind.x * span / last, 0.0, 1.0), bind.y)
 
 
+## The hit points still standing in the single lattice cell a bind sits in — what
+## the flesh in a set of jaws is actually made of, and so what a pull has to part
+## to take it away. Split at the snout exactly the way `bind_solid` is, and for
+## the same reason.
+func bind_hp(bind: Vector2) -> float:
+	if spine == null or body == null:
+		return 0.0
+	var span: float = float(maxi(spine.size() - 1, 1))
+	if bind.x * span < 0.5:
+		return anatomy.tissue.head_hp(bind.y)
+	var last: float = float(maxi(mini(body.last_index, spine.size() - 1), 1))
+	return anatomy.tissue.body_hp(clampf(bind.x * span / last, 0.0, 1.0), bind.y)
+
+
 func _width_at(t: float) -> float:
 	var n: int = body.widths.size()
 	if n < 2:
@@ -934,16 +1008,36 @@ func can_bite() -> bool:
 ## Tracks the physical button independently from the one-shot bite request.
 ## Releasing a connected clamp does not cancel the bite; it simply lets the
 ## existing animation continue through recovery from the apex.
+##
+## With a hold in force the button means something else, and this is where the
+## difference lives. Jaws already on flesh do not spring open the instant the
+## button rises — they part, and a press taken while they are parting closes them
+## again on the same bind. So a held button is a grip, working the button is
+## chewing, and letting go is letting go.
 func set_bite_held(held: bool) -> void:
-	bite_held = held
-	if not held:
-		bite_latched = false
-		grip = null
-		_grip_lockout = false
+	if held:
+		bite_held = true
+		if grip != null and grip.is_alive() and _regrasp_remaining > 0.0:
+			_regrasp_remaining = 0.0
+			_chew_requested = true
+		return
+	bite_held = false
+	if grip != null and grip.is_alive():
+		_regrasp_remaining = GRIP_REGRASP_WINDOW
+		return
+	_regrasp_remaining = 0.0
+	bite_latched = false
+	_chew_requested = false
+	grip = null
+	_grip_lockout = false
 
 
+## Whether these jaws are shut on something. True through the parting window as
+## well as while the button is down: the hold has not ended until the jaws have
+## actually opened, and everything downstream — the clamped head, the suspended
+## contact pass, the tether — has to agree about when that is.
 func is_bite_latched() -> bool:
-	return bite_latched and bite_held and grip != null
+	return bite_latched and grip != null and (bite_held or _regrasp_remaining > 0.0)
 
 
 ## Whether something else has hold of this creature. Refreshed once per tick, so
@@ -1006,7 +1100,7 @@ func _take_up_slack(held: Grip, other: Creature, direction: float) -> void:
 func _advance_grip(delta: float) -> void:
 	if grip == null:
 		return
-	if not grip.is_alive() or not bite_held:
+	if not grip.is_alive() or not (bite_held or _regrasp_remaining > 0.0):
 		_release_grip()
 		return
 
@@ -1042,18 +1136,30 @@ func _advance_grip(delta: float) -> void:
 		_tear_free()
 		return
 
-	# One clock, both halves of what holding on does to a body. The harder the two
-	# pull against each other the sooner the jaws come round again *and* the less
-	# of their force is left over to drive deep — so a victim that has stopped
-	# struggling is chewed through in a few deep bites, and one that keeps
-	# thrashing saws itself open on the same set of jaws. Neither is a rule of its
-	# own; both are `strain` read twice.
-	grip.chew_timer -= delta * (1.0 + grip.strain() * CHEW_STRAIN_RATE)
-	if grip.chew_timer <= 0.0:
-		grip.chew_timer = maxf(params.chew_interval, 0.05)
-		# Through the ordinary world resolver, so a chew sheds meat, picks its
-		# target and reports a miss exactly the way the opening bite does.
-		bite_started.emit(jaw_point(), params.bite_radius * size_scale)
+	# A chew: the jaws opening and shutting once on what they are already holding.
+	# It is an action taken, never a clock — holding on is holding on, and the only
+	# thing that turns a hold into a wound by itself is the pull below. Routed
+	# through the ordinary world resolver, so a chew sheds meat, picks its target
+	# and reports a miss exactly the way the opening bite does.
+	if _chew_requested:
+		_chew_requested = false
+		if _chew_cooldown <= 0.0:
+			_chew_cooldown = maxf(params.chew_interval, 0.05)
+			bite_started.emit(jaw_point(), params.bite_radius * size_scale)
+
+	# The flesh's own half of the contest — see the tearing constants above. The
+	# pull either sits inside what the tissue will take, in which case it holds
+	# indefinitely, or it works it: drawing the meat out of the body, and given
+	# long enough parting it. Stress is spent as fast as it is earned once the
+	# struggling stops, so this is a consequence of force over time and never of
+	# the button being down.
+	var overload: float = grip.load / maxf(grip.tissue_strength(), 0.0001)
+	if overload > TEAR_YIELD:
+		grip.stress = minf(grip.stress + (overload - TEAR_YIELD) * delta / TEAR_WORK, 1.0)
+	else:
+		grip.stress = maxf(grip.stress - TEAR_RELAX * delta, 0.0)
+	if grip.stress >= 1.0:
+		_tear_out()
 
 
 ## How deep one closing of these jaws drives, in the tissue lattice's hit points.
@@ -1061,7 +1167,13 @@ func _advance_grip(delta: float) -> void:
 ## Full `bite_damage` for a free strike, which is what every bite in the game was
 ## until now. A latched one spends part of its force simply staying shut, so what
 ## is left to cut with falls away as the load rises.
+##
+## A tear is not a closing of the jaws at all and is not priced as one: what
+## comes away is however much meat parted from the body, not however much these
+## jaws could cut.
 func bite_depth() -> float:
+	if _tearing:
+		return TEAR_DEPTH
 	var strain: float = grip.strain() if grip != null and grip.is_alive() else 0.0
 	return params.bite_damage \
 		* clampf(1.0 - strain * CHEW_STRAIN_COST, CHEW_MIN_DEPTH, 1.0)
@@ -1089,7 +1201,10 @@ func _regrip() -> bool:
 		var t: float = float(k) / float(REGRIP_STATIONS)
 		for lateral in REGRIP_LATERALS:
 			var candidate := Vector2(t, lateral)
-			if victim.bind_solid(candidate) <= 0.0:
+			# The same two questions the hold itself asks — does the body still
+			# reach here, and is there anything in the cell — so jaws can never
+			# re-seat onto a place they would immediately report as empty.
+			if victim.bind_solid(candidate) <= 0.0 or victim.bind_hp(candidate) <= 0.0:
 				continue
 			var d: float = jaw.distance_to(victim.body_point(candidate))
 			if d < best_distance:
@@ -1111,6 +1226,29 @@ func _tear_free() -> void:
 	bite_started.emit(at, params.bite_radius * size_scale)
 
 
+## The flesh gave before the jaws did: the piece they were holding parts from the
+## body and comes away in them.
+##
+## Centred on the anchor rather than on the jaws, because what is being removed is
+## the meat that tore and not the volume the teeth occupy — under load the two
+## have visibly drawn apart, which is the whole point of the stretch. Resolved
+## through the same world path as every other closing of these jaws so a tear
+## sheds, damages and reports identically; only its depth differs, and only
+## because it is measured in flesh rather than in bite force.
+##
+## The jaws stay shut afterwards. They are re-seated on whatever is left inside
+## them, exactly as they are when a mouthful is chewed away, so tearing deepens a
+## wound instead of ending the hold that made it.
+func _tear_out() -> void:
+	grip.stress = 0.0
+	var at: Vector2 = grip.anchor()
+	_tearing = true
+	bite_started.emit(at, params.bite_radius * size_scale)
+	_tearing = false
+	if grip != null and grip.bind_is_hollow() and not _regrip():
+		_release_grip(true)
+
+
 ## `lost` marks a grip that ended by itself rather than by the button coming up.
 ## Jaws that were pulled off cannot silently take hold again while the button is
 ## still down: a bite is one press, and that has to stay true of the hold as well
@@ -1118,6 +1256,8 @@ func _tear_free() -> void:
 func _release_grip(lost: bool = false) -> void:
 	grip = null
 	bite_latched = false
+	_regrasp_remaining = 0.0
+	_chew_requested = false
 	_grip_lockout = lost
 
 
@@ -1191,10 +1331,11 @@ func apply_bite(center: Vector2, radius: float, depth: float) -> float:
 func resolve_bite(connected: bool, target: Creature = null, hit: AnatomyState.Hit = null) -> void:
 	bite_connected = connected
 	if grip != null:
-		# A chew that closes on nothing is a chew that closes on nothing. It does
-		# not end the hold: what the jaws have hold of is the bind, and the three
-		# things that can end that are the flesh under it being gone with nothing
-		# left to re-seat on, the load pulling them off, and the button coming up.
+		# A chew that closes on nothing is a chew that closes on nothing, and the
+		# same goes for a tear. Neither ends the hold: what the jaws have hold of is
+		# the bind, and the only things that end that are the flesh under it being
+		# gone with nothing left to re-seat on, the load pulling them off, and the
+		# jaws being given long enough to open.
 		return
 	if not (connected and bite_held) or target == null or _grip_lockout:
 		bite_latched = false
@@ -1222,9 +1363,11 @@ func _form_grip(target: Creature, hit: AnatomyState.Hit) -> void:
 	# contact pass holding the two bodies apart at that same point, and what keeps
 	# a biter's own spine settling under a clamped head from towing it forward.
 	held.rest_length = jaw.distance_to(target.body_point(held.bind)) + GRIP_SLACK
-	held.chew_timer = maxf(params.chew_interval, 0.05)
 	grip = held
 	bite_latched = true
+	# The strike that took hold was itself one closing of these jaws, so the next
+	# one waits out the same interval a chew does.
+	_chew_cooldown = maxf(params.chew_interval, 0.05)
 
 
 ## The hit frame. Announces the jaw volume at full extension and lets the world

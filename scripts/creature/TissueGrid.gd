@@ -647,6 +647,68 @@ func limb_solid(key: String, segment: int) -> float:
 	return p.span_solid(LIMB_BONE_COLS, LIMB_COLS)
 
 
+# ------------------------------------------------------------- tenacity ----
+# The solidity queries above answer *how far the body still reaches* — which is
+# what a bite, a contact and the renderer need. These answer *how much is left
+# exactly where something has hold*, which is what decides whether a piece of the
+# creature can be pulled off it.
+
+## Hit points still standing in the one torso cell a body-space position falls
+## in, summed over its layers. Addressed the same way `body_solid` is.
+func body_hp(t: float, lateral: float) -> float:
+	return _cell_hp(patches[BODY_KEY],
+		HEAD_COLS + clampi(int(t * float(TORSO_COLS)), 0, TORSO_COLS - 1), lateral)
+
+
+## The same for the snout cap, sampled at the middle of it. Jaws closed on a head
+## have hold of the skull, not of one facet of the outline drawn around it.
+func head_hp(lateral: float) -> float:
+	return _cell_hp(patches[BODY_KEY], HEAD_COLS / 2, lateral)
+
+
+func _cell_hp(p: Patch, col: int, lateral: float) -> float:
+	var row: int = clampi(int((lateral + 1.0) * 0.5 * float(p.rows)), 0, p.rows - 1)
+	var base: int = (clampi(col, 0, p.cols - 1) * p.rows + row) * LAYERS
+	return p.hp[base + SKIN] + p.hp[base + MUSCLE] + p.hp[base + BONE]
+
+
+## Average hit points per cell over everything inside a circle — how much tissue
+## a set of jaws of that footprint actually has hold of.
+##
+## Destroyed cells count as the nothing they are, so a region already half eaten
+## comes out at half strength rather than dropping out of the average. That is
+## the whole reason this is an average over the footprint and not the one cell
+## under the anchor: a single cell chewed thin reads as almost no tissue at all,
+## and jaws pulling on it would part it again every tick without ever removing
+## anything, which is a hold vibrating rather than a wound deepening.
+##
+## Walks cells, so it is priced like a bite rather than like a per-frame query —
+## but unlike a bite it runs every tick, and so is only ever called for a set of
+## jaws that is actually holding something.
+func flesh_within(center: Vector2, radius: float) -> float:
+	var r2: float = radius * radius
+	if r2 <= 0.0:
+		return 0.0
+	var total: float = 0.0
+	var count: int = 0
+	for key in patches:
+		var p: Patch = patches[key]
+		if not p.live:
+			continue
+		if center.x + radius < p.lo.x or center.x - radius > p.hi.x \
+				or center.y + radius < p.lo.y or center.y - radius > p.hi.y:
+			continue
+		for cell in p.cells:
+			if center.distance_squared_to(p.centre_of(cell)) >= r2:
+				continue
+			count += 1
+			if p.gone[cell] != 0:
+				continue
+			var base: int = cell * LAYERS
+			total += p.hp[base + SKIN] + p.hp[base + MUSCLE] + p.hp[base + BONE]
+	return total / float(count) if count > 0 else 0.0
+
+
 # -------------------------------------------------------------- skeletons ----
 
 ## Skull, vertebral column, two limb girdles and a ribcage between them — see

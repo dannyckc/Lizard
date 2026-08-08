@@ -201,28 +201,51 @@ func _shove(pusher: Creature, pushee: Creature, pusher_name: String, pushee_name
 func _check_grip(player: Creature, target: Creature) -> void:
 	_check_weight(player, target)
 
-	# A heavy set of jaws on light prey: it goes where the biter goes.
+	# Jaws shut on a victim and left alone are jaws shut on a victim. Nothing about
+	# a hold generates damage by itself — only chewing and pulling do.
+	_hold(player, target, "Crocodile", "Gecko", "still", 0.0)
+	var untouched: float = target.anatomy.tissue.integrity()
+	_hold_on(player, target, "still", 3.0)
+	_check(player.grip != null, "a Crocodile let go of a Gecko that did nothing at all")
+	_check(is_equal_approx(target.anatomy.tissue.integrity(), untouched),
+		"three motionless seconds in a Crocodile's jaws chewed the victim anyway")
+
+	# A heavy set of jaws on light prey: it goes where the biter goes. Towing is
+	# quiet — the two travel together — so it is a drag and not a dismemberment.
 	var towed: float = _hold(player, target, "Crocodile", "Gecko", "drag", 3.0)
 	_check(player.grip != null,
 		"a Crocodile lost its hold on a Gecko it was simply walking away with")
 	_check(towed > 100.0,
 		"prey held in a Crocodile's jaws was towed only %.0f px in three seconds" % towed)
-	_check(target.anatomy.tissue.integrity() < 0.95,
-		"three seconds in a Crocodile's jaws left the victim unchewed")
-	# Chewing has to keep going after it has eaten through what it first took
-	# hold of, or a strong bite would lose its grip faster than a weak one.
-	var chewed_through: bool = false
-	for key in [TissueGrid.BODY_KEY]:
-		var patch: TissueGrid.Patch = target.anatomy.tissue.patch(key)
-		chewed_through = chewed_through or patch.gone_count > 0
-	_check(chewed_through and player.grip != null,
-		"jaws that ate clean through their mouthful did not take hold of the next")
 
-	# The same jaws, with the victim thrashing: unshakeable.
+	# The same jaws, with the victim thrashing: unshakeable, and now the load has
+	# somewhere to go. The flesh is weaker than the jaws, so it is the flesh that
+	# gives — a mouthful at a time, with the hold re-seating on what is left.
+	var whole: float = target.anatomy.tissue.integrity()
 	_hold(player, target, "Crocodile", "Gecko", "thrash", 3.0)
 	_check(player.grip != null,
 		"a thrashing Gecko shook a Crocodile off jaws worth %.1f"
 			% player.physique.bite_force)
+	var torn: float = target.anatomy.tissue.integrity()
+	_check(torn < whole - 0.1,
+		"a Gecko thrashing in a Crocodile's jaws had no meat pulled off it (%.2f -> %.2f)"
+			% [whole, torn])
+	_check(main.scrap_field.scraps.size() > 0, "tearing meat off a creature shed nothing")
+	# Torn, not ground: a tear is a discrete failure of the tissue, so it has to
+	# leave holes in the lattice rather than uniformly thin the whole victim.
+	var opened: TissueGrid.Patch = target.anatomy.tissue.patch(TissueGrid.BODY_KEY)
+	_check(opened.gone_count > 0,
+		"three seconds of tearing never opened a hole in the victim")
+
+	# ...and a victim that stops struggling stops being torn. Stress is spent as
+	# fast as it is earned once the pull comes off, so the hold goes quiet — after
+	# the moment it takes the pair to actually come to rest and whatever was
+	# already most of the way to parting to finish doing so.
+	_hold_on(player, target, "still", 0.75)
+	var settled: float = target.anatomy.tissue.integrity()
+	_hold_on(player, target, "still", 2.0)
+	_check(is_equal_approx(target.anatomy.tissue.integrity(), settled),
+		"a victim that stopped thrashing went on being torn apart")
 
 	# Reverse the pair and the same rules produce the opposite outcome.
 	_hold(player, target, "Gecko", "Crocodile", "drag", 2.0)
@@ -241,6 +264,11 @@ func _check_grip(player: Creature, target: Creature) -> void:
 		"tearing free let go of the button as well as of the victim")
 	_check(target.anatomy.tissue.integrity() < 1.0,
 		"jaws pulled off a victim came away clean")
+	# The other half of that: which of the two gave is decided by nothing but
+	# which was weaker. Jaws that lost come off a body still in one piece, where
+	# the same struggle against jaws that held would have opened it up.
+	_check(target.anatomy.tissue.patch(TissueGrid.BODY_KEY).gone_count == 0,
+		"a Crocodile that shook a Gecko off had meat torn out of it anyway")
 
 	# Depth is what is left of the jaws' force after holding on, so the same bite
 	# cuts deeper into something that has stopped fighting.
@@ -253,7 +281,9 @@ func _check_grip(player: Creature, target: Creature) -> void:
 			"jaws holding a struggling victim bit as deep as free ones (%.2f of %.2f)"
 				% [strained, player.params.bite_damage])
 	player.set_bite_held(false)
-	player._physics_process(TICK)
+	for _i in int(ceil(Creature.GRIP_REGRASP_WINDOW / TICK)) + 2:
+		player._physics_process(TICK)
+	_check(player.grip == null, "the strained-chew hold outlived its parting window")
 	_check(is_equal_approx(player.bite_depth(), player.params.bite_damage),
 		"a free bite did not go in at its full configured depth")
 
@@ -264,8 +294,7 @@ func _check_grip(player: Creature, target: Creature) -> void:
 
 
 ## Latches `biter_name`'s jaws onto `victim_name` and runs the pair for
-## `seconds`. `mode` is what happens next: the biter walks off with it, or the
-## victim spins on the spot trying to shake it. Returns how far the victim moved.
+## `seconds`. Returns how far the victim moved.
 func _hold(biter: Creature, victim: Creature, biter_name: String, victim_name: String,
 		mode: String, seconds: float) -> float:
 	biter.set_bite_held(false)
@@ -285,12 +314,19 @@ func _hold(biter: Creature, victim: Creature, biter_name: String, victim_name: S
 	if biter.grip == null:
 		failures.append("%s never got hold of %s to begin with" % [biter_name, victim_name])
 		return 0.0
+	return _hold_on(biter, victim, mode, seconds)
 
+
+## Runs an established hold on for `seconds`. `mode` is what the two do about it:
+## the biter walks off with its prey, the victim spins on the spot trying to shake
+## the jaws, or neither of them does anything at all — which is the case that
+## proves a hold is a hold rather than a slow bite. Returns the victim's travel.
+func _hold_on(biter: Creature, victim: Creature, mode: String, seconds: float) -> float:
 	var biter_cmd := MovementInput.Command.new()
 	var victim_cmd := MovementInput.Command.new()
 	if mode == "drag":
 		biter_cmd.throttle = 1.0
-	else:
+	elif mode == "thrash":
 		victim_cmd.turn = 1.0
 	var start: Vector2 = victim.head_pos
 	for _i in int(round(seconds / TICK)):
@@ -361,28 +397,56 @@ func _check_bite_contract(player: Creature, target: Creature) -> void:
 	_check(player.is_bite_latched(), "connected bite released itself while click stayed held")
 	_check(player.is_lunging() and is_equal_approx(player.bite_time, APEX),
 		"held bite drifted away from full extension")
-	# Jaws that stay shut keep working — that is what makes a hold a hold rather
-	# than a freeze frame. What holding must still never do is re-run the
-	# *strike*: one press is one lunge, one cooldown and one hit frame, however
-	# long it is held, and the chewing that follows is the grip's doing.
-	var chewed: float = target.anatomy.tissue.integrity()
-	_check(chewed < latched_integrity,
-		"jaws held shut on a victim never chewed into it")
-	_check(chewed > latched_integrity - 0.4,
-		"a held bite stripped %.0f%% of a creature in under a second — that is a grinder, not chewing"
-			% ((latched_integrity - chewed) * 100.0))
+	# A hold is a hold. Neither of the two things that damage a victim is the
+	# button being down: a chew is an action taken, and a tear is force over time.
+	# Neither party is moving here, so a full second of clamped jaws must leave the
+	# creature exactly as the strike left it — and one press must still mean one
+	# lunge, one cooldown and one hit frame however long it is held.
+	_check(is_equal_approx(target.anatomy.tissue.integrity(), latched_integrity),
+		"jaws merely held shut on a motionless victim went on damaging it")
 	_check(is_equal_approx(player.bite_time, APEX),
-		"chewing restarted the strike animation instead of working the jaws")
+		"holding restarted the strike animation")
 	_check(player.bite_cooldown_remaining <= 0.0,
 		"latch test did not actually outlast the cooldown")
 	_check(not player.request_bite(Vector2(100.0, 0.0)),
-		"second bite was accepted while the first was latched")
+		"a second strike was accepted while the first was latched")
+
+	# Chewing is the button being *worked*. Jaws part rather than spring open, and
+	# a press taken while they are parting shuts them again on the same flesh: it
+	# bites, and it keeps the hold.
+	player.set_bite_held(false)
+	_check(player.is_bite_latched(),
+		"jaws sprang open the instant the button rose instead of parting")
+	player._physics_process(TICK)
+	player.set_bite_held(true)
+	for _i in 3:
+		player._physics_process(TICK)
+	var chewed: float = target.anatomy.tissue.integrity()
+	_check(chewed < latched_integrity, "a chew inside the parting window bit nothing")
+	_check(player.is_bite_latched(), "chewing let go of the hold it was chewing with")
+	_check(is_equal_approx(player.bite_time, APEX),
+		"a chew restarted the strike animation instead of working the jaws")
 	_check(main.scrap_field.scraps.size() > 0,
 		"a bite through skin and muscle shed nothing edible into the world")
 
-	# Release must leave the latch immediately, then finish the existing recovery.
+	# ...and one press is one closing of the jaws here too. Mashing the button
+	# cannot beat the interval the species can actually work them at.
+	for _i in 4:
+		player.set_bite_held(false)
+		player._physics_process(TICK)
+		player.set_bite_held(true)
+		player._physics_process(TICK)
+	_check(is_equal_approx(target.anatomy.tissue.integrity(), chewed),
+		"mashing the button chewed faster than chew_interval allows")
+	_check(player.is_bite_latched(), "mashing the button shook the hold loose")
+
+	# Held past the parting window, the jaws actually open — then the original
+	# recovery finishes as it always did.
 	player.set_bite_held(false)
-	_check(not player.is_bite_latched(), "button release left the bite latched")
+	for _i in int(ceil(Creature.GRIP_REGRASP_WINDOW / TICK)) + 2:
+		player._physics_process(TICK)
+	_check(not player.is_bite_latched(), "the parting window never let go")
+	_check(player.grip == null, "jaws that had opened kept their hold")
 	for _i in int(ceil(Creature.LUNGE_RECOVER / TICK)) + 2:
 		player._physics_process(TICK)
 	_check(not player.is_lunging(), "released latch never finished its recovery")

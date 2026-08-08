@@ -405,9 +405,14 @@ func _draw_debug() -> void:
 
 
 ## The tether a latched bite actually is: jaw point, the flesh it is bound to,
-## and how close the load on it is to pulling it off. Drawn because none of it is
-## visible in the pose otherwise — a grip about to fail and one that will never
-## fail look identical until the moment it goes.
+## and how close each of the two things holding it together is to failing.
+## Drawn because none of it is visible in the pose otherwise — a grip about to
+## fail and one that will never fail look identical until the moment it goes.
+##
+## Both failures get an arc, and the pair of them is the whole contest at a
+## glance: whichever fills first is what is about to happen. The inner one is the
+## jaws' own strain, and a full circle is them being pulled off. The outer is the
+## flesh's, and a full circle is a mouthful of the victim coming away.
 func _draw_grip_debug() -> void:
 	var held: Grip = creature.grip
 	if held == null or not held.is_alive():
@@ -415,9 +420,12 @@ func _draw_grip_debug() -> void:
 	var jaw: Vector2 = creature.jaw_point()
 	var anchor: Vector2 = held.anchor()
 	var strain: float = clampf(held.strain(), 0.0, 1.0)
-	draw_line(jaw, anchor, Color(INK, 0.30 + 0.55 * strain), 1.0 + 1.6 * strain, true)
+	var stress: float = clampf(held.stress, 0.0, 1.0)
+	draw_line(jaw, anchor, Color(INK, 0.30 + 0.55 * maxf(strain, stress)),
+		1.0 + 1.6 * strain, true)
 	draw_arc(anchor, 4.0, 0.0, TAU, 12, COL_DBG_LIMB, 1.5, true)
-	# Strain as an arc filling around the jaws: a full circle is jaws coming off.
 	draw_arc(jaw, 7.0, -PI * 0.5, -PI * 0.5 + TAU * strain, 20, COL_DBG_ANCHOR, 2.0, true)
-	# The play the tether allows before it pulls at all.
-	draw_arc(jaw, held.rest_length, 0.0, TAU, 24, COL_DBG_RANGE, 1.0, true)
+	draw_arc(jaw, 10.0, -PI * 0.5, -PI * 0.5 + TAU * stress, 24, COL_MUSCLE, 2.0, true)
+	# The play the tether allows before it pulls at all, including whatever the
+	# flesh has already drawn out of the body — the ring grows as tissue yields.
+	draw_arc(jaw, held.rest_length + held.stretch(), 0.0, TAU, 24, COL_DBG_RANGE, 1.0, true)

@@ -28,7 +28,8 @@ godot --path . --editor   # open the editor
 | `A` `D` / left/right arrows | turn the body left/right |
 | move mouse | shift and look the head toward the cursor; the mouse never steers the body |
 | left click | bite (anatomical hit + cooldown) |
-| hold left click | keep hold of what you bit — drag it, chew it, or be dragged by it |
+| hold left click | keep hold of what you bit — drag it, or be dragged by it |
+| click again while holding | chew: shut the same jaws on the same flesh once more |
 | `Shift` | sprint |
 | `F1` | show/hide the tuning panel |
 | `F2` | toggle debug draw |
@@ -486,7 +487,9 @@ under different numbers:
 | **being dragged** | the same tether, seen from the other end |
 | **struggling** | both creatures pulling; the tether's slack is the measured disagreement |
 | **losing your grip** | that disagreement, as a force, exceeding the jaws' bite force |
-| **chewing** | the jaws closing again, on a clock, at whatever depth their force has left over |
+| **stretching** | that same force past the *tissue's* yield point; the tether lengthens as the flesh draws out of the body |
+| **tearing meat off** | it staying there long enough for the flesh to part — the mouthful comes away and the jaws re-seat |
+| **chewing** | the player working the button; the jaws shut on their bind again, at whatever depth their force has left over |
 
 The bind is stored in body space for the same reason tissue damage is: the pose
 is rebuilt from scratch every tick and a hold recorded in world coordinates would
@@ -513,23 +516,61 @@ Four details carry the rest of it:
   fight legible: however overmatched a creature is, thrashing stays available —
   and thrashing is precisely what loads a set of jaws, because the load is
   measured from how fast the two are coming apart. **Turning is the escape.**
-- **Chewing and struggling are one clock read twice.** The harder the two pull
-  against each other, the sooner the jaws come round again *and* the less of
-  their force is left to drive deep. A victim that has stopped fighting is chewed
-  through in a few deep bites; one that keeps thrashing saws itself open on the
-  same jaws. `strain`, twice — not two systems.
+- **A hold never bites by itself.** Holding the button is holding on and nothing
+  else: jaws clamped on a victim that is not being pulled against leave it
+  exactly as the strike left it, however long they stay shut. The two things that
+  damage a held creature are an action and a force, and neither is the button
+  being down. *Chewing* is the button being worked — release and press again and
+  the same jaws shut once more on the same bind, at whatever depth their force
+  has left over after holding on (`strain`, so a struggling victim is bitten
+  shallower than a still one). *Tearing* is below.
 
-A chew goes through the same world resolver as the opening bite and the mouthful
-a grip takes with it when it is torn off, so all three shed meat, pick their
-target and can report a miss by one path.
+  Jaws part rather than spring open, so a press inside a 0.25 s window is a chew
+  and not a release. That is the whole of what it costs to make chewing a
+  repeated action on one button: hold to hold, work it to chew, let it go to let
+  go. `chew_interval` is now a floor on how fast a species can work its jaws
+  rather than a rate they work at on their own.
 
-Jaws that eat clean through the flesh they were holding **take hold of the next**
-rather than opening — they search the victim's body for the nearest surviving
-tissue within their gape. Without that a strong bite would lose its grip *faster*
-than a weak one, since the better it chews the sooner the cell it was bound to is
-gone. Re-seating is what turns a latch into chewing *in*: the wound deepens under
-jaws that stay shut, and the hold ends only when the load pulls them off, the
-button comes up, or there is nothing left within them to hold.
+- **Flesh has a tensile strength, and it is measured against the same load the
+  jaws are.** A hold has two ways to fail and they are compared directly:
+
+  ```
+  load > bite_force               → the jaws come off a body still in one piece
+  load > tissue strength, for long enough → the flesh parts and the meat comes away
+  ```
+
+  Tissue strength is read, not set: the surviving hit points inside the jaws' own
+  footprint — so a mouthful backed by bone resists about twice one over an open
+  cavity, and a wound already chewed through gives at once — times the victim's
+  cross-section by the same `mass^(2/3)` the rest of the physique uses.
+
+  Which failure happens is therefore never chosen anywhere. It is whichever gives
+  out first, and that single comparison is the whole of why a Crocodile strips
+  meat off prey a Gecko can only be shaken from. Past the yield point the pull
+  first *draws the flesh out* — the tether visibly lengthens by up to 7 px as it
+  stretches — and only parts it once enough force has been sustained for long
+  enough. Stop struggling and the stretch recovers; the wound stops growing.
+
+A chew, a tear, and the mouthful a grip takes with it when it is pulled off all
+go through the same world resolver as the opening bite, so all four shed meat,
+pick their target and can report a miss by one path. Only their depth differs,
+and a tear's is measured in flesh rather than in bite force: enough to clear skin
+and muscle at the centre of the jaws, with bone still stopping it at the
+skeleton. That is why a limb can be stripped but a ribcage only bared.
+
+Jaws that empty the flesh they were holding — by chewing it away or by tearing it
+off — **take hold of the next** rather than opening, searching the victim's body
+for the nearest surviving tissue within their gape. Without that a strong bite
+would lose its grip *faster* than a weak one, since the better it works the
+sooner the cell it was bound to is gone. Re-seating is what turns a latch into
+chewing *in*: the wound deepens under jaws that stay shut, and the hold ends only
+when the load pulls them off, the jaws are given long enough to open, or there is
+nothing left within them to hold.
+
+A bind counts as empty when *either* the body no longer reaches that far or the
+cell the jaws are on has nothing in it. The second condition is the ordinary
+aftermath of a tear, and without it a set of jaws would go on pulling against
+flesh already in them and part it again every tick.
 
 Jaws pulled off take a mouthful with them, and cannot silently take hold again
 until the button is released — one press is one hold, the same way it is already
@@ -542,15 +583,24 @@ Victim displacement over five seconds, or when the jaws came off:
 
 | | biter drags it away | victim runs | victim thrashes on the spot |
 |---|---|---|---|
-| Crocodile on Gecko | tows it 529 px | holds; it makes 11 px | holds, still chewing |
-| Komodo on Lizard | tows it 466 px | holds; it makes 25 px | holds, still chewing |
-| Lizard on Lizard | tows it 306 px | towed 295 px along with it | **torn off at 2.9 s** |
-| Lizard on Komodo | moves it 19 px | dragged 470 px behind it | **torn off at 0.7 s** |
-| Gecko on Crocodile | moves it 1 px | **torn off at 0.6 s** | **torn off at 0.6 s** |
+| Crocodile on Gecko | tows it 524 px | holds; it makes 17 px | holds; strips 62% of it |
+| Komodo on Lizard | tows it 457 px | holds; it makes 44 px | holds; strips 24% of it |
+| Lizard on Lizard | tows it 282 px | towed 352 px along with it | **torn off at 2.9 s** |
+| Lizard on Komodo | moves it 17 px | dragged 478 px behind it | **torn off at 0.7 s** |
+| Gecko on Crocodile | moves it 1 px | **torn off at 1.1 s** | **torn off at 0.6 s** |
 
 Read the diagonal: the same tether, the same three numbers, and a Crocodile is
 unshakeable while a Gecko cannot keep hold of anything it did not already
 outweigh.
+
+Read the last column on its own and you have the tearing rule in one line. Every
+one of those five victims is doing exactly the same thing — spinning on the spot,
+loading the jaws as hard as it can. Three of them shake the jaws off. Two of them
+cannot, and being unable to is precisely what gets them eaten: the load has to go
+somewhere, and if the jaws will not give then the flesh does. Nothing in that
+column is a rule about crocodiles. Note also that **dragging tears nothing** —
+towed prey travels *with* the jaws, so the two never come apart and the load
+stays near zero. Tearing is bought with struggle, by either party.
 
 ## Tuning
 
@@ -579,7 +629,8 @@ The parameters worth reaching for first:
 | Heavier for the same silhouette | `density` up — and remember the width sliders already move mass |
 | Strong for its size (drags more, is dragged less) | `muscle_power` up |
 | Jaws that will not be shaken off | `jaw_power` up — this is grip, not penetration |
-| Faster or slower chewing while latched | `chew_interval` down / up |
+| How fast the jaws can be worked while latched | `chew_interval` down / up — a floor on player-driven chewing, not a rate |
+| How readily held flesh tears | `Grip.FLESH_TENSILE` / `Creature.TEAR_YIELD` / `TEAR_WORK` — global properties of meat, not per-species |
 
 Four couplings are easy to trip over:
 
@@ -631,9 +682,15 @@ they land; bone survives several times longer than the flesh beside it; damage
 outlives both a procedural rebuild *and* a change of segment count; and the
 lunge extends, resolves at its apex, shows its Bite cue only on impact, and
 leaves the creature standing exactly where it started. It also checks that shed
-tissue is aggregated into weighty pieces rather than cell-sized particles, and
-that a held bite chews — into the victim, at a rate that is neither nothing nor a
-grinder, without ever re-running the strike animation or the cooldown.
+tissue is aggregated into weighty pieces rather than cell-sized particles.
+
+The hold/chew contract gets its own set, because the distinction between the two
+is the easiest thing here to regress into a grinder. Jaws clamped on a motionless
+victim for a full second must leave its integrity *exactly* where the strike left
+it. A release followed by a press inside the parting window must bite and must
+keep the hold, without re-running the strike animation. Mashing the button must
+not beat `chew_interval`. And a release held past the window must actually open
+the jaws, and then finish the original lunge's recovery.
 
 It also asserts the skeleton is still a *frame* — bone under less than half the
 body, at least three free-standing crossbars over the torso with flesh either
@@ -669,14 +726,19 @@ mass — otherwise mass is really a slider spelled differently — and chewing a
 creature open has to take mass and strength back off it.
 
 Then the grip, one assertion per outcome the three numbers are supposed to
-produce: a Crocodile tows a Gecko and keeps chewing it after eating clean through
-what it first took hold of; the same jaws are not shaken off by a thrashing one;
-reversed, a Gecko moves a Crocodile almost nowhere and keeps little of its own top
-speed while trying; a Gecko is torn off a thrashing Crocodile, is left holding
-nothing while still holding the button, and leaves a wound behind; and a bite
-under load goes in shallower than the same bite when free. Weight gets its own
-pair: two identical creatures still split a contact exactly down the middle, and a
-Crocodile shoves a Gecko several times further than a Gecko shoves a Crocodile.
+produce. A Crocodile holding a Gecko that does nothing for three seconds leaves it
+untouched, and then tows it without hurting it — those two are what say a hold is
+a hold. The same jaws are not shaken off by a thrashing Gecko, and the struggle
+tears meat out of it: integrity falls, scraps enter the world, and the lattice is
+left with *holes*, since a tear is a discrete failure of the tissue and not a
+uniform thinning. Stop the thrashing and the wound stops growing. Reversed, a
+Gecko moves a Crocodile almost nowhere and keeps little of its own top speed while
+trying; and a Gecko is torn off a thrashing Crocodile, is left holding nothing
+while still holding the button — and leaves that Crocodile with no hole in it at
+all, which is the assertion that says which of the two failures fired. Last, a
+bite under load goes in shallower than the same bite when free. Weight gets its
+own pair: two identical creatures still split a contact exactly down the middle,
+and a Crocodile shoves a Gecko several times further than the reverse.
 
 `SimTest` drives each preset through idle → walk → turn → pivot → idle and
 asserts that segment lengths hold, bends stay inside the limit, IK bones keep
