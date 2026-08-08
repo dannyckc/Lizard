@@ -20,7 +20,9 @@ func _process(_delta: float) -> bool:
 		return false
 	checked = true
 	_check_reverse_keeps_facing()
+	_check_reverse_is_slower_than_forward()
 	_check_turn_response()
+	_check_turn_switch_answers_promptly()
 	_check_moving_turn_has_no_extra_sweep()
 
 	if failures.is_empty():
@@ -61,6 +63,33 @@ func _check_reverse_keeps_facing() -> void:
 	_destroy_creature(creature)
 
 
+## Backing up is a deliberate retreat, not a mirrored walk: it settles well
+## under forward speed, and holding sprint must not buy any of the gap back.
+func _check_reverse_is_slower_than_forward() -> void:
+	var creature := _spawn_creature()
+	var drive := MovementInput.Command.new()
+	drive.throttle = 1.0
+	drive.sprint = true
+	for _tick in 90:
+		creature.command = drive
+		creature._physics_process(TICK)
+	var forward_speed: float = absf(creature.speed)
+
+	drive.throttle = -1.0
+	for _tick in 120:
+		creature.command = drive
+		creature._physics_process(TICK)
+	var reverse_speed: float = absf(creature.speed)
+	var reverse_cap: float = creature.params.move_speed * creature.params.reverse_speed_factor
+
+	_check(reverse_speed < forward_speed * 0.7,
+		"reverse reached %.0f px/s against %.0f forward" % [reverse_speed, forward_speed])
+	_check(reverse_speed <= reverse_cap + 0.5,
+		"sprinting in reverse exceeded the walk-speed fraction (%.0f > %.0f px/s)" % [
+			reverse_speed, reverse_cap])
+	_destroy_creature(creature)
+
+
 func _check_turn_response() -> void:
 	var creature := _spawn_creature()
 	var turn := MovementInput.Command.new()
@@ -83,6 +112,30 @@ func _check_turn_response() -> void:
 		"opposite turn input had not reversed angular velocity after 200 ms")
 	_check(start.distance_to(creature.head_pos) < creature.params.turn_pivot * 1.25,
 		"a brief direction change repositioned the head by %.1f px" % start.distance_to(creature.head_pos))
+	_destroy_creature(creature)
+
+
+## Switching A to D must not carry the old swing for a readable beat: the
+## angular velocity has to cross zero within a few ticks of the command flip.
+func _check_turn_switch_answers_promptly() -> void:
+	var creature := _spawn_creature()
+	var turn := MovementInput.Command.new()
+	turn.turn = -1.0
+	for _tick in 30:
+		creature.command = turn
+		creature._physics_process(TICK)
+	_check(creature.ang_vel < 0.0, "held left turn did not build angular velocity")
+
+	turn.turn = 1.0
+	var ticks_to_cross: int = -1
+	for tick in 12:
+		creature.command = turn
+		creature._physics_process(TICK)
+		if creature.ang_vel > 0.0:
+			ticks_to_cross = tick + 1
+			break
+	_check(ticks_to_cross >= 1 and ticks_to_cross <= 3,
+		"A->D switch carried the old swing for %d ticks" % ticks_to_cross)
 	_destroy_creature(creature)
 
 

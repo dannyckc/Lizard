@@ -18,6 +18,10 @@ const MIDLINE_LIMIT_DEG: float = 78.0
 ## Slack kept between the knee and the socket's own outward plane, so the joint
 ## reads as sitting outside the body rather than grazing it.
 const KNEE_CLEARANCE_DEG: float = 6.0
+## Corrections under this many pixels are not applied by the envelope clamp.
+## Far below anything visible, far above the resting spine's micro-jitter —
+## see clamp_to_envelope.
+const ENVELOPE_SLOP: float = 0.05
 
 var key: String = "FL"
 var pair: int = FRONT
@@ -212,7 +216,11 @@ func bearing(a: Spine.Frame, v: Vector2) -> float:
 ## matter how far the gait has fallen behind the body.
 ##
 ## Returns `target` untouched when it is already legal, so a resting foot is
-## never nudged by the round trip through polar coordinates.
+## never nudged by the round trip through polar coordinates. The same courtesy
+## covers a target the projection would move by less than ENVELOPE_SLOP: the
+## Verlet spine never settles to perfect stillness, so a planted foot left
+## exactly on the boundary by its last skid would otherwise follow every micron
+## of that jitter along the arc forever instead of staying nailed to the world.
 func clamp_to_envelope(a: Spine.Frame, target: Vector2, max_reach: float, swing: float) -> Vector2:
 	var v: Vector2 = target - a.pos
 	var r: float = v.length()
@@ -247,7 +255,8 @@ func clamp_to_envelope(a: Spine.Frame, target: Vector2, max_reach: float, swing:
 		out_phi = maxf(out_phi, -safe)
 
 	var out_axis: Vector2 = a.perp * side
-	return a.pos + (out_axis * cos(out_phi) + a.fwd * sin(out_phi)) * clamped_r
+	var out: Vector2 = a.pos + (out_axis * cos(out_phi) + a.fwd * sin(out_phi)) * clamped_r
+	return target if out.distance_squared_to(target) <= ENVELOPE_SLOP * ENVELOPE_SLOP else out
 
 
 func anchor() -> Vector2:

@@ -637,9 +637,15 @@ func _integrate_motion(delta: float) -> void:
 	# pivot on the spot (together with the pivot offset below).
 	var turn_rate: float = deg_to_rad(p.turn_speed_deg) * (1.0 - p.turn_speed_falloff * speed_norm)
 	# Angular velocity eases toward the commanded rate rather than snapping, so
-	# the body has something to lag behind during a turn.
+	# the body has something to lag behind during a turn. Shedding the old swing —
+	# A switched to D, or both keys released — takes the same brake the linear
+	# axis uses: eased only at the spin-up rate, the head kept carrying the old
+	# turn for a beat after the command reversed.
 	var desired_ang_vel: float = command.turn * turn_rate
-	ang_vel = lerpf(ang_vel, desired_ang_vel, 1.0 - exp(-p.turn_responsiveness * delta))
+	var turn_response: float = p.turn_responsiveness
+	if not is_zero_approx(ang_vel) and signf(desired_ang_vel) != signf(ang_vel):
+		turn_response *= BRAKE_MULTIPLIER
+	ang_vel = lerpf(ang_vel, desired_ang_vel, 1.0 - exp(-turn_response * delta))
 
 	# Turning at rest swings the head around a pivot behind it so the spine and
 	# feet visibly participate. Once the creature is travelling, linear motion
@@ -653,9 +659,15 @@ func _integrate_motion(delta: float) -> void:
 	head_pos = pivot + Vector2.RIGHT.rotated(heading) * pivot_dist
 
 	# Forward speed: accelerate toward the commanded speed, coast down faster
-	# than we spin up so releasing the key feels responsive.
-	var top_speed: float = p.move_speed * size_scale \
-		* (p.sprint_multiplier if command.sprint else 1.0) * haul
+	# than we spin up so releasing the key feels responsive. Reverse is a
+	# deliberate, gaited retreat rather than a mirrored walk — legs are built to
+	# push a body forward — so it tops out at a fraction of forward speed and
+	# sprint does not apply to it.
+	var sprint: float = p.sprint_multiplier \
+		if command.sprint and command.throttle > 0.0 else 1.0
+	var top_speed: float = p.move_speed * size_scale * sprint * haul
+	if command.throttle < 0.0:
+		top_speed *= p.reverse_speed_factor
 	var desired_speed: float = command.throttle * top_speed
 	var rate: float = p.acceleration * size_scale * haul
 	var reversing: bool = not is_zero_approx(speed) and not is_zero_approx(desired_speed) \

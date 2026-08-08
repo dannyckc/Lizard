@@ -112,6 +112,10 @@ extends Resource
 ## pivot on the spot instead of needing forward speed to change direction.
 @export_range(0.0, 160.0, 1.0) var turn_pivot: float = 46.0
 @export_range(1.0, 3.0, 0.05) var sprint_multiplier: float = 1.55
+## Reverse top speed as a fraction of forward. Legs are built to push a body
+## forward, so backing up is a deliberate retreat rather than a mirrored walk;
+## sprint never applies to it.
+@export_range(0.2, 1.0, 0.01) var reverse_speed_factor: float = 0.55
 
 # --------------------------------------------------------------- combat ----
 @export_group("Combat")
@@ -230,6 +234,7 @@ const SCHEMA: Array = [
 	{"prop": "turn_responsiveness", "label": "Turn response", "min": 1.0, "max": 20.0, "step": 0.1},
 	{"prop": "turn_pivot", "label": "Turn pivot", "min": 0.0, "max": 160.0, "step": 1.0},
 	{"prop": "sprint_multiplier", "label": "Sprint multiplier", "min": 1.0, "max": 3.0, "step": 0.05},
+	{"prop": "reverse_speed_factor", "label": "Reverse speed", "min": 0.2, "max": 1.0, "step": 0.01},
 
 	{"group": "Combat"},
 	{"prop": "bite_reach", "label": "Bite reach", "min": 2.0, "max": 60.0, "step": 1.0},

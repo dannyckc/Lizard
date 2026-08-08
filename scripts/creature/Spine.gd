@@ -28,6 +28,10 @@ const SLUMP_BEND_FRACTION: float = 0.55
 ## slow arc alone reads as a body bent deliberately; this is what makes it read
 ## as flesh that is not uniform.
 const SLUMP_WANDER: float = 0.35
+## Below this much motion in one tick a point is asleep and gives up its implied
+## velocity — see step()'s rest pass. 0.005 px at 60 Hz is 0.3 px/s, far under
+## perception; a body actually travelling moves hundreds of times this per tick.
+const REST_EPSILON: float = 0.005
 
 ## Position/orientation sampled at a fractional point along the chain.
 class Frame extends RefCounted:
@@ -172,6 +176,19 @@ func step(delta: float, head_pos: Vector2, p: CreatureParams, speed_norm: float,
 			points[i] = Constraints.solve_distance(points[i - 1], points[i], seg_len, stiffness)
 			if i >= 2:
 				points[i] = Constraints.solve_angle(points[i - 2], points[i - 1], points[i], max_bend)
+
+	# 5. Rest. Step 1 turns every correction the solver just made into next
+	#    tick's velocity — that feedback is the "soft" feel — but it also means
+	#    the chain has no fixed point to settle into: joints parked exactly on
+	#    the bend limit trade a sub-micron correction back and forth forever,
+	#    and the residue is directional, so an idle body ratchets its rear end
+	#    across the world at a fraction of a pixel per second. A point whose
+	#    whole tick of motion is below perception gives that velocity up here
+	#    and is genuinely at rest; anything actually moving is orders of
+	#    magnitude above the threshold and never notices.
+	for i in range(1, n):
+		if points[i].distance_squared_to(prev[i]) <= REST_EPSILON * REST_EPSILON:
+			prev[i] = points[i]
 
 	_compute_frames()
 

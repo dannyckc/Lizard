@@ -24,8 +24,8 @@ godot --path . --editor   # open the editor
 
 | | |
 |---|---|
-| `W` `S` / up/down arrows | move forward/backward along the creature's orientation |
-| `A` `D` / left/right arrows | turn the body left/right |
+| `W` `S` / up/down arrows | move forward / back up along the creature's orientation — reverse is a slower, deliberate retreat and never sprints |
+| `A` `D` / left/right arrows | turn the body left/right; switching sides sheds the old swing at the brake rate, so the flip answers immediately |
 | move mouse | shift and look the head toward the cursor; the mouse never steers the body |
 | left click | bite (anatomical hit + cooldown) |
 | hold left click | keep hold of what you bit — drag it, or be dragged by it |
