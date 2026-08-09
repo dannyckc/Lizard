@@ -24,12 +24,22 @@
 ## of flesh standing at a height the pose put it at, which is what the bite query
 ## has been reading all along to tell a knee from a belly — so this view takes the
 ## third coordinate the cells already carry and projects it, rather than throwing
-## it away as the field's top-down camera does. Dragging orbits the eye around the
-## animal: `spin` rolls it around the spine, from over the back through the flank
-## to the belly; `tilt` swings it off straight-overhead toward the snout. Nothing
-## about the creature moves. The specimen is the same pose of the same body seen
-## from somewhere else, which is the only kind of rotation a reading of a creature
-## is allowed to be.
+## it away as the field's top-down camera does. Nothing about the creature moves.
+## The specimen is the same pose of the same body seen from somewhere else, which
+## is the only kind of rotation a reading of a creature is allowed to be.
+##
+## It is turned by its own sphere. The animal is framed by the ball that contains
+## it, that ball is drawn at the stage's inscribed circle, and a drag seizes the
+## point of it under the pointer and carries that point to wherever the pointer
+## goes — so the specimen turns with the hand rather than along two named axes,
+## and the surface under the cursor is the surface that follows. `orient` is the
+## whole of the eye's position; `spin`, `tilt` and `roll` are readings off it, and
+## setting either of the first two names a viewpoint without the third.
+##
+## Framing is the same sphere and therefore does not move: the scale is the ball's
+## radius against the stage, which no rotation can change. A specimen being turned
+## holds its size, where fitting the silhouette instead would have it swell and
+## shrink through the drag as the outline it happened to present grew and narrowed.
 class_name AnatomyView
 extends Control
 
@@ -82,11 +92,11 @@ const VESSEL_OFFSET: float = 2.6
 const GRAIN_MIN_CELL: float = 3.2
 const LATTICE_MIN_CELL: float = 3.0
 
-## How far the eye can be tipped off overhead, either way. Short of a right angle
-## deliberately: end-on, an animal has no length left for the fit to frame.
-const TILT_LIMIT: float = PI * 0.44
-## Radians of orbit per pixel dragged.
-const ORBIT_RATE: float = 0.010
+## Where the trackball stops being a sphere and becomes the sheet that carries on
+## from it. Inside this radius the pointer is on the ball proper, outside it the
+## drag is a roll in the plane of the page — Bell's hyperbolic skirt, which is what
+## keeps a drag past the edge of the sphere from dying against it.
+const BALL_EDGE: float = 0.70710678
 ## Orbit under which the projection is the plain top-down one. Below it no height
 ## can separate anything on the page, so the volume is skipped entirely — which is
 ## the whole cost of the third axis on a specimen nobody has turned.
@@ -106,16 +116,45 @@ const UNDERSIDE: float = 0.14
 const RELIEF: float = 0.42
 
 var creature: Creature = null
-## Where the specimen is being looked at from, in the animal's own frame. Camera
-## angles, both of them: nothing here moves the creature.
-var spin: float = 0.0:
+## Where the specimen is being looked at from, in the animal's own frame: the whole
+## of the camera, and a camera is all it is — nothing here moves the creature.
+##
+## Held as an orientation rather than as angles because the ball it is turned by
+## has no axes of its own. Two angles can only ever be composed in some order, and
+## the order shows: whichever one is applied second stops answering the drag once
+## the first has swung its axis away from the screen. A rotation carries no such
+## order, so every drag turns the specimen the way the hand went.
+var orient: Basis = Basis():
 	set(value):
-		spin = fposmod(value, TAU)
+		# Re-squared on every turn. The orientation is accumulated from arbitrarily
+		# many drags, and an orthonormal basis multiplied a few thousand times is no
+		# longer one.
+		orient = value.orthonormalized()
 		_bake_orbit()
-var tilt: float = 0.0:
+## How far the eye has been carried around the animal's long axis, from over the
+## back through the flank to the belly. A reading off `orient`, and — assigned —
+## a way to name that viewpoint, which puts the specimen back upright on the page
+## because two angles cannot say anything about the third.
+var spin: float:
+	get:
+		return atan2(-_eye.x, _eye.z)
 	set(value):
-		tilt = clampf(value, -TILT_LIMIT, TILT_LIMIT)
-		_bake_orbit()
+		_aim(value, tilt)
+## How far the eye has swung off straight-overhead toward the tail, the same way.
+var tilt: float:
+	get:
+		return asin(clampf(_eye.y, -1.0, 1.0))
+	set(value):
+		_aim(spin, value)
+## How far the animal's own length has been turned off vertical on the page. Read
+## only: it is what a ball has that a pair of camera angles does not, and it comes
+## out of the drag rather than being asked for.
+var roll: float:
+	get:
+		var snout := Vector2(-_page_x.y, -_page_y.y)
+		if snout.length_squared() < 0.000001:
+			return 0.0
+		return Vector2(0.0, -1.0).angle_to(snout)
 ## Which layers of the depth stack are still on the specimen.
 var layers: int = ALL_LAYERS
 var show_vessels: bool = true
@@ -137,12 +176,24 @@ var _origin: Vector2 = Vector2.ZERO
 var _lo: Vector2 = Vector2.ZERO
 var _hi: Vector2 = Vector2.ZERO
 var _fitted: bool = false
+## The ball that contains the specimen: its centre in the animal's own upright
+## frame, and its radius there. Both are properties of the pose alone — no angle
+## the eye is at appears in either, which is why turning the specimen cannot
+## resize it.
+var _centre3: Vector3 = Vector3.ZERO
+var _radius: float = 1.0
+## That same ball on the page, as a radius about the middle of the stage. What the
+## fit puts there, and what a drag takes hold of.
+var _ball: float = 1.0
 
-# Baked orbit. Every projection below is these four numbers and nothing else.
-var _cos_spin: float = 1.0
-var _sin_spin: float = 0.0
-var _cos_tilt: float = 1.0
-var _sin_tilt: float = 0.0
+# Baked orbit: the rows of `orient`, which is the only form of it anything below
+# asks for. Two of them say where a point of the animal lands on the page and the
+# third says how near the eye it is — so every projection in the file is three
+# dot products, and the eye's own direction through the body is a row rather than
+# something to be worked out.
+var _page_x: Vector3 = Vector3(1.0, 0.0, 0.0)
+var _page_y: Vector3 = Vector3(0.0, 1.0, 0.0)
+var _eye: Vector3 = Vector3(0.0, 0.0, 1.0)
 ## Whether the eye is off the vertical far enough for heights to matter.
 var _solid: bool = false
 ## How far off straight-overhead it is, as how much relief to draw. Nought looking
@@ -153,6 +204,12 @@ var _relief: float = 0.0
 var _hover_key: String = ""
 var _hover_cell: int = -1
 var _orbiting: bool = false
+## Where the ball was seized, and how the specimen stood at that moment. The turn
+## is measured from the grab rather than accumulated from the frame before it, so
+## the point under the pointer stays under the pointer for the length of the drag
+## instead of creeping away from it a rounding at a time.
+var _grab: Vector3 = Vector3(0.0, 0.0, 1.0)
+var _grabbed: Basis = Basis()
 
 # Reused geometry, on the same terms as CreatureView's: this redraws every frame,
 # so the cell layer writes into these rather than allocating per cell.
@@ -217,14 +274,57 @@ func reset_fit() -> void:
 ## Puts the eye back over the animal's back, looking straight down — the view the
 ## field itself is drawn in, and so the one the specimen reads against.
 func reset_orbit() -> void:
-	spin = 0.0
-	tilt = 0.0
+	orient = Basis()
 
 
-## Turns the eye by a drag, in pixels across the stage.
-func orbit_by(drag: Vector2) -> void:
-	spin += drag.x * ORBIT_RATE
-	tilt += drag.y * ORBIT_RATE
+## Names a viewpoint by where the eye stands, with the page left upright.
+func _aim(new_spin: float, new_tilt: float) -> void:
+	orient = Basis(Vector3(1.0, 0.0, 0.0), new_tilt) * Basis(Vector3(0.0, 1.0, 0.0), new_spin)
+
+
+## The trackball on the page: a radius about the middle of the stage, which is the
+## sphere the specimen is framed by drawn where the fit put it.
+func ball_radius() -> float:
+	return _ball
+
+
+## Takes hold of the sphere under the pointer.
+func grab_ball(at: Vector2) -> void:
+	_grab = _on_ball(at)
+	_grabbed = orient
+
+
+## Carries the seized point of the sphere to where the pointer has got to, turning
+## the specimen with it.
+##
+## The turn is the arc from one point of the ball to the other — the shortest
+## rotation that takes the first to the second — applied to how the specimen stood
+## when it was seized. That is the whole of the interaction: what was under the
+## finger is still under the finger, and everything else on the animal comes round
+## with it.
+func turn_ball(at: Vector2) -> void:
+	var to: Vector3 = _on_ball(at)
+	var axis: Vector3 = _grab.cross(to)
+	var span: float = axis.length()
+	if span < 0.000001:
+		orient = _grabbed
+		return
+	orient = Basis(axis / span, atan2(span, _grab.dot(to))) * _grabbed
+
+
+## Where a place on the page sits on the trackball, in the eye's own frame — page
+## x and y as they are drawn, and depth toward the viewer, so the near face of the
+## sphere is the face being grabbed.
+##
+## The sphere proper only reaches so far across the stage. Past that the ball is
+## continued by a sheet that falls away from it, so a drag off the edge keeps
+## turning the specimen — as a roll, which is what taking hold of the rim of a real
+## sphere and pulling sideways does — rather than sticking against the silhouette.
+func _on_ball(at: Vector2) -> Vector3:
+	var p: Vector2 = (at - size * 0.5) / maxf(_ball, 1.0)
+	var d: float = p.length()
+	var depth: float = sqrt(maxf(1.0 - d * d, 0.0)) if d <= BALL_EDGE else 0.5 / d
+	return Vector3(p.x, p.y, depth).normalized()
 
 
 ## Whether the specimen is being seen as a volume rather than from overhead.
@@ -233,12 +333,18 @@ func orbited() -> bool:
 
 
 func _bake_orbit() -> void:
-	_cos_spin = cos(spin)
-	_sin_spin = sin(spin)
-	_cos_tilt = cos(tilt)
-	_sin_tilt = sin(tilt)
-	_solid = absf(_sin_spin) > FLAT or absf(_sin_tilt) > FLAT
-	_relief = sqrt(clampf(1.0 - _cos_spin * _cos_tilt, 0.0, 1.0))
+	var ex: Vector3 = orient * Vector3(1.0, 0.0, 0.0)
+	var ey: Vector3 = orient * Vector3(0.0, 1.0, 0.0)
+	var ez: Vector3 = orient * Vector3(0.0, 0.0, 1.0)
+	_page_x = Vector3(ex.x, ey.x, ez.x)
+	_page_y = Vector3(ex.y, ey.y, ez.y)
+	_eye = Vector3(ex.z, ey.z, ez.z)
+	_solid = absf(_eye.x) > FLAT or absf(_eye.y) > FLAT
+	_relief = sqrt(clampf(1.0 - _eye.z, 0.0, 1.0))
+	# The page follows the turn in the same breath as the projection does. A drag
+	# lands between one settle and the next, and re-centring on the next frame
+	# instead would let the specimen swim a frame behind the hand.
+	_reframe()
 
 
 func layer_shown(layer: int) -> bool:
@@ -270,6 +376,12 @@ func tissue() -> TissueGrid:
 ## world, so walking across the map moves the specimen not at all. What is left
 ## to ease is the bend of the body and the loss of a piece, both of which should
 ## be seen settling rather than snapping.
+##
+## The size is decided by the ball the animal fits inside and not by the outline it
+## is presenting, which is the one thing that keeps a drag from being a zoom. A
+## silhouette fit measures a body that is long, narrow and standing at an angle, so
+## every degree of the turn hands it a different rectangle to fill and the specimen
+## breathes in and out under the hand. The ball is the same ball from every side.
 func _settle(delta: float) -> void:
 	var grid: TissueGrid = tissue()
 	if grid == null or creature.spine == null or creature.body == null:
@@ -291,8 +403,11 @@ func _settle(delta: float) -> void:
 	_rot = -PI * 0.5 - _heading
 	_anchor = creature.body.head.pos
 
-	var lo := Vector2(INF, INF)
-	var hi := Vector2(-INF, -INF)
+	# The animal's own box, in the upright frame and in all three axes. No angle of
+	# the eye appears in it, so it is the same box whichever way the specimen has
+	# been turned — which is the whole of why the fit below holds still.
+	var lo := Vector3(INF, INF, INF)
+	var hi := Vector3(-INF, -INF, -INF)
 	for key in _patch_order():
 		var p: TissueGrid.Patch = grid.patch(key)
 		if p == null or not p.live:
@@ -304,42 +419,57 @@ func _settle(delta: float) -> void:
 			p.surfaces_of(cell, _band)
 			for k in 4:
 				var at: Vector2 = (_quad[k] - _anchor).rotated(_rot)
-				# The corner at its lowest and its highest, which between them bound
-				# everything drawn there — both faces of the cell and the patch of
-				# floor its shadow falls on. Two points rather than three because the
-				# projection is linear in the height, so nothing in between can lie
-				# outside them, and the ground only extends the range on an animal
-				# holding itself above it.
-				var under: float = minf(_band[k].x, 0.0) if _solid else _band[k].y
-				var over: float = maxf(_band[k].y, 0.0) if _solid else _band[k].y
-				# Written out rather than calling `_flatten` twice: this is the one
-				# loop in the file that runs over every corner of every cell of the
-				# animal on every frame, turned or not.
-				var flat_x: float = at.x * _cos_spin
-				var flat_y: float = at.y * _cos_tilt + at.x * _sin_spin * _sin_tilt
-				var drop: float = _cos_spin * _sin_tilt
-				var low := Vector2(flat_x + under * _sin_spin, flat_y - under * drop)
-				var high := Vector2(flat_x + over * _sin_spin, flat_y - over * drop)
-				lo = lo.min(low.min(high))
-				hi = hi.max(low.max(high))
+				# The corner at its lowest and its highest, and the floor as well: the
+				# specimen's shadow is cast on the ground, so the ground is part of
+				# what has to stay on the stage for an animal holding itself above it.
+				lo = Vector3(minf(lo.x, at.x), minf(lo.y, at.y), minf(lo.z, _band[k].x))
+				hi = Vector3(maxf(hi.x, at.x), maxf(hi.y, at.y), maxf(hi.z, _band[k].y))
 	if lo.x > hi.x:
 		return
+	lo.z = minf(lo.z, 0.0)
+	hi.z = maxf(hi.z, 0.0)
 
-	var span: Vector2 = (hi - lo).max(Vector2(1.0, 1.0))
-	var room: Vector2 = (size - Vector2(PAD_X * 2.0, PAD_Y * 2.0)).max(Vector2(1.0, 1.0))
-	var target_scale: float = minf(room.x / span.x, room.y / span.y)
-	var target_centre: Vector2 = (lo + hi) * 0.5
+	var target_centre: Vector3 = (lo + hi) * 0.5
+	# Corner to centre of that box: the radius of a ball that holds the animal from
+	# every side. Loose by however much the body fails to fill its own corners, and
+	# on a creature that is mostly length that is a fraction of a percent.
+	var target_radius: float = maxf((hi - lo).length() * 0.5, 0.5)
 	if _fitted:
 		var ease: float = 1.0 - exp(-SETTLE * delta)
-		_scale = lerpf(_scale, target_scale, ease)
-		_centre = _centre.lerp(target_centre, ease)
+		_radius = lerpf(_radius, target_radius, ease)
+		_centre3 = _centre3.lerp(target_centre, ease)
 	else:
-		_scale = target_scale
-		_centre = target_centre
+		_radius = target_radius
+		_centre3 = target_centre
 		_fitted = true
+
+	# The ball drawn at the stage's inscribed circle, and the scale that follows
+	# from it. Both survive the panel being resized; neither can see the orbit.
+	var room: Vector2 = (size - Vector2(PAD_X * 2.0, PAD_Y * 2.0)).max(Vector2(1.0, 1.0))
+	_ball = minf(room.x, room.y) * 0.5
+	_scale = _ball / _radius
+	_reframe()
+
+	# What the animal actually covers on the page, for the labels that have to stand
+	# clear of it. The eight corners of its box rather than every cell of it: this is
+	# a margin for leader lines, and the box already bounds the body.
+	_lo = Vector2(INF, INF)
+	_hi = Vector2(-INF, -INF)
+	for i in 8:
+		var at: Vector2 = _origin + _flatten(
+			Vector2(hi.x if (i & 1) != 0 else lo.x, hi.y if (i & 2) != 0 else lo.y),
+			hi.z if (i & 4) != 0 else lo.z) * _scale
+		_lo = _lo.min(at)
+		_hi = _hi.max(at)
+
+
+## Re-centres the stage on the ball. Called by the fit and again by every turn,
+## because where the middle of the animal lands on the page depends on both.
+func _reframe() -> void:
+	if not _fitted:
+		return
+	_centre = _flatten(Vector2(_centre3.x, _centre3.y), _centre3.z)
 	_origin = size * 0.5 - _centre * _scale
-	_lo = _origin + lo * _scale
-	_hi = _origin + hi * _scale
 
 
 ## Where a place on the animal lands on the page. The whole of the relationship
@@ -359,22 +489,21 @@ func to_panel(world: Vector2) -> Vector2:
 ## One point of the upright presentation, seen from wherever the eye currently is.
 ##
 ## `turned` is the body in plan, already rotated snout-up; `height` is how far off
-## the ground that point stands. Spin rolls the eye around the animal's long axis,
-## so the belly-to-back direction sweeps across the page; tilt then swings it off
-## overhead, so the animal's length foreshortens. At an orbit of nothing this is
-## the identity on the plan and drops the height entirely, which is exactly the
-## top-down reading the field is drawn in.
+## the ground that point stands. The two together are a place in the animal, and
+## the two page rows of `orient` say where on the stage that place falls. At an
+## orientation of nothing this is the identity on the plan and drops the height
+## entirely, which is exactly the top-down reading the field is drawn in.
 func _flatten(turned: Vector2, height: float) -> Vector2:
 	return Vector2(
-		turned.x * _cos_spin + height * _sin_spin,
-		turned.y * _cos_tilt - (height * _cos_spin - turned.x * _sin_spin) * _sin_tilt)
+		turned.x * _page_x.x + turned.y * _page_x.y + height * _page_x.z,
+		turned.x * _page_y.x + turned.y * _page_y.y + height * _page_y.z)
 
 
 ## How near the eye that same point is. The painter's-order key, and the only
 ## reason a rolled specimen reads as a solid animal rather than as a shell turned
 ## inside out.
 func _towards(turned: Vector2, height: float) -> float:
-	return turned.y * _sin_tilt + (height * _cos_spin - turned.x * _sin_spin) * _cos_tilt
+	return turned.x * _eye.x + turned.y * _eye.y + height * _eye.z
 
 
 ## Whether the specimen has been framed yet. False for a creature whose lattice
@@ -482,7 +611,7 @@ func _draw_cells(grid: TissueGrid) -> void:
 			# out on the flank faces sideways; and the ellipse says by how much.
 			var lateral: float = p.row_centre(cell % p.rows)
 			var rise: float = sqrt(maxf(1.0 - lateral * lateral, 0.0))
-			var over_ink: Color = _relieved(color, rise * _cos_spin - lateral * _sin_spin)
+			var over_ink: Color = _relieved(color, rise * _eye.z + lateral * _eye.x)
 
 			var over: float = 0.0
 			for k in 4:
@@ -496,7 +625,7 @@ func _draw_cells(grid: TissueGrid) -> void:
 				continue
 
 			var under: Color = _relieved(color.lerp(Color(INK, color.a), UNDERSIDE),
-				-rise * _cos_spin - lateral * _sin_spin)
+				-rise * _eye.z + lateral * _eye.x)
 			var below: float = 0.0
 			for k in 4:
 				_points[v + k] = _origin + _flatten(_turned[k], _band[k].x) * _scale
@@ -572,7 +701,7 @@ func _build_shadow_indices(cells: int) -> void:
 ## grain, the lattice, a wound rim and the hit test all describe the side you are
 ## actually looking at.
 func _facing(band: Vector2) -> float:
-	return band.y if _cos_spin >= 0.0 else band.x
+	return band.y if _eye.z >= 0.0 else band.x
 
 
 ## Whether that face is actually turned toward the eye rather than lying on the
@@ -589,7 +718,7 @@ func _shows(lateral: float) -> bool:
 	if not _solid:
 		return true
 	var rise: float = sqrt(maxf(1.0 - lateral * lateral, 0.0))
-	return (rise if _cos_spin >= 0.0 else -rise) * _cos_spin - lateral * _sin_spin > 0.0
+	return (rise if _eye.z >= 0.0 else -rise) * _eye.z + lateral * _eye.x > 0.0
 
 
 ## Material grain, on the same rule the field uses: skin is read as one membrane
@@ -907,6 +1036,10 @@ func _draw_hover(grid: TissueGrid) -> void:
 ## Dragging turns the specimen; moving over it reads a cell. Both are the pointer
 ## on the same stage, so which one is happening is decided by whether a button is
 ## down and nowhere else.
+##
+## A drag is on the ball and takes the pointer's position, not its displacement:
+## the specimen goes where the hand goes because it is being held, rather than
+## being nudged by however far the mouse reported having moved this frame.
 func _gui_input(event: InputEvent) -> void:
 	var click := event as InputEventMouseButton
 	if click != null and click.button_index == MOUSE_BUTTON_LEFT:
@@ -914,6 +1047,7 @@ func _gui_input(event: InputEvent) -> void:
 			reset_orbit()
 		_orbiting = click.pressed
 		if click.pressed:
+			grab_ball(click.position)
 			_hover_key = ""
 			_hover_cell = -1
 			cell_hovered.emit("", false)
@@ -923,7 +1057,7 @@ func _gui_input(event: InputEvent) -> void:
 	if motion == null:
 		return
 	if _orbiting:
-		orbit_by(motion.relative)
+		turn_ball(motion.position)
 		accept_event()
 		return
 	_pick(motion.position)
@@ -971,10 +1105,9 @@ func _pick(at: Vector2) -> void:
 				var height: float = _facing(_band[k])
 				_turned[k] = turned
 				_heights[k] = height
-				var raised: float = height * _cos_spin - turned.x * _sin_spin
 				_face[k] = _origin + Vector2(
-					turned.x * _cos_spin + height * _sin_spin,
-					turned.y * _cos_tilt - raised * _sin_tilt) * _scale
+					turned.x * _page_x.x + turned.y * _page_x.y + height * _page_x.z,
+					turned.x * _page_y.x + turned.y * _page_y.y + height * _page_y.z) * _scale
 				lo = lo.min(_face[k])
 				hi = hi.max(_face[k])
 			# The cell's own box on the page first, which turns almost every cell

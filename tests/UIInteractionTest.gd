@@ -197,10 +197,10 @@ func _check_composition(panel: AnatomyPanel, each: Creature) -> void:
 		each.anatomy.state.circulation), "the heart bar was not what the heart delivers")
 
 
-## Turning the specimen. It is a camera and nothing else, so the two things worth
-## checking are that it genuinely moves the eye through the third axis — the one
-## the lattice has been carrying all along — and that the animal stays framed and
-## still answers the pointer once it has been turned.
+## Turning the specimen. It is a camera and nothing else, so what is worth checking
+## is that it genuinely moves the eye through the third axis — the one the lattice
+## has been carrying all along — that the animal stays framed and still answers the
+## pointer once it has been turned, and that turning it is a turn and not a zoom.
 func _check_orbit(panel: AnatomyPanel, each: Creature) -> void:
 	var view: AnatomyView = panel.view
 	var grid: TissueGrid = each.anatomy.tissue
@@ -213,20 +213,30 @@ func _check_orbit(panel: AnatomyPanel, each: Creature) -> void:
 	# eye is off it. That is the whole claim the third axis makes.
 	_check(view.project(each.body.head.pos, 40.0).is_equal_approx(flat),
 		"a height moved the specimen while the view was still top-down")
+	_settled(view)
+	var rested: float = view._scale
 
 	view.spin = deg_to_rad(25.0)
 	view.tilt = deg_to_rad(20.0)
 	_check(view.orbited(), "orbiting the specimen left it flat")
+	_check(is_equal_approx(view.spin, deg_to_rad(25.0))
+		and is_equal_approx(view.tilt, deg_to_rad(20.0)),
+		"the eye did not read back at the angles it was sent to")
+	_check(absf(view.roll) < 0.001, "naming a viewpoint by its angles tipped the page over")
 	_check(not view.project(each.body.head.pos, 40.0).is_equal_approx(
 		view.to_panel(each.body.head.pos)),
 		"the turned specimen still ignored how high the body stands")
 
-	view._settle(1.0)
+	_settled(view)
 	var stage := Rect2(Vector2.ZERO, view.size)
 	var framed: bool = true
 	for i in range(each.body.last_index + 1):
 		framed = framed and stage.has_point(view.to_panel(each.spine.points[i]))
 	_check(framed, "part of the turned specimen was framed off the stage")
+	# The specimen is framed by the ball it sits in, so no angle of the eye can
+	# resize it. Without this the fit reads the silhouette and every drag is a zoom.
+	_check(is_equal_approx(view._scale, rested),
+		"turning the specimen resized it: %f then %f" % [rested, view._scale])
 
 	# The hit test has to follow the projection, or a turned specimen is a picture
 	# with a stale grid of hotspots behind it.
@@ -241,13 +251,66 @@ func _check_orbit(panel: AnatomyPanel, each: Creature) -> void:
 	_check(panel._orbit.text.contains("SPIN"),
 		"the stage did not report where the eye had been moved to: " + panel._orbit.text)
 
-	view.tilt = 4.0
-	_check(view.tilt <= AnatomyView.TILT_LIMIT,
-		"the eye tipped past the limit, where the animal has no length to frame")
+	_check_trackball(view)
+
 	view.reset_orbit()
-	_check(not view.orbited() and is_zero_approx(view.spin),
+	_check(not view.orbited() and is_zero_approx(view.spin) and is_zero_approx(view.roll),
 		"resetting the view did not put the eye back over the animal's back")
-	view._settle(1.0)
+	_settled(view)
+
+
+## The drag itself. The specimen is held inside a sphere and the pointer takes hold
+## of it, so the one thing that has to be true is that the body follows the hand:
+## the part of the animal that was under the cursor comes with it, the way it would
+## if the sphere were a real one being turned, and it goes on turning when the drag
+## runs off the edge of the ball instead of stalling against it.
+func _check_trackball(view: AnatomyView) -> void:
+	view.reset_orbit()
+	_settled(view)
+	var middle: Vector2 = view.size * 0.5
+	# The near face of the sphere, as a place in the animal rather than as a place on
+	# the page — so that where it lands is a question with an answer, and the answer
+	# has to be wherever the pointer has taken it.
+	var pole: Vector2 = _ball_point(view, Vector3(0.0, 0.0, 1.0))
+	_check(pole.is_equal_approx(middle),
+		"the near face of the sphere was not at the middle of the stage: %v" % pole)
+
+	view.grab_ball(middle)
+	var to: Vector2 = middle + Vector2(view.ball_radius() * 0.5, 0.0)
+	view.turn_ball(to)
+	_check(_ball_point(view, Vector3(0.0, 0.0, 1.0)).is_equal_approx(to),
+		"the point of the sphere that was grabbed did not follow the pointer: %v for %v"
+			% [_ball_point(view, Vector3(0.0, 0.0, 1.0)), to])
+	_check(view.spin > 0.0, "dragging sideways did not walk the eye around the animal")
+
+	# A pointer brought back to where it seized the ball must leave the specimen
+	# exactly where it stood, or a click on the stage is a nudge.
+	view.turn_ball(middle)
+	_check(_ball_point(view, Vector3(0.0, 0.0, 1.0)).is_equal_approx(middle),
+		"letting the pointer come back to where it grabbed did not put the specimen back")
+
+	# Off the ball entirely. A sphere caught by its rim rolls; it does not stop.
+	view.reset_orbit()
+	var rim: Vector2 = middle + Vector2(view.ball_radius() * 1.6, 0.0)
+	view.grab_ball(rim)
+	view.turn_ball(rim + Vector2(0.0, 40.0))
+	_check(absf(view.roll) > 0.01, "a drag past the edge of the ball turned nothing")
+
+
+## Where a direction out of the middle of the containing sphere meets its surface,
+## on the page. Asked through the same projection the specimen is drawn by, off the
+## same fit, so it is the drawn ball that is being measured and not a second idea
+## of one.
+func _ball_point(view: AnatomyView, direction: Vector3) -> Vector2:
+	var at: Vector3 = view._centre3 + direction.normalized() * view._radius
+	return view.project(view._anchor + Vector2(at.x, at.y).rotated(-view._rot), at.z)
+
+
+## Runs the fit out to where it has stopped moving, so a measurement of it is of
+## the fit and not of the ease.
+func _settled(view: AnatomyView) -> void:
+	for _step in 8:
+		view._settle(1.0)
 
 
 func _check(condition: bool, message: String) -> void:

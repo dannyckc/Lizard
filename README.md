@@ -41,7 +41,7 @@ godot --path . --editor   # open the editor
 | `F1` | show/hide the tuning panel |
 | `F2` | toggle debug draw |
 | `F3` | switch between the **Field** and **Anatomy** views |
-| drag the specimen | orbit the anatomy view around the creature — roll it off its back, tip the eye off overhead; double-click to look straight down again |
+| drag the specimen | turn the anatomy view: the creature is held in a sphere and the drag rolls it, so the part under the pointer follows the hand; double-click to look straight down again |
 | `R` | reset |
 | mouse wheel | zoom |
 
@@ -1344,12 +1344,31 @@ geometry, and it is not new: the lattice has carried a third coordinate per cell
 corner since the bite query needed to tell a knee from a belly. `Patch.surfaces_of`
 hands over the underside and the top of a cell in the same pixels as its `x` and
 `y`, and `_flatten` folds them onto the page from wherever the eye currently is.
-**Drag the specimen to orbit it.** `spin` rolls the eye around the animal's own
-spine, from over the back through the flank to the belly; `tilt` swings it off
-straight-overhead toward the snout; a double-click puts it back. Nothing about
+**Drag the specimen to turn it**, and a double-click puts it back. Nothing about
 the creature moves — it is the same pose of the same body seen from somewhere
 else, which is the only kind of rotation a *reading* of a creature is allowed to
 be.
+
+The drag is on the animal's own **containing sphere**. The fit works out the ball
+the creature sits inside, draws it at the stage's inscribed circle, and a press
+takes hold of the point of that ball under the pointer; every move carries that
+point to where the pointer has got to, by the shortest rotation that does it. So
+the surface under the hand is the surface that follows, a drag off the edge of the
+ball rolls the specimen instead of stalling against it, and the turn slows toward
+the rim the way a real sphere does — none of which is a rate to be tuned, it is
+the ball's own curvature. `orient` is the whole of the eye's position, held as a
+rotation rather than as a pair of angles: composed angles have an order, and the
+order shows, because whichever is applied second stops answering the drag once the
+first has swung its axis off the screen. `spin`, `tilt` and `roll` are readings
+off `orient` for the stage's readout, and setting either of the first two names a
+viewpoint outright.
+
+Framing is that same sphere, which is what keeps a turn from being a zoom. The
+scale is the ball's radius against the stage, and no angle of the eye appears in
+it. Fitting the drawn silhouette instead — a body that is long, narrow and now
+standing at an angle — hands the fit a different rectangle to fill every degree of
+the way round, and the specimen swells and shrinks under the hand for the whole
+drag.
 
 Three things follow from the eye leaving the vertical, and each is skipped
 entirely while it has not, so a specimen nobody has turned costs exactly what it
@@ -2237,7 +2256,12 @@ because the failure worth catching is four unrelated percentages that happen to
 look plausible — and the orbit as a camera: that a height moves nothing while the
 eye is overhead and moves the specimen once it is not, that the animal stays framed
 when it is turned, and that the hit test follows the projection rather than leaving
-a stale grid of hotspots behind the picture. `RenderSmoke` then holds the tab open
+a stale grid of hotspots behind the picture. The drag is checked as a ball: that
+the point of the sphere the pointer seized is exactly where the pointer left it,
+that bringing the pointer back where it started puts the specimen back, that a drag
+past the rim still rolls it — and that the fit does not move by a part in a million
+through any of it, which is the check that fails the day the framing goes back to
+measuring the silhouette and every turn becomes a zoom. `RenderSmoke` then holds the tab open
 over a target that has been chewed to the bone and had a leg taken off, turns it
 part way through, and fails if the specimen it drew had no holes in it or was never
 turned off the vertical — a clean run flat over an intact body would exercise

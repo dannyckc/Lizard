@@ -138,9 +138,15 @@ func _open_anatomy() -> void:
 ## Rolls the specimen off its back and tips the eye off overhead, so the closed
 ## shell, the painter's sort and the shadow on the floor are all drawn — and picks
 ## a cell again through the turned projection, which is a different hit test.
+##
+## Dragged on the ball rather than nudged along the two named axes, because a drag
+## across a sphere puts the animal's own length off vertical as well, and a rolled
+## page is a case the cull, the relief and the sort all have to survive.
 func _turn_anatomy() -> void:
 	var view: AnatomyView = (main.hud as EvolutionHUD).anatomy.view
-	view.orbit_by(Vector2(34.0, 26.0))
+	var middle: Vector2 = view.size * 0.5
+	view.grab_ball(middle)
+	view.turn_ball(middle + Vector2(74.0, 52.0))
 	view._settle(1.0)
 	var torso: TissueGrid.Patch = view.tissue().patch(TissueGrid.BODY_KEY)
 	var cell: int = torso.cells / 2

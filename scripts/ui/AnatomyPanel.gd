@@ -62,6 +62,10 @@ const DIM: float = 0.98
 const FAINT: float = 0.35
 ## Circulation at which the heart is losing the body rather than merely labouring.
 const FAILING: float = 0.5
+## Tip of the specimen's own length off vertical below which the readout treats it
+## as standing straight. A degree either way is the drag not having been perfectly
+## level, and naming it would be reporting the hand rather than the view.
+const LEVEL: float = 0.017
 
 const WIDTH: float = 378.0
 const INSET: float = 44.0
@@ -318,13 +322,20 @@ static func _blood_word(state: BodyState) -> String:
 	return "SEALED" if state.blood < 0.999 else "FULL"
 
 
+## Where the eye has got to. Roll is only named once there is some — it is the one
+## of the three that cannot be asked for, so on a specimen nobody has turned over
+## it would be a reading of nothing.
 func _orbit_word() -> String:
 	if view == null:
 		return ""
-	if not view.orbited():
+	var roll: float = view.roll
+	if not view.orbited() and absf(roll) < LEVEL:
 		return "TOP DOWN · DRAG TO TURN"
-	return "SPIN %d° · TILT %+d° · DOUBLE-CLICK RESETS" % [
+	var word: String = "SPIN %d° · TILT %+d°" % [
 		int(round(rad_to_deg(view.spin))), int(round(rad_to_deg(view.tilt)))]
+	if absf(roll) >= LEVEL:
+		word += " · ROLL %+d°" % int(round(rad_to_deg(roll)))
+	return word + " · DOUBLE-CLICK RESETS"
 
 
 func _blank() -> void:
