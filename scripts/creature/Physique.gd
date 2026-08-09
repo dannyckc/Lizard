@@ -22,7 +22,15 @@ extends RefCounted
 ## than a measured baseline for the same reason the lattice's dimensions are: it
 ## has to mean the same thing after the creation menu has restructured the body
 ## underneath it.
-const REFERENCE_VOLUME: float = 29000.0
+##
+## Re-measured when the width profile's knots were moved onto the girdles they are
+## named for — see BodyShape.knot_stations. Every body in the file got lighter by
+## much the same fraction, because all of them had been carrying a tail drawn at
+## nearly hip width for three quarters of its length, and none of them had a tail
+## like that. Re-anchoring here is what keeps `density` 1.0 meaning what its own
+## comment says it means; leaving it would have quietly made the reference animal
+## weigh four fifths of a reference animal.
+const REFERENCE_VOLUME: float = 23224.0
 ## Head cap radius of that same default build, ditto.
 const REFERENCE_HEAD_RADIUS: float = 13.0
 ## Nothing is ever weightless — the contact solver divides by a mass sum, and a

@@ -195,7 +195,15 @@ func _check_the_body_does_it(player: Creature) -> void:
 func _check_the_hind_limbs_drive(player: Creature) -> void:
 	_apply(player, "Cat")
 	var behind: float = player.leap.share.y
-	_check(behind > player.leap.share.x * 2.0,
+	# Most of the push, rather than a fixed multiple of it. Part of what separates
+	# the two girdles is `Physique.balance` — how much animal there is on the far
+	# side of each — and that reading got a good deal less lopsided when the width
+	# profile's hip knot was moved onto the hips: a Cat's tail is a light, tapering
+	# thing, and it had been drawn at nearly hip width for three quarters of its
+	# length. What is left doing the separating is the articulation, which is where
+	# it belonged — a knee that folds past its stance, a longer light shin and most
+	# of the animal's stored tissue, all of them on the hind girdle.
+	_check(behind > 0.55,
 		"a Cat's forelimbs took %.0f%% of the push" % (player.leap.share.x * 100.0))
 
 	var deepest := Vector2.ZERO

@@ -675,7 +675,7 @@ func update(creature: Node) -> void:
 	# were drawn against, so the heights here cannot disagree with the positions.
 	_update_body(creature.body, creature.spine, creature.stature,
 		creature.posture.depth_ratio if creature.posture != null else 1.0,
-		creature.droop)
+		creature.droop, creature.params.front_limb_t)
 	if creature.gait == null:
 		return
 	# Everything on a limb is quoted against the creature's own ground, so a body
@@ -688,19 +688,26 @@ func update(creature: Node) -> void:
 			_update_limb(p, limb, creature.size_scale, lift)
 
 
-## Share of the torso the neck occupies — how far back along the trunk the body
-## has finished rising to meet the head.
+## Least share of the trunk the neck may occupy, for a build whose forelimbs are
+## carried right up under its jaw.
 ##
-## The lattice runs one continuous strip from the snout to the tail tip, so this
-## is where the head's height becomes the back's. It is a real piece of anatomy
-## rather than a blend factor: the cells inside it are the cells of the neck, and
-## what makes a browser able to reach over a fence and a low animal able to bite
-## its throat is that they stand between the two heights rather than at either.
-const NECK_SHARE: float = 0.25
+## The lattice runs one continuous strip from the snout to the tail tip, and
+## somewhere along it the head's height becomes the back's. Where is not a blend
+## factor and it is not a share of the animal: a neck runs from the skull to the
+## *shoulder*, so it ends at the pectoral girdle and nowhere else — see
+## `_update_body`, which reads it straight off `front_limb_t`.
+##
+## This is only the floor under that. A quarter of the trunk used to be the whole
+## answer, and on a build carrying its shoulders further forward than that the
+## girdle sat inside the ramp: the flesh at the shoulder was still on its way down
+## off the head, so it was drawn and tessellated a good deal higher than the back
+## the leg underneath was actually holding, and the socket ended up grazing the
+## underside of its own chest.
+const NECK_MIN: float = 0.08
 
 
 func _update_body(body: BodyShape, spine: Spine, stature: Stature,
-		depth_ratio: float, droop: Droop = null) -> void:
+		depth_ratio: float, droop: Droop = null, shoulder_t: float = 0.25) -> void:
 	var p: Patch = patches[BODY_KEY]
 	var last: int = body.last_index
 	if last < 2 or body.widths.size() <= last:
@@ -732,6 +739,11 @@ func _update_body(body: BodyShape, spine: Spine, stature: Stature,
 			body.head_radius * sin(a))
 		station += 1
 
+	# Where the neck stops being neck: the pectoral girdle, because that is what a
+	# shoulder is. Everything ahead of it is rising to meet the head and everything
+	# behind it is back.
+	var neck: float = maxf(shoulder_t, NECK_MIN)
+
 	# Torso, at a fixed count of stations along the *clipped* spine, so the
 	# lattice is independent of how many particles the chain happens to have.
 	for k in range(TORSO_COLS + 1):
@@ -762,7 +774,7 @@ func _update_body(body: BodyShape, spine: Spine, stature: Stature,
 		# instead. One expression covers both because it is one back.
 		var along: float = float(k) / float(TORSO_COLS)
 		var carried: float = droop.at(along) if droop != null else back
-		var mid: float = lerpf(crown, carried, smoothstep(0.0, NECK_SHARE, along))
+		var mid: float = lerpf(crown, carried, smoothstep(0.0, neck, along))
 		p.set_station(station,
 			spine.points[i].lerp(spine.points[i + 1], f) + drawn,
 			perp, half, mid, half * depth_ratio)

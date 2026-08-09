@@ -113,7 +113,7 @@ func _check_composition(c: Creature) -> void:
 	var trunk: float = tissue.region_layer(BodyPlan.LUMBAR, TissueGrid.FAT)
 	_check(is_equal_approx(trunk, 1.0), "an untouched trunk was not fully fat")
 	var plan: BodyPlan = c.anatomy.plan
-	_check(plan.fat_at(TissueGrid.BODY_KEY, BodyPlan.HEAD_COLS + BodyPlan.LUMBAR_COL, 0.9)
+	_check(plan.fat_at(TissueGrid.BODY_KEY, BodyPlan.HEAD_COLS + plan.lumbar_col, 0.9)
 			> plan.fat_at("FL", 8, 0.0) * 2.0,
 		"fat is spread evenly over the animal rather than laid over its trunk")
 
@@ -698,8 +698,10 @@ func _check_tail_comes_off(c: Creature) -> void:
 	c.part_severed.connect(handle)
 
 	# Straight through the animal at the root of the tail: every row of one column,
-	# vertebra included.
-	var col: int = BodyPlan.HEAD_COLS + BodyPlan.LOIN_COL
+	# vertebra included. Where that root is is the plan's answer, not a column
+	# written down here — it moves with the hips, and on a build whose hind limbs
+	# are carried further back this cut would otherwise land in the pelvis.
+	var col: int = BodyPlan.HEAD_COLS + c.anatomy.plan.loin_col
 	var beyond: int = (col + 3) * BodyPlan.BODY_ROWS + BodyPlan.SPINE_ROW
 	_check(patch.gone[beyond] == 0, "the tail was already missing before it was cut")
 	for row in BodyPlan.BODY_ROWS:
@@ -880,7 +882,7 @@ func _cord_cell(c: Creature, region: int) -> int:
 
 ## A flank cell well behind the ribs, where the body is flesh over one vertebra.
 func _flank_cell(c: Creature) -> int:
-	var col: int = BodyPlan.HEAD_COLS + BodyPlan.LOIN_COL
+	var col: int = BodyPlan.HEAD_COLS + c.anatomy.plan.loin_col
 	return col * BodyPlan.BODY_ROWS + 1
 
 

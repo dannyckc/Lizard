@@ -46,6 +46,44 @@ const SLACK_STIFFNESS: float = 0.10
 ## doubling, so a broken back still reads as a back and not as a rope.
 const BROKEN_BEND: float = 1.85
 
+## How much further than its own back a joint at the thin end of a taper folds.
+##
+## A vertebra's grip on the pair either side of it goes with the section it is cut
+## from — the same sentence `Droop` says about the vertical, and the reason a tail
+## sags — so the caudal vertebrae at the end of a tapering tail are a small
+## fraction as stiff as the thoracic ones. One `max_bend_deg` for the whole chain
+## said the opposite: it made an Elephant's tail exactly as rigid as its back,
+## which at ten degrees a joint is a plank, and it gave a Lizard's whip and a
+## Kangaroo's rudder the same articulation on bodies that taper nothing like each
+## other.
+##
+## Deliberately modest, and this is the one bound here that is not anatomy. A tail
+## free enough to fold right round is a tail that can coil *through* things:
+## contacts move the whole animal — see `Creature._translate_contact` — so a chain
+## that can put its own tip where the body is not can carry it through something
+## the body has been pushed clear of. Measured: at twice the back's limit a
+## Lizard's tail passes through an Elephant's planted foot, and at one and a half
+## it does not.
+##
+## It never touches the solver's final full-strength pass — see `step` — so a
+## limber tail is still exactly as long as it was.
+##
+## Note what is deliberately *not* graded off the section: how much of its motion a
+## station carries into the next tick. Letting a thin one keep more is the obvious
+## way to buy trailing, and it works — measured, a Lizard's tail swung three times
+## as far off the track its own hips had laid and took twice as long to come to
+## rest — and then it resonates. The undulation in `step` is a periodic forcing
+## along the whole body, the solver's corrections feed back into the integrator by
+## design, and a free end that spends less of what it is handed pumps: a Cheetah
+## walking dead straight swayed thirteen times its own `body_wave`. Lag on a towed
+## chain has to come from the wave being driven where the muscle is, which is a
+## change to what `body_wave` means rather than one to this file.
+const LIMBER_BEND: float = 1.5
+## Least section a station is allowed to count as, against the animal's stoutest.
+## A tail tapers to a point, and a point has no stiffness at all — without a floor
+## the last joint has no limit to hold it and nothing to settle it.
+const MIN_SECTION: float = 0.06
+
 ## Position/orientation sampled at a fractional point along the chain.
 class Frame extends RefCounted:
 	var pos: Vector2 = Vector2.ZERO
@@ -59,6 +97,10 @@ var perps: PackedVector2Array = PackedVector2Array()
 ## Lateral displacement the undulation currently owns, per point. Tracked so the
 ## wave can be applied as a bounded offset instead of an accumulating force.
 var wave_offsets: PackedVector2Array = PackedVector2Array()
+## How stiff each station is against the stoutest section of the same animal,
+## 0..1 — see `set_sections`. Empty on a chain nobody has profiled, which is
+## exactly the uniform back the solver assumed before there was one.
+var section_hold: PackedFloat32Array = PackedFloat32Array()
 
 var wave_clock: float = 0.0
 
@@ -98,11 +140,15 @@ func rebuild_slumped(count: int, seg_len: float, origin: Vector2, heading: float
 		max_bend: float, rng: RandomNumberGenerator) -> void:
 	rebuild(count, seg_len, origin, heading)
 	var n: int = points.size()
-	var limit: float = max_bend * SLUMP_BEND_FRACTION
 	var arc: float = rng.randf_range(-1.0, 1.0)
 	var direction: Vector2 = Vector2.RIGHT.rotated(heading + PI)
 	var at: Vector2 = origin
 	for i in range(1, n):
+		# Per joint rather than one budget for the chain, for the same reason the
+		# solve below is: a carcass's tail lies in a slacker curve than its back
+		# because the vertebrae out there are smaller. Drawn inside the limit the
+		# constraints will hold it to, so the first pass has nothing to unpick.
+		var limit: float = bend_at(i - 1, max_bend) * SLUMP_BEND_FRACTION
 		# The arc is weighted through the trunk and eases off toward both ends, so
 		# the body folds where a body folds rather than coiling evenly end to end.
 		var t: float = float(i) / float(n - 1)
@@ -116,6 +162,43 @@ func rebuild_slumped(count: int, seg_len: float, origin: Vector2, heading: float
 
 func size() -> int:
 	return points.size()
+
+
+## Tells the chain how thick the animal is at each of its stations.
+##
+## Structure rather than pose, so it is set once when the body is built and read
+## every tick afterwards. What it buys is the difference between a back and the
+## tail behind it: the cube below is the beam law, and a station a third as thick
+## as the chest comes out a twenty-seventh as stiff — so a species keeps the
+## `max_bend_deg` it was given for its back, and its tail gets the one its own
+## taper implies. A thick-based Kangaroo tail stays stiff at the root and a
+## Lizard's does not, and neither needed a parameter.
+##
+## Measured against the animal's own stoutest section rather than against a
+## pixel count, which is what makes it size-free: a creature drawn twice as large
+## has the same profile of holds.
+func set_sections(sections: PackedFloat32Array) -> void:
+	var n: int = sections.size()
+	var stoutest: float = 0.0
+	for w in sections:
+		stoutest = maxf(stoutest, w)
+	if n == 0 or stoutest <= 0.0:
+		section_hold.resize(0)
+		return
+	if section_hold.size() != n:
+		section_hold.resize(n)
+	for i in n:
+		var ratio: float = clampf(sections[i] / stoutest, 0.0, 1.0)
+		section_hold[i] = clampf(ratio * ratio * ratio, MIN_SECTION, 1.0)
+
+
+## The bend the joint at point `i` is allowed, against the animal's own limit.
+## Exposed rather than kept inside the solve because anything checking that the
+## chain stayed legal has to ask about the same limit the solver applied.
+func bend_at(i: int, max_bend: float) -> float:
+	if section_hold.size() != points.size() or i < 0 or i >= section_hold.size():
+		return max_bend
+	return max_bend * lerpf(LIMBER_BEND, 1.0, section_hold[i])
 
 
 ## Advances the spine one tick. `head_pos` is where the head is being dragged to.
@@ -199,17 +282,19 @@ func step(delta: float, head_pos: Vector2, p: CreatureParams, speed_norm: float,
 	var passes: int = maxi(p.constraint_iterations, 1)
 	var damaged: bool = tone.size() == n
 	for it in range(passes):
-		var stiffness: float = 1.0 if it == passes - 1 else p.spine_stiffness
+		var final_pass: bool = it == passes - 1
 		for i in range(1, n):
 			# The last pass stays full strength whatever the anatomy says. That is
 			# not tone, it is the invariant that makes segment lengths exact — a
 			# broken back is a slack back, never a stretched one.
-			var hold: float = stiffness
-			var bend: float = max_bend
+			var hold: float = 1.0 if final_pass else p.spine_stiffness
+			# The joint is the vertex at i-1, which is the station whose vertebra
+			# decides how far the pair either side of it may turn.
+			var bend: float = bend_at(i - 1, max_bend)
 			if damaged:
-				if it < passes - 1:
-					hold = lerpf(SLACK_STIFFNESS, stiffness, tone[i])
-				bend = max_bend * lerpf(BROKEN_BEND, 1.0, tone[i])
+				if not final_pass:
+					hold = lerpf(SLACK_STIFFNESS, hold, tone[i])
+				bend *= lerpf(BROKEN_BEND, 1.0, tone[i])
 			points[i] = Constraints.solve_distance(points[i - 1], points[i], seg_len, hold)
 			if i >= 2:
 				points[i] = Constraints.solve_angle(points[i - 2], points[i - 1], points[i], bend)
@@ -264,12 +349,12 @@ func step_free(p: CreatureParams, seg_len: float, damping: float) -> void:
 			for i in range(1, n):
 				_solve_distance_symmetric(i - 1, i, seg_len)
 				if i >= 2:
-					_solve_angle_symmetric(i - 2, i - 1, i, max_bend)
+					_solve_angle_symmetric(i - 2, i - 1, i, bend_at(i - 1, max_bend))
 		else:
 			for i in range(n - 1, 0, -1):
 				_solve_distance_symmetric(i - 1, i, seg_len)
 				if i <= n - 3:
-					_solve_angle_symmetric(i, i + 1, i + 2, max_bend)
+					_solve_angle_symmetric(i, i + 1, i + 2, bend_at(i + 1, max_bend))
 
 	_compute_frames()
 

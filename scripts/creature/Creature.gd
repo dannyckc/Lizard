@@ -426,6 +426,10 @@ var command: MovementInput.Command = MovementInput.Command.new()
 ## Reused buffer for the spine's per-joint tone, so a damaged creature allocates
 ## nothing per tick and a healthy one never fills it at all.
 var _tone: PackedFloat32Array = PackedFloat32Array()
+## ...and for the cross-sections the spine reads its stiffness off. Filled once
+## per rebuild rather than per tick, because how thick this animal is at each
+## station is structure and not pose.
+var _sections: PackedFloat32Array = PackedFloat32Array()
 
 
 func _ready() -> void:
@@ -462,6 +466,14 @@ func rebuild() -> void:
 	anatomy.set_girdles(params.front_limb_t, params.rear_limb_t)
 	spine = Spine.new()
 	var seg_len: float = params.segment_length * size_scale
+	# How thick the animal is at each station, before the chain is laid out —
+	# because how far a joint bends is decided by it, and a carcass's slump is
+	# drawn against those limits. It is the same profile the silhouette is built
+	# from, so the back a bite finds and the back the solver holds are one body:
+	# see BodyShape.section_profile.
+	_sections.resize(params.segment_count)
+	BodyShape.section_profile(params, size_scale, _sections)
+	spine.set_sections(_sections)
 	if alive:
 		spine.rebuild(params.segment_count, seg_len, head_pos, heading)
 	else:

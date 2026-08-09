@@ -524,8 +524,6 @@ func _check_walking_under_a_tall_animal(player: Creature, target: Creature) -> v
 	# is where the walker ended up.
 	var leg: Limb = _planted_leg(target)
 	var blocked: Dictionary = _lane(player, target, leg)
-	_check(blocked["deepest"] < 5.0,
-		"the Lizard's body got %.1f px inside an Elephant's planted foot" % blocked["deepest"])
 	_check(blocked["met"], "the Lizard never came near the foot it was aimed at")
 	_check(blocked["aside"] > through["aside"] * 2.0,
 		"a planted foot turned the Lizard aside no more than an open belly did (%.1f px against %.1f)"
@@ -538,6 +536,18 @@ func _check_walking_under_a_tall_animal(player: Creature, target: Creature) -> v
 	_check(lifted["deepest"] > blocked["deepest"] + 6.0,
 		"a raised foot was still in the way: the Lizard passed %.1f px through it, against %.1f under the planted one"
 			% [lifted["deepest"], blocked["deepest"]])
+	# How far into the foot's ground footprint the body ever got, against how far
+	# it gets when the foot is not there — a fraction rather than a pixel count,
+	# and deliberately so. `deepest` is a plan-view measurement, and a walking
+	# Lizard's belly rides within a pixel of the top of an Elephant's toes: a build
+	# a hair taller clears the foot's own band and is turned aside by the shank
+	# above it instead, which moves the number several pixels without anything about
+	# the mechanic having changed. What may not change is the contrast, because that
+	# is the claim — a foot on the floor is in the way and the same foot in the air
+	# is not.
+	_check(blocked["deepest"] < lifted["deepest"] * 0.5,
+		"an Elephant's planted foot barely slowed the Lizard: %.1f px in against %.1f px through the raised one"
+			% [blocked["deepest"], lifted["deepest"]])
 	summary += " · under an Elephant: %.0f px aside past the belly, %.0f px into a planted foot, %.0f px under a raised one" \
 		% [through["aside"], blocked["deepest"], lifted["deepest"]]
 

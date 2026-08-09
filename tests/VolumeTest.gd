@@ -207,7 +207,11 @@ func _check_cells_agree_with_the_body(player: Creature) -> void:
 		# Where the last thing holding the back up is. Between the neck and this the
 		# body is carried by its legs and is level; behind it there is nothing under
 		# it and it hangs, which is a different claim and is checked as one.
-		var hips: float = clampf(player.params.rear_limb_t, 0.0, 1.0)
+		var hips: float = BodyPlan.tail_t(player.params.rear_limb_t)
+		# ...and where the neck stops being neck: the shoulder, which is where the
+		# lattice finishes bringing the flesh down off the head. Read off the same
+		# girdle the strip is built against rather than off a share of the animal.
+		var neck: float = maxf(player.params.front_limb_t, TissueGrid.NECK_MIN)
 		for k in range(TissueGrid.TORSO_COLS):
 			var col: int = TissueGrid.HEAD_COLS + k
 			# One cross-section rather than a cell's worth of two. A cell that
@@ -218,7 +222,7 @@ func _check_cells_agree_with_the_body(player: Creature) -> void:
 			deepest = maxf(deepest, band.y - band.x)
 			var along: float = float(k) / float(TissueGrid.TORSO_COLS)
 			var centre: float = (band.x + band.y) * 0.5
-			if along <= TissueGrid.NECK_SHARE:
+			if along <= neck:
 				continue
 			if along <= hips:
 				# Between the neck and the hips the back is held level by the legs, so

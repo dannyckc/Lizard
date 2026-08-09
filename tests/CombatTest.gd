@@ -1370,13 +1370,19 @@ func _check_teeth_stay_on_the_flesh(player: Creature, target: Creature) -> void:
 	# backstop underneath it, for the flesh that leaves without a fight: something
 	# that jumps, something the tether cannot follow for its mass, a body moved out
 	# from under the teeth.
-	if player.grip != null:
-		_check(player.grip.is_holding(),
+	#
+	# The body is carried out from under the teeth as one piece rather than reset
+	# there, and the difference is the whole check. `reset` is an authority from
+	# outside the simulation and it detaches every grip on the body it puts down —
+	# see Creature.reset — so jaws let go by it would prove nothing about the flesh
+	# having gone. This is the same translation a contact applies, so what is asked
+	# afterwards is a hold on a body that genuinely moved away.
+	var held: Grip = player.grip
+	if held != null:
+		_check(held.is_holding(),
 			"a settled hold did not report itself as holding anything")
-		var stood: Vector2 = target.head_pos
-		target.reset(stood + Vector2(0.0, player.grip.contact_span() * 2.0),
-			target.heading)
-		_check(not player.grip.is_holding(),
+		target._translate_contact(Vector2(0.0, held.contact_span() * 2.0))
+		_check(not held.is_holding(),
 			"jaws reported a hold on flesh that had left the mouth entirely")
 		player._physics_process(TICK)
 		_check(player.grip == null and not player.is_bite_latched(),

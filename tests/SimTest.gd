@@ -132,11 +132,16 @@ func _run_case(preset_name: String) -> void:
 				worst_seg_tick = tick
 				worst_seg_index = i
 
-		# 2. angle constraint
+		# 2. angle constraint, against the limit each joint was actually solved to
+		# rather than against one number for the animal. A back and the tail behind
+		# it are not the same beam — see Spine.set_sections — so the invariant is
+		# per joint, and asking the spine for it is what stops the check and the
+		# solver drifting apart.
 		for i in range(1, spine.size() - 1):
 			var a: float = (spine.points[i] - spine.points[i - 1]).angle()
 			var b: float = (spine.points[i + 1] - spine.points[i]).angle()
-			max_bend_excess = maxf(max_bend_excess, absf(wrapf(b - a, -PI, PI)) - max_bend)
+			max_bend_excess = maxf(max_bend_excess,
+				absf(wrapf(b - a, -PI, PI)) - spine.bend_at(i, max_bend))
 
 		# 3. IK bone lengths + gait bookkeeping
 		var airborne: int = 0

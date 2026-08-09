@@ -375,13 +375,17 @@ func _check_pose_invariants(creature: Creature, label: String) -> void:
 		_check(absf(actual - seg_len) <= POSITION_EPSILON,
 			"%s stretched segment %d to %.6f px (rest %.6f)" % [
 				label, i, actual, seg_len])
+	# Against the limit each joint was solved to rather than one for the animal:
+	# a tapering tail bends further than the back it hangs off, and the spine is
+	# the one place that says by how much — see Spine.bend_at.
 	for i in range(1, creature.spine.size() - 1):
 		var front: float = (creature.spine.points[i - 1] - creature.spine.points[i]).angle()
 		var back: float = (creature.spine.points[i] - creature.spine.points[i + 1]).angle()
 		var bend: float = absf(wrapf(front - back, -PI, PI))
-		_check(bend <= max_bend + ANGLE_EPSILON,
+		var limit: float = creature.spine.bend_at(i, max_bend)
+		_check(bend <= limit + ANGLE_EPSILON,
 			"%s exceeded max bend at joint %d: %.4f° > %.4f°" % [
-				label, i, rad_to_deg(bend), rad_to_deg(max_bend)])
+				label, i, rad_to_deg(bend), rad_to_deg(limit)])
 
 
 func _spawn_creature(facing: float) -> Creature:

@@ -86,11 +86,31 @@ const REGION_NAMES: Array[String] = [
 const AXIAL_REGIONS: Array[int] = [HEAD, THORAX, LUMBAR, PELVIS, TAIL]
 const LIMB_REGIONS: Array[int] = [FL, FR, RL, RR]
 
-## Torso column each axial region starts at, in torso-local columns. The head cap
-## and the tail cap are handled either side of these.
+## Torso column the trunk's regions start at. The head cap and the tail cap are
+## handled either side of these.
+##
+## Only the first is a constant, and that is the fix. The other three used to be
+## as well — a lumbar at 7, a pelvis at 9 and a tail at 12 — which described one
+## particular animal and was then applied to every animal. Move a build's hind
+## limbs and the girdle bar under them moved with the socket, exactly as it should,
+## while the block of muscle, nerve, vessel and fat *called* the pelvis stayed
+## bolted across the ninth column: a Camel and a Kangaroo hung their hind legs off
+## their own lumbar region, and every creature in the file started its tail at the
+## same fraction of itself however far forward or back its hips were.
+##
+## So the three that are a function of where the girdles are now say so, and the
+## only constant left is the one that genuinely is one — a trunk starts where the
+## head cap ends. See `_lay_out`.
 const THORAX_COL: int = 0
-const LUMBAR_COL: int = 7
-const LOIN_COL: int = 12
+## Torso columns the pelvic block reaches in front of and behind its socket. A hip
+## joint is set *into* a pelvis rather than bolted to the front of one — ilium
+## ahead of it, ischium and sacrum behind — so the block straddles the girdle bar,
+## and the tail begins where that bone runs out.
+const PELVIS_FORE: int = 1
+const PELVIS_AFT: int = 3
+## Least unribbed span between the ribcage and the pelvis. A back has to have
+## somewhere to bend: two girdles butted together are one long girdle.
+const LUMBAR_SPAN: int = 2
 
 # --- organs -----------------------------------------------------------------
 const NO_ORGAN: int = 0
@@ -203,6 +223,13 @@ var limb_socket_col: Dictionary = {}
 ## time, which is exactly the thing they have to name the same cells against.
 var shoulder_col: int = SHOULDER_COL
 var pelvis_col: int = PELVIS_COL
+## ...and the three region boundaries that follow from them: where the ribcage
+## gives out, where the pelvic block starts, and where there is nothing left but
+## tail. Derived in `_lay_out` and never set from outside — a boundary that could
+## be written to is a boundary that can disagree with the bone under it.
+var lumbar_col: int = 0
+var pelvis_from: int = 0
+var loin_col: int = 0
 
 
 func _init() -> void:
@@ -228,7 +255,14 @@ func set_girdles(front: float, rear: float) -> bool:
 
 
 func _lay_out() -> void:
-	# The sockets first: the networks below run out through them, so where the
+	# The regions before anything else, because everything below is quoted in them:
+	# which cells a nerve runs through, which muscle group acts where, how much fat
+	# a station carries. All three are read off where the girdles are rather than
+	# off a column somebody wrote down.
+	pelvis_from = clampi(pelvis_col - PELVIS_FORE, shoulder_col + 1, TORSO_COLS - 1)
+	loin_col = clampi(pelvis_col + PELVIS_AFT, pelvis_from + 1, TORSO_COLS)
+	lumbar_col = clampi(pelvis_from - LUMBAR_SPAN, shoulder_col + 1, pelvis_from)
+	# The sockets next: the networks below run out through them, so where the
 	# girdles are has to be settled before anything is plumbed across one.
 	for key in LIMB_KEYS:
 		limb_region[key] = _limb_region_of(key)
@@ -291,8 +325,8 @@ func _fat_along(col: int) -> float:
 		# The tail tapers to nothing, so its fat has to taper with it or the tip
 		# comes out better padded than the hips.
 		var torso: int = col - HEAD_COLS
-		var t: float = clampf(float(torso - LOIN_COL) / float(maxi(
-			TORSO_COLS + TAIL_COLS - LOIN_COL, 1)), 0.0, 1.0)
+		var t: float = clampf(float(torso - loin_col) / float(maxi(
+			TORSO_COLS + TAIL_COLS - loin_col, 1)), 0.0, 1.0)
 		return lerpf(FAT_ALONG[PELVIS], FAT_ALONG[TAIL], t)
 	return FAT_ALONG[region]
 
@@ -332,11 +366,11 @@ func _axial_region_of_column(col: int) -> int:
 	if col < HEAD_COLS:
 		return HEAD
 	var torso: int = col - HEAD_COLS
-	if torso < LUMBAR_COL:
+	if torso < lumbar_col:
 		return THORAX
-	if torso < PELVIS_COL:
+	if torso < pelvis_from:
 		return LUMBAR
-	if torso < LOIN_COL:
+	if torso < loin_col:
 		return PELVIS
 	return TAIL
 
@@ -347,6 +381,24 @@ func _limb_region_of(key: String) -> int:
 		"FR": return FR
 		"RL": return RL
 		_: return RR
+
+
+## Where along the clipped spine the tail begins, given where the hind limbs hang.
+##
+## Behind the pelvis, not at the hip socket, and the distinction is the whole of
+## "the tail is attached at the pelvis": the socket is set into a block of bone
+## and what cantilevers off the animal is whatever is behind that block. The
+## girdle bar, the sacrum and the first caudals are all still being held up by the
+## leg underneath them.
+##
+## Static, and the only answer to the question. The silhouette clips a tailless
+## body here, `Droop` hangs its cantilever from here, and — since `torso_column`
+## floors and `loin_col` is `PELVIS_AFT` past the bar — the lattice's TAIL region
+## begins at exactly the column this lands in, give or take the clamps that keep a
+## girdle off the ends of the trunk. Three consumers that were previously each
+## making the call themselves, and disagreeing.
+static func tail_t(rear_limb_t: float) -> float:
+	return clampf(rear_limb_t + float(PELVIS_AFT) / float(TORSO_COLS), 0.0, 1.0)
 
 
 ## Body column a fraction along the *clipped* spine falls in — the bridge between

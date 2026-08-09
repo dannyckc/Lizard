@@ -97,8 +97,17 @@ var heights: PackedFloat32Array = PackedFloat32Array()
 ## needs it; it is what a test, a HUD or a species readout asks, and it is the one
 ## number that says at a glance whether this animal carries its tail.
 var tip_sag: float = 0.0
-## Where along the spine the last thing holding the body up is — the hind girdle,
+## Where along the spine the last thing holding the body up is — the hip socket,
 ## as a fraction. Everything before it is held; everything after it hangs.
+##
+## The socket rather than the back of the pelvis, and the distinction is worth
+## stating because `BodyPlan.tail_t` answers a neighbouring question differently.
+## That one is where the *tail* begins as a structure, which is behind the pelvic
+## block; this is where the last upward force on the body is applied, which is the
+## joint the leg pushes through. How much of the pelvis behind it bends is then
+## not declared at all — it is the thickest section on the back half of the animal
+## and `hold` below cubes it, so the block comes out rigid because it is stout
+## rather than because anything said so.
 var anchor: float = 0.0
 
 

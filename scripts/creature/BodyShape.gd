@@ -110,23 +110,26 @@ func build(spine: Spine, p: CreatureParams, scale: float, posture: Posture = nul
 		return
 
 	# --- width profile -----------------------------------------------------
-	# Five knots (head, chest, waist, hip, tail tip) interpolated with a
-	# Catmull-Rom spline, so a handful of sliders control the whole silhouette
-	# and the taper stays smooth regardless of segment count.
-	var knots: PackedFloat32Array = PackedFloat32Array([
-		p.head_width, p.chest_width, p.waist_width, p.hip_width, p.tail_tip_width
-	])
+	# Five knots (head, chest, waist, hip, tail tip) through a spline, each one
+	# measured at the station it is named for — see `section_profile`. Only the
+	# swallow is added here, because a mouthful going down is a pose rather than a
+	# structure and the same profile has to answer for the spine's own stiffness
+	# whether or not the animal has just eaten.
 	widths.resize(n)
+	section_profile(p, scale, widths)
 	for i in n:
 		var t: float = float(i) / float(n - 1)
-		widths[i] = maxf(_catmull_rom(knots, t) * p.body_width * scale
-			* (1.0 + _swallow_at(t)), 0.6)
+		widths[i] = maxf(widths[i] * (1.0 + _swallow_at(t)), 0.6)
 
-	# The tail is just the spine past the hips, so making it optional is a
-	# matter of clipping the silhouette early rather than resizing the chain.
+	# The tail is the spine past the pelvis, so making it optional is a matter of
+	# clipping the silhouette early rather than resizing the chain. Where that is
+	# is BodyPlan's answer rather than a second one taken here: the lattice starts
+	# its TAIL region at the same station and the droop hangs from it, and three
+	# files disagreeing about where a tail begins is three different animals.
 	last_index = n - 1
 	if not p.tail_enabled:
-		last_index = clampi(int(round(p.rear_limb_t * float(n - 1))) + 2, 3, n - 1)
+		last_index = clampi(
+			int(round(BodyPlan.tail_t(p.rear_limb_t) * float(n - 1))), 3, n - 1)
 
 	# --- flesh drawn out by whatever has hold of it -------------------------
 	# Before every point below is placed, because all of them are placed off it:
@@ -269,24 +272,95 @@ func _set_anchor(spine: Spine, p: CreatureParams, key: String, t: float, side: f
 	socket_half[key] = widths[idx]
 
 
-## Uniform Catmull-Rom through `knots`, clamped at both ends.
-static func _catmull_rom(knots: PackedFloat32Array, t: float) -> float:
+## The half-width the body has at each of `into.size()` evenly spaced spine
+## stations, before anything the animal is currently doing to itself.
+##
+## Static, and separate from `build`, because two different things read it and
+## they must not answer differently. The silhouette is drawn from it — and so, in
+## turn, are the tissue lattice, the mass, the collision capsules and every hit
+## test, all of which already go through `widths`. And how freely each joint of
+## the back bends is read off the same sections, because bending resistance is a
+## property of how thick a beam is there: see `Spine.set_sections`.
+static func section_profile(p: CreatureParams, scale: float,
+		into: PackedFloat32Array) -> void:
+	var n: int = into.size()
+	if n <= 0:
+		return
+	var knots: PackedFloat32Array = PackedFloat32Array([
+		p.head_width, p.chest_width, p.waist_width, p.hip_width, p.tail_tip_width
+	])
+	var stations: PackedFloat32Array = knot_stations(p)
+	var girth: float = p.body_width * scale
+	if n == 1:
+		into[0] = knots[0] * girth
+		return
+	for i in n:
+		into[i] = _spline(knots, stations, float(i) / float(n - 1)) * girth
+
+
+## Where along the spine each width knot is measured.
+##
+## The five parameters are already anatomy — they are called head, chest, waist,
+## hip and tail tip — and they were being read at five evenly spaced fractions of
+## the body, which is a different animal. On every build in the file that put the
+## hip knot around 0.7 while the hind limbs hung at 0.44 to 0.54, so the widest
+## part of the creature sat a fifth of a body *behind* the legs holding it up and
+## the sockets came out of the waist. The Cheetah was the worst of it: its hind
+## legs were attached at the narrowest cross-section it has.
+##
+## Nothing was wrong with the numbers and nothing wanted a per-species offset —
+## they were being sampled in the wrong places. So the knots go where their names
+## say: the snout, the pectoral girdle, the loin between the girdles, the pelvic
+## girdle, and the tail tip. Two of those are the stations the limbs already hang
+## from, which is what makes the silhouette agree with the skeleton for free, on
+## every creature, including ones nobody has authored yet.
+static func knot_stations(p: CreatureParams) -> PackedFloat32Array:
+	# Ordered and strictly increasing whatever the sliders are set to — the spline
+	# below divides by the gaps.
+	var shoulder: float = clampf(p.front_limb_t, 0.02, 0.90)
+	var hip: float = clampf(p.rear_limb_t, shoulder + 0.04, 0.96)
+	return PackedFloat32Array([0.0, shoulder, (shoulder + hip) * 0.5, hip, 1.0])
+
+
+## Cubic Hermite through `knots` at `stations`, with Catmull-Rom tangents.
+##
+## The non-uniform form rather than the textbook one, because the stations are
+## not evenly spaced any more and the uniform spline would draw the right shape in
+## the wrong place. Reduces exactly to it when they are. C¹ in `t`, so moving a
+## girdle slides the bulge along the body instead of putting a crease in the
+## flank where the knot landed.
+static func _spline(knots: PackedFloat32Array, stations: PackedFloat32Array,
+		t: float) -> float:
 	var last: int = knots.size() - 1
 	if last <= 0:
 		return knots[0] if last == 0 else 0.0
-	var s: float = clampf(t, 0.0, 1.0) * float(last)
-	var i: int = clampi(int(floor(s)), 0, last - 1)
-	var f: float = s - float(i)
-	var p0: float = knots[maxi(i - 1, 0)]
-	var p1: float = knots[i]
-	var p2: float = knots[i + 1]
-	var p3: float = knots[mini(i + 2, last)]
-	return 0.5 * (
-		(2.0 * p1)
-		+ (-p0 + p2) * f
-		+ (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * f * f
-		+ (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * f * f * f
-	)
+	var x: float = clampf(t, stations[0], stations[last])
+	var i: int = 0
+	while i < last - 1 and x > stations[i + 1]:
+		i += 1
+	var span: float = maxf(stations[i + 1] - stations[i], 0.000001)
+	var f: float = clampf((x - stations[i]) / span, 0.0, 1.0)
+	# Tangents in width-per-station, re-expressed over this interval's own width so
+	# the Hermite basis below stays the unit one.
+	var m0: float = _tangent(knots, stations, i) * span
+	var m1: float = _tangent(knots, stations, i + 1) * span
+	var f2: float = f * f
+	var f3: float = f2 * f
+	return (2.0 * f3 - 3.0 * f2 + 1.0) * knots[i] \
+		+ (f3 - 2.0 * f2 + f) * m0 \
+		+ (-2.0 * f3 + 3.0 * f2) * knots[i + 1] \
+		+ (f3 - f2) * m1
+
+
+## Catmull-Rom tangent at one knot: the slope of the chord across its neighbours.
+## One-sided at the ends, which is what clamps the curve there rather than letting
+## it overshoot off the snout or past the tail tip.
+static func _tangent(knots: PackedFloat32Array, stations: PackedFloat32Array,
+		i: int) -> float:
+	var last: int = knots.size() - 1
+	var a: int = maxi(i - 1, 0)
+	var b: int = mini(i + 1, last)
+	return (knots[b] - knots[a]) / maxf(stations[b] - stations[a], 0.000001)
 
 
 ## Chaikin corner cutting on a closed loop — used only to smooth the drawn
