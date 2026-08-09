@@ -388,19 +388,18 @@ func _land(leap: Leap, elevation: Elevation, loco: Locomotion) -> void:
 
 
 ## How long until this body reaches the ground, in seconds. The ballistic
-## solution and nothing else — height, the rate it is going, and gravity.
+## solution and nothing else — height, the rate it is going, and gravity — which
+## is why it is asked of `Gravity` rather than worked out here: a leg falling off
+## this same animal is timed by the identical line.
 func _fall_time(elevation: Elevation) -> float:
-	var v: float = elevation.rate
-	var h: float = maxf(elevation.height, 0.0)
-	var g: float = Elevation.GRAVITY
-	return (v + sqrt(maxf(v * v + 2.0 * g * h, 0.0))) / g
+	return Gravity.fall_time(maxf(elevation.height, 0.0), elevation.rate)
 
 
 ## How fast the body left, for scaling the tuck. Read off what it was launched
 ## for rather than kept, so a jump interrupted mid-arc still normalises against
 ## something real.
 func _takeoff_rate() -> float:
-	return sqrt(2.0 * Elevation.GRAVITY * maxf(launch_peak, 1.0))
+	return Gravity.launch_rate(maxf(launch_peak, 1.0))
 
 
 func _enter(next: int) -> void:

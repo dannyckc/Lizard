@@ -51,6 +51,10 @@ func _ready() -> void:
 	camera.make_current()
 	camera.zoom = Vector2(DEFAULT_ZOOM, DEFAULT_ZOOM)
 	camera.global_position = creature.head_pos
+	# What loose anatomy falls onto. The field integrates its own parts and has no
+	# way to find the ground on its own; the world is the one thing that knows both
+	# of these exist, so it is the one that introduces them.
+	carrion.terrain = terrain
 	# Any creature can be bitten, so any creature can bite and any creature can
 	# shed. Children are ready before their parent, so the group is already
 	# populated here. The biter is bound rather than assumed, because a latched

@@ -43,14 +43,18 @@ const TETHER_SLACK: float = 6.0
 ## currency as scavenging, and a big piece feeds more because there is more of it.
 const FOOD_PER_UNIT: float = TissueGrid.SKIN_HP + TissueGrid.FAT_HP + TissueGrid.MUSCLE_HP
 
-## The height a part lying on the ground occupies. Meat is flat and it is on the
-## floor, so this is a thin band at zero — which is all the vertical layer needs
-## to know about it. It is what makes carrion reachable by anything standing on
-## that floor and unreachable by anything that has left it.
+## The height the thinnest possible part occupies once it has come to rest — the
+## floor's own band, and what `Part.band` reduces to when a piece is down and has
+## no thickness worth speaking of.
 ##
-## Taken from Volume rather than restated, because a scrap of the same animal
-## lying beside it has to be exactly as reachable: two descriptions of "on the
-## floor" is two things a set of jaws could disagree about.
+## It used to be the band of *every* part, on the grounds that meat is flat and on
+## the floor. Meat is flat and on the floor once it gets there, and a leg bitten
+## off a standing animal is neither for as long as it is falling — see `Part.fall`,
+## which is where a part's height actually comes from now. What survives here is
+## the floor case, kept because it is the one another field has to agree with: a
+## scrap of the same animal lying beside a part has to be exactly as reachable, and
+## two descriptions of "on the floor" is two things a set of jaws could disagree
+## about.
 const GROUND_BAND := Vector2(0.0, Volume.GROUND_THICKNESS)
 
 const COL_SHADOW := Color("14140f", 0.055)
@@ -115,6 +119,33 @@ class Part extends RefCounted:
 	## The same division the rig already makes between a limb the gait is striding
 	## and a limb nothing is holding out.
 	var carrier: Node = null
+
+	## Where it is in the one direction the picture does not have, and what is
+	## happening to it there. A part comes off an animal at the height the tissue
+	## was standing at and falls from there, under the same pull as everything else
+	## — see Gravity, which owns both halves of that sentence.
+	##
+	## This is the whole of why the field no longer quotes a constant band at zero.
+	## A leg lying on the floor is on the floor because it *arrived* there, and for
+	## the fraction of a second before it does, jaws at floor level cannot reach it
+	## and jaws at shoulder level can. Nothing had to be told that: it is one band
+	## derived from one height, tested by the same `overlaps` every other pair of
+	## things in the world is tested by.
+	var fall: Gravity.Fall = Gravity.Fall.new()
+	## How thick the piece is, so the band it occupies is the volume of a real
+	## object rather than a plane. Carried off the lattice with the height.
+	var thickness: float = Volume.GROUND_THICKNESS * 0.5
+
+	## The heights this part occupies right now.
+	##
+	## In the air it is a slab about wherever it has fallen to; on the ground it is
+	## `GROUND_BAND`, and that is not a special case but the same expression with
+	## the height at zero — a thing resting on the floor is a thing whose underside
+	## is the floor. Held to at least that band's own thickness so a piece of meat
+	## worn down to a sliver is still something a mouth can close on.
+	func band() -> Vector2:
+		var half: float = maxf(thickness, Volume.GROUND_THICKNESS * 0.5)
+		return Vector2(fall.height, fall.height + half * 2.0)
 
 	func to_world(at: Vector2) -> Vector2:
 		return pos + at.rotated(angle)
@@ -191,9 +222,15 @@ class Part extends RefCounted:
 
 	## Lets go. The piece keeps whatever it was moving with, so meat dropped by a
 	## running animal is thrown forward and meat put down is put down.
+	##
+	## And it keeps the height it was let go at, with no upward speed, which is the
+	## whole of what dropping something is: jaws that open at head height leave a leg
+	## falling from head height. Nothing had to say so — the fall simply resumes from
+	## wherever the carrying stopped placing it.
 	func release() -> void:
 		carrier = null
 		settled = false
+		fall.start(fall.height, 0.0, fall.floor_height)
 
 	## Moves this part so the place a set of jaws has hold of arrives at the jaws.
 	##
@@ -216,7 +253,16 @@ class Part extends RefCounted:
 	## and swings freely across it, so it trails and slews after the animal; a leg
 	## taken across its middle has no lever to speak of and is carried level. Neither
 	## was posed, and there is no case here for either.
-	func carry(hold: Vector2, jaw: Vector2, grasp: float, reach: float, delta: float) -> void:
+	## `jaw_height` is where those jaws are in the vertical, and the piece is lifted
+	## toward it by the same `grasp` that carries it horizontally — which is the
+	## whole of the difference between a creature carrying a leg and a creature
+	## dragging one. Nothing here decides which: a light piece arrives at the mouth
+	## and rides at mouth height, a heavy one never gets there and stays scraping
+	## along whatever is under it, and the only number separating them is the mass in
+	## the divisor. It cannot go below the ground it is being hauled over, because
+	## dragging is a thing done *along* a surface.
+	func carry(hold: Vector2, jaw: Vector2, grasp: float, reach: float, delta: float,
+			jaw_height: float = 0.0, surface: float = 0.0) -> void:
 		if delta <= 0.0:
 			return
 		var was: Vector2 = pos
@@ -243,6 +289,10 @@ class Part extends RefCounted:
 		var over: float = slack.length() - reach
 		if over > 0.0:
 			pos += slack.normalized() * over
+		# And the same haul in the vertical. `take` is the identical response, so a
+		# piece that is being carried level is also being carried up, and one that is
+		# only being dragged is only being dragged.
+		fall.rest_on(maxf(lerpf(fall.height, jaw_height, take), surface))
 		# Kept rather than zeroed, so a piece put down by a running animal is thrown
 		# and one released mid-swing goes on swinging. Motion is measured off where
 		# it actually went, which is the only honest source for it.
@@ -251,6 +301,11 @@ class Part extends RefCounted:
 
 
 var parts: Array[Part] = []
+
+## What a falling part lands on. Optional — with nothing here everything comes to
+## rest at zero, which is exactly the flat habitat every headless test runs in —
+## and set by the world, which is the only thing that knows both fields exist.
+var terrain: Terrain = null
 
 var _quad := PackedVector2Array([Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO])
 var _taken := PackedFloat32Array()
@@ -261,6 +316,11 @@ var _indices := PackedInt32Array()
 var _flat := PackedColorArray([COL_SHADOW])
 var _skin_lines := PackedVector2Array()
 var _muscle_lines := PackedVector2Array()
+## Which runs of the drawn mesh belong to parts that are off the ground, and how
+## far off. Only ever filled while something is actually falling, so a habitat
+## whose meat has all landed pays one empty loop for it.
+var _aloft_span := PackedInt32Array()
+var _aloft_lift := PackedFloat32Array()
 
 
 func _ready() -> void:
@@ -321,6 +381,7 @@ func _build(piece: TissueGrid.Piece, source_mass: float, source_id: int) -> Part
 	part.full_flesh = piece.flesh
 	part.full_mass = source_mass * piece.share
 	part.source_id = source_id
+	part.thickness = maxf(piece.thickness, Volume.GROUND_THICKNESS * 0.5)
 
 	var centre := Vector2.ZERO
 	for cell in piece.cells:
@@ -337,7 +398,30 @@ func _build(piece: TissueGrid.Piece, source_mass: float, source_id: int) -> Part
 			part.local[i + k] = piece.corners[i + k] - part.pos
 		spread += part.local_centre_of(cell).length_squared()
 	part.gyradius = maxf(sqrt(spread / float(piece.cells)), 0.5)
+	# And the drop. The piece knows the height its cells were standing at, so this
+	# is the one line that turns a severed part into a physical object: it starts
+	# where the tissue was and falls from there, with no velocity of its own,
+	# because nothing threw it — what took it off was a set of jaws, and whatever
+	# they imparted is the shove the caller applies to `vel`.
+	#
+	# Measured down to the piece's own underside rather than to its centre line, so
+	# a leg that comes off already lying on the floor is already lying on the floor
+	# and does not drop by half its own thickness first.
+	part.fall.start(maxf(piece.height - part.thickness, 0.0), 0.0,
+		_surface_at(part.pos))
 	return part
+
+
+## What is underneath a point. Zero over open ground, and the top of whatever is
+## there otherwise — a part dropped onto a rock lies on the rock, for the same
+## reason and through the same query a foot set down on one stands on it.
+##
+## Null-safe because the field is perfectly capable of running without terrain,
+## and every headless test that has no obstacles in it does.
+func _surface_at(where: Vector2) -> float:
+	if terrain == null:
+		return 0.0
+	return terrain.surface(where, 0.0).x
 
 
 ## Drops the oldest loose parts once there are too many. A part in somebody's jaws
@@ -376,7 +460,7 @@ func reach_of(center: Vector2, radius: float, reach: Vector2 = Stature.UNBOUNDED
 	var best: Part = null
 	var best_score: float = radius
 	for part in parts:
-		if part.carrier == null and not Stature.overlaps(reach, GROUND_BAND):
+		if part.carrier == null and not Stature.overlaps(reach, part.band()):
 			continue
 		var score: float = depth_into(part, center)
 		if score <= best_score:
@@ -551,6 +635,12 @@ func _extract(part: Part, members: PackedInt32Array) -> Part:
 	piece.source_id = part.source_id
 	piece.vel = part.vel
 	piece.spin = part.spin
+	# Both halves of the thing it was torn out of: a piece bitten off a leg that is
+	# still in the air is still in the air, at the same height and going the same
+	# way. Chewing something in half is not a reason for either half to teleport to
+	# the floor.
+	piece.thickness = part.thickness
+	piece.fall.start(part.fall.height, part.fall.rate, part.fall.floor_height)
 
 	var index := PackedInt32Array()
 	index.resize(part.cells)
@@ -637,10 +727,17 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 
-## Ground friction on everything nothing is holding, and the sweep for pieces that
-## no longer exist. Exponential decay rather than a linear step, so the settle
-## looks the same whatever the frame rate — and a part at rest falls out of the
-## maths entirely.
+## The fall, then ground friction on everything nothing is holding, and the sweep
+## for pieces that no longer exist. Exponential decay rather than a linear step, so
+## the settle looks the same whatever the frame rate — and a part at rest falls out
+## of the maths entirely.
+##
+## The two halves are in that order and gated against each other, because friction
+## is a thing the ground does. A part still in the air is slowed by nothing: it
+## keeps every bit of the speed the jaws let go of it with, and it keeps travelling
+## while it drops, which is what makes a leg thrown off a running animal land
+## somewhere rather than directly below where it came apart. The moment it arrives
+## the drag starts, and what was a throw becomes a skid.
 func settle(delta: float) -> void:
 	var keep: float = exp(-DRAG * delta)
 	for i in range(parts.size() - 1, -1, -1):
@@ -651,7 +748,31 @@ func settle(delta: float) -> void:
 		if part.is_spent():
 			parts.remove_at(i)
 			continue
-		if part.carrier != null or part.settled:
+		# Something with hold of it is not falling. Jaws carry a piece of meat at the
+		# height of the jaws, which is what they are doing when they lift it — see
+		# `carry`, which places the part in all three directions rather than
+		# integrating it in any of them.
+		if part.carrier != null:
+			continue
+		if not part.fall.resting:
+			part.fall.advance(delta, _surface_at(part.pos))
+			# Still going somewhere horizontally while it does. A part in the air is
+			# not settled however slowly it is travelling, so the test at the bottom
+			# is skipped and it cannot go to sleep mid-drop.
+			part.pos += part.vel * delta
+			part.angle += part.spin * delta
+			continue
+		# On the ground, and the ground may have moved out from under it — a part
+		# that has been dragged off the top of an obstacle starts falling again, and
+		# nothing had to notice. `advance` returns immediately when the surface is
+		# still where it was, so a field of settled meat pays a comparison per part.
+		var surface: float = _surface_at(part.pos)
+		if part.fall.height > surface + Gravity.TOUCHDOWN:
+			part.fall.advance(delta, surface)
+			part.settled = false
+			continue
+		part.fall.rest_on(surface)
+		if part.settled:
 			continue
 		part.pos += part.vel * delta
 		part.angle += part.spin * delta
@@ -681,7 +802,13 @@ func _draw() -> void:
 		_indices.resize(count * 6)
 	var v: int = 0
 	var t: int = 0
+	# Where each part that is off the ground begins in the buffer, and how far up it
+	# is. Empty in the ordinary case — meat lies on the floor — which is what keeps
+	# the second pass below free for a field of settled parts.
+	_aloft_span.resize(0)
+	_aloft_lift.resize(0)
 	for part in parts:
+		var from: int = v
 		for cell in part.cells:
 			if part.gone[cell] != 0:
 				continue
@@ -699,10 +826,23 @@ func _draw() -> void:
 			_indices[t + 5] = v + 3
 			v += 4
 			t += 6
+		if v > from and part.fall.is_airborne():
+			_aloft_span.append(from)
+			_aloft_span.append(v)
+			_aloft_lift.append(part.fall.height)
 
+	# The shadow goes on the ground, because that is where shadows are. It is drawn
+	# from the positions before the lift is applied, so the gap between a falling
+	# part and its own shadow is exactly how far it still has to fall — the same
+	# reading, through the same constant, that says how high a creature is holding
+	# its body.
 	draw_set_transform(Vector2(0.0, 5.0), 0.0, Vector2.ONE)
 	RenderingServer.canvas_item_add_triangle_array(
 		get_canvas_item(), _indices, _points, _flat)
+	for i in _aloft_lift.size():
+		var lift := Vector2(0.0, -_aloft_lift[i] * Posture.PERSPECTIVE)
+		for k in range(_aloft_span[i * 2], _aloft_span[i * 2 + 1]):
+			_points[k] += lift
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	RenderingServer.canvas_item_add_triangle_array(
 		get_canvas_item(), _indices, _points, _colors)
@@ -716,6 +856,10 @@ func _draw_grain() -> void:
 	_skin_lines.resize(0)
 	_muscle_lines.resize(0)
 	for part in parts:
+		# Grain is drawn *on* the meat, so it goes wherever the meat went. Taken off
+		# the same height through the same constant as the cells themselves — two
+		# readings of one fall would be skin sliding off a leg on the way down.
+		var lift := Vector2(0.0, -part.fall.height * Posture.PERSPECTIVE)
 		for cell in part.cells:
 			if part.gone[cell] != 0:
 				continue
@@ -723,16 +867,16 @@ func _draw_grain() -> void:
 			part.corners_of(cell, _quad)
 			if part.hp[base + TissueGrid.SKIN] > 0.0:
 				if part.cell_row[cell] % 2 == 1:
-					_skin_lines.append(_quad[0].lerp(_quad[1], 0.5))
-					_skin_lines.append(_quad[3].lerp(_quad[2], 0.5))
+					_skin_lines.append(_quad[0].lerp(_quad[1], 0.5) + lift)
+					_skin_lines.append(_quad[3].lerp(_quad[2], 0.5) + lift)
 				continue
 			if part.hp[base + TissueGrid.FAT] > 0.0 \
 					or part.hp[base + TissueGrid.MUSCLE] <= 0.0:
 				continue
 			for strand in range(1, 4):
 				var across: float = float(strand) * 0.25
-				_muscle_lines.append(_quad[0].lerp(_quad[1], across))
-				_muscle_lines.append(_quad[3].lerp(_quad[2], across))
+				_muscle_lines.append(_quad[0].lerp(_quad[1], across) + lift)
+				_muscle_lines.append(_quad[3].lerp(_quad[2], across) + lift)
 	if not _skin_lines.is_empty():
 		draw_multiline(_skin_lines, COL_SKIN_TENSION, 0.75, true)
 	if not _muscle_lines.is_empty():

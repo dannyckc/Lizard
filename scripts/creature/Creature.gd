@@ -90,6 +90,16 @@ var jump: Jump = Jump.new()
 ## What heights this body occupies and what heights its jaws reach, read off the
 ## solved pose each tick beside the physique. Not settings — see Stature.
 var stature: Stature = Stature.new()
+## Whether the legs under this body are actually holding it up — where the weight
+## is against where the feet are, and whether there is enough leg under it to
+## matter. Read off the solved pose each tick, and the only thing in the class that
+## can put a conscious animal on the ground. See Balance.
+var balance: Balance = Balance.new()
+## And what the back does about its own weight where nothing is holding it up:
+## the height of the axial line, station by station, behind the last girdle. The
+## tail hangs off this and nothing else — there is no tail pose anywhere. See
+## Droop.
+var droop: Droop = Droop.new()
 ## Owns the limbs while `alive` is false, exactly where Gait owns them while it is
 ## true. Null on a living creature.
 var ragdoll: Ragdoll = null
@@ -516,6 +526,15 @@ func _update_stature() -> void:
 		held = Vector2(gait.shoulder_height, gait.hip_height)
 	stature.update(posture, body, params, size_scale, body_length(),
 		elevation.height, gape_radius(), alive, held, locomotion)
+	# ...and then what the back does past the last thing holding it up. After the
+	# stature because it hangs from the height the stature just measured, and before
+	# the lattice because the lattice stamps these heights onto the cells behind the
+	# hips. See Droop, which is the only thing in the simulation that reads a height
+	# off weight rather than off a support.
+	droop.update(body, spine, params, anatomy.state,
+		stature.reference + stature.elevation,
+		_surface_under_foot(spine.points[0], 0.0).x,
+		speed_norm, alive)
 
 
 ## The generator a carcass's resting shape is drawn from.
@@ -552,6 +571,10 @@ func reset(at: Vector2 = Vector2.ZERO, facing: float = 0.0) -> void:
 	_standing_on = {}
 	elevation.reset()
 	jump.reset()
+	# A body put down somewhere is standing there, not part way through falling over
+	# at wherever it used to be. The clock especially: carrying a stumble across a
+	# reset would drop a creature that had just been placed.
+	balance.reset()
 	anatomy.reset()
 	bite_cooldown_remaining = 0.0
 	bite_connected = false
@@ -735,10 +758,21 @@ func _physics_process(delta: float) -> void:
 	_release_severed()
 	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
 	_update_bounds()
-	# Last of the derived state, because it is a consequence of all of it: a body
-	# whose brain has gone out or whose circulation has stopped is no longer
-	# driving itself, and the next tick belongs to the ragdoll.
-	if anatomy.state.collapsed:
+	# Whether any of that is standing up. After the physique because what a leg has
+	# to hold is what the body weighs, and after the gait because where the support
+	# is is where the feet have actually been put. What it measures is spent through
+	# `_limb_load` on the next tick, alongside the crouch and the jump, because a
+	# body losing its footing folds its legs and there is only one channel for that.
+	balance.update(delta, gait.limbs, body, spine, physique, anatomy.state, locomotion,
+		locomotion.swing_time(maxf(params.leg_length, params.arm_length) * size_scale),
+		elevation.is_airborne(), alive)
+	# Last of the derived state, because it is a consequence of all of it. Two ways
+	# to end up on the floor and they are genuinely different: a body whose brain has
+	# gone out or whose circulation has stopped is no longer driving itself, and a
+	# body that is perfectly conscious but has nothing left underneath it has run out
+	# of legs. Both arrive here, because from this line on there is no difference —
+	# nothing is holding it up, and the next tick belongs to the ragdoll.
+	if anatomy.state.collapsed or balance.failed:
 		collapse()
 		return
 
@@ -1112,7 +1146,7 @@ func _advance_elevation(delta: float) -> void:
 		var peak: float = jump.launch_peak * effort
 		var lean: float = clampf(Leap.DIRECTION_SHARE * jump.launch_lean, 0.0, 0.95)
 		elevation.leap(peak * (1.0 - lean * lean), 1.0)
-		speed += sqrt(2.0 * Elevation.GRAVITY * maxf(peak, 0.0)) * lean
+		speed += Gravity.launch_rate(peak) * lean
 	elevation.advance(delta, command.climb, params.wing_lift, body_length(), effort)
 
 
@@ -1165,6 +1199,14 @@ func _footing() -> Vector2:
 ## already in is the gather it would have made anyway.
 func _limb_load() -> Vector2:
 	var reach := Vector2(crouch, crouch)
+	# ...and whatever the legs are failing to hold. A third demand on the same
+	# joint, and the one that is not a decision: the crouch and the jump are things
+	# the animal is doing, and this is a thing being done to it. It only ever folds,
+	# so it is taken as the deeper of the two rather than replacing anything — a
+	# creature crouching on legs that are giving way is doing both, and what its
+	# knees end up at is whichever is further down.
+	var give: Vector2 = balance.give()
+	reach = Vector2(maxf(reach.x, give.x), maxf(reach.y, give.y))
 	if not jump.active():
 		return reach
 	return Vector2(
@@ -2901,8 +2943,14 @@ func _place_mouthful(delta: float) -> void:
 	var jaw: Vector2 = jaw_point() + fwd * mouthful.draw_in(body.head_radius)
 	var load: float = mouthful.part.mass() * HAUL_COST
 	var grasp: float = physique.strength / maxf(physique.strength + load, 0.0001)
+	# Where those jaws are in the vertical, so a piece light enough to be lifted is
+	# carried at mouth height and a piece that is not stays on the floor being
+	# dragged over it. Both come out of the same `grasp` the horizontal haul uses —
+	# see CarrionField.Part.carry — so nothing here chooses between them.
 	mouthful.part.carry(mouthful.hold, jaw, grasp,
-		gape_radius() + CarrionField.TETHER_SLACK, delta)
+		gape_radius() + CarrionField.TETHER_SLACK, delta,
+		stature.head_height + stature.elevation,
+		_surface_under_foot(mouthful.part.pos, 0.0).x)
 
 
 ## One closing of the jaws on what they are already holding.

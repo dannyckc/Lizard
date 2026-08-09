@@ -169,19 +169,36 @@ func _draw() -> void:
 	# Torso. Three restrained offset copies approximate the diffused editorial
 	# shadow from the reference without a sprite or a blur texture; they are the
 	# body's own mesh, so a hole in the creature is a hole in its shadow too.
+	# The height the back is being held at, which is what the rest of the body is
+	# drawn *relative to*. The transform above already put the animal there; what
+	# `_raise` adds is the part of the body that is not there — the head riding up
+	# on its neck, the tail hanging down off the hips. Zero everywhere on a level
+	# back, which is why nothing about a creature standing square changes.
+	var back: float = stature.reference + stature.elevation
 	if _build(torso, 0, TissueGrid.BODY_COLS) > 0:
+		# Shadows first and from the unraised mesh, because a shadow is on the
+		# ground: a tail held clear of the floor and one lying on it cast the same
+		# outline in the same place, and the gap between the two is the whole of how
+		# the height reads.
 		_flush_flat(Transform2D(0.0, ground + Vector2(0.0, 12.0 * creature.size_scale)), COL_SHADOW_FAR)
 		_flush_flat(Transform2D(0.0, ground + Vector2(0.0, 8.0 * creature.size_scale)), COL_SHADOW_MID)
 		_flush_flat(Transform2D(0.0, ground + lift), COL_SHADOW_NEAR)
+		_raise(torso, 0, TissueGrid.BODY_COLS, back)
 		_flush_at(aloft)
-	_draw_tissue_grain(torso, 0, TissueGrid.BODY_COLS, aloft)
+	_draw_tissue_grain(torso, 0, TissueGrid.BODY_COLS, aloft, back)
 	# Under the eyes, so a lizard looking at you over its own open mouth still
 	# has eyes to look with. Both ride with the head, so both take the same lift
 	# off the ground the torso did — as a plain displacement rather than the whole
 	# transform, because both are drawn about the head and a shear evaluated at the
 	# point it is drawn about is a translation.
-	_draw_jaws(body, carried)
-	_draw_eyes(body, torso, carried)
+	# ...and the same lift the head's own cells were just given, because the jaws and
+	# the eyes are on the head. Read off the head's height rather than off the mesh
+	# so there is one statement of where a head is: a mouth drawn on the back of the
+	# neck is what two of them would look like.
+	var crowned: Vector2 = carried + Vector2(0.0,
+		(back - (stature.head_height + stature.elevation)) * Posture.PERSPECTIVE)
+	_draw_jaws(body, crowned)
+	_draw_eyes(body, torso, crowned)
 
 	# Feet, over the torso — same reason the limb bones went under it.
 	# A shadow is the one thing a stripped patch cannot suppress by being empty:
@@ -435,6 +452,41 @@ func _build(patch: TissueGrid.Patch, from_col: int, to_col: int) -> int:
 	return count
 
 
+## Lifts the built mesh off the level back by however far each station of it
+## actually stands above or below one.
+##
+## The body has been drawn as one flat sheet at the height its legs hold it ever
+## since there was a height at all, and for as long as a back was level that was
+## the truth. It is not: the lattice gives every cross-section its own height —
+## the head rides up on the neck, the tail hangs off the hips under its own weight
+## — and a picture that draws all of them on one plane is a picture disagreeing
+## with the volume every bite is resolved against. A creature could be bitten on a
+## tail that was drawn somewhere the tail was not.
+##
+## So this is not a lean, a curve or a droop *drawn* onto the animal. It is the
+## same `Posture.drop` every height in the game is read through, applied per
+## station instead of once for the whole body, against the back as the reference
+## plane. On a level back every term is zero and the mesh is untouched.
+##
+## Corners 0 and 1 of a cell belong to the near cross-section and 2 and 3 to the
+## far one — the winding `Patch.corners_of` guarantees — so a quad spanning two
+## heights is drawn as the sloped thing it is rather than being flattened onto
+## either end.
+func _raise(patch: TissueGrid.Patch, from_col: int, to_col: int, back: float) -> void:
+	var v: int = 0
+	for col in range(from_col, to_col):
+		var near := Vector2(0.0, (back - patch.mids[col]) * Posture.PERSPECTIVE)
+		var far := Vector2(0.0, (back - patch.mids[col + 1]) * Posture.PERSPECTIVE)
+		for row in patch.rows:
+			if patch.gone[col * patch.rows + row] != 0:
+				continue
+			_mesh_points[v] += near
+			_mesh_points[v + 1] += near
+			_mesh_points[v + 2] += far
+			_mesh_points[v + 3] += far
+			v += 4
+
+
 ## Destroyed cells inside a column range. Skipped outright while the patch is
 ## whole, so an unbitten creature never walks its own lattice to be told so.
 func _gone_in(patch: TissueGrid.Patch, from_col: int, to_col: int) -> int:
@@ -543,13 +595,24 @@ static func tissue_color(hp: PackedFloat32Array, base: int, fat_capacity: float,
 ## Material detail deliberately ignores cell boundaries. Intact skin is read as
 ## one continuous membrane through sparse longitudinal tension lines, while a
 ## revealed muscle cell carries several close fibres along the anatomy's grain.
+## `back` is the reference plane the stations are raised off, exactly as in
+## `_raise` — grain is drawn on the skin, so it goes wherever the skin went. Left
+## out, nothing is raised, which is what every limb patch wants: a limb's drawn
+## joints already carry its heights and lifting them a second time would
+## foreshorten the same leg twice.
 func _draw_tissue_grain(patch: TissueGrid.Patch, from_col: int, to_col: int,
-		at: Transform2D = Transform2D.IDENTITY) -> void:
+		at: Transform2D = Transform2D.IDENTITY, back: float = INF) -> void:
 	if patch == null or not patch.live:
 		return
+	var raised: bool = back < INF
 	_skin_lines.resize(0)
 	_muscle_lines.resize(0)
 	for col in range(from_col, to_col):
+		var near := Vector2.ZERO
+		var far := Vector2.ZERO
+		if raised:
+			near = Vector2(0.0, (back - patch.mids[col]) * Posture.PERSPECTIVE)
+			far = Vector2(0.0, (back - patch.mids[col + 1]) * Posture.PERSPECTIVE)
 		for row in patch.rows:
 			var cell: int = col * patch.rows + row
 			if patch.gone[cell] != 0:
@@ -561,8 +624,8 @@ func _draw_tissue_grain(patch: TissueGrid.Patch, from_col: int, to_col: int,
 				# Only alternating rows carry a mark, so the surface reads as a few
 				# stretched bands rather than the grid underneath it.
 				if row % 2 == 1:
-					_skin_lines.append(_quad[0].lerp(_quad[1], 0.5))
-					_skin_lines.append(_quad[3].lerp(_quad[2], 0.5))
+					_skin_lines.append(_quad[0].lerp(_quad[1], 0.5) + near)
+					_skin_lines.append(_quad[3].lerp(_quad[2], 0.5) + far)
 				continue
 			# Fat is a smooth, structureless layer — it has no grain of its own, and
 			# putting muscle's on it would draw fibres across a place where there
@@ -572,8 +635,8 @@ func _draw_tissue_grain(patch: TissueGrid.Patch, from_col: int, to_col: int,
 				continue
 			for strand in range(1, 4):
 				var across: float = float(strand) * 0.25
-				_muscle_lines.append(_quad[0].lerp(_quad[1], across))
-				_muscle_lines.append(_quad[3].lerp(_quad[2], across))
+				_muscle_lines.append(_quad[0].lerp(_quad[1], across) + near)
+				_muscle_lines.append(_quad[3].lerp(_quad[2], across) + far)
 	if _skin_lines.is_empty() and _muscle_lines.is_empty():
 		return
 	if at != Transform2D.IDENTITY:

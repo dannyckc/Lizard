@@ -155,6 +155,18 @@ class Piece extends RefCounted:
 	## how much of the animal's weight walked off with it.
 	var flesh: float = 0.0
 	var share: float = 0.0
+	## The height the tissue was standing at when it stopped being an animal, and
+	## how thick it was there. Both absolute, in the same pixels as x and y.
+	##
+	## Carried for one reason, and it is the reason this axis exists at all: a leg
+	## bitten off a standing creature has to fall from the shoulder. The lattice
+	## already knew the height of every cell it took — see `Patch.height_of` — so
+	## there is nothing to work out here and nothing to guess. Without it the world
+	## would have to invent a height for the piece, and every honest invention comes
+	## out as zero: a severed leg appearing on the floor under the animal, which is
+	## the one thing that reads as a bug rather than as anatomy.
+	var height: float = 0.0
+	var thickness: float = 0.0
 
 
 ## A rectangular cell lattice over one anatomical structure.
@@ -662,7 +674,8 @@ func update(creature: Node) -> void:
 	# solved from the same pose on the same tick — which is also the one the limbs
 	# were drawn against, so the heights here cannot disagree with the positions.
 	_update_body(creature.body, creature.spine, creature.stature,
-		creature.posture.depth_ratio if creature.posture != null else 1.0)
+		creature.posture.depth_ratio if creature.posture != null else 1.0,
+		creature.droop)
 	if creature.gait == null:
 		return
 	# Everything on a limb is quoted against the creature's own ground, so a body
@@ -687,7 +700,7 @@ const NECK_SHARE: float = 0.25
 
 
 func _update_body(body: BodyShape, spine: Spine, stature: Stature,
-		depth_ratio: float) -> void:
+		depth_ratio: float, droop: Droop = null) -> void:
 	var p: Patch = patches[BODY_KEY]
 	var last: int = body.last_index
 	if last < 2 or body.widths.size() <= last:
@@ -736,28 +749,39 @@ func _update_body(body: BodyShape, spine: Spine, stature: Stature,
 		# so an animal that is not being bitten tessellates exactly as it did.
 		var drawn: Vector2 = body.pull[i].lerp(body.pull[i + 1], f) \
 			if body.pull.size() > i + 1 else Vector2.ZERO
-		# Down off the head onto the back over the length of the neck, and level
-		# from there. Smoothstepped rather than linear so the shoulder is a
-		# shoulder: a straight ramp puts a crease at the end of the neck that
-		# every band test downstream would then read as a step in the animal.
-		var mid: float = lerpf(crown, back,
-			smoothstep(0.0, NECK_SHARE, float(k) / float(TORSO_COLS)))
+		# Down off the head onto the back over the length of the neck, and then
+		# along whatever the back is actually doing. Smoothstepped rather than
+		# linear so the shoulder is a shoulder: a straight ramp puts a crease at
+		# the end of the neck that every band test downstream would then read as a
+		# step in the animal.
+		#
+		# The far end of that ramp is no longer a single number for the whole
+		# animal. Between the girdles a back is level and `Droop` says so by
+		# reporting exactly `back` there, so the neck arrives where it always did;
+		# behind the hips there is nothing holding it up and `Droop` says that
+		# instead. One expression covers both because it is one back.
+		var along: float = float(k) / float(TORSO_COLS)
+		var carried: float = droop.at(along) if droop != null else back
+		var mid: float = lerpf(crown, carried, smoothstep(0.0, NECK_SHARE, along))
 		p.set_station(station,
 			spine.points[i].lerp(spine.points[i + 1], f) + drawn,
 			perp, half, mid, half * depth_ratio)
 		station += 1
 
-	# Tail cap: the snout cap mirrored around the last cross-section.
+	# Tail cap: the snout cap mirrored around the last cross-section — and at the
+	# height the last cross-section actually reached, which on a long tail is a
+	# good way below the back it started from.
 	var behind: Vector2 = -spine.forwards[last]
 	var tip_r: float = body.widths[last]
 	var tail_pull: Vector2 = body.pull[last] if body.pull.size() > last else Vector2.ZERO
+	var tip_height: float = droop.at(1.0) if droop != null else back
 	for k in range(1, TAIL_COLS + 1):
 		var a2: float = PI * 0.5 * (float(k) / float(TAIL_COLS))
 		var tail_half: float = tip_r * cos(a2)
 		p.set_station(station,
 			spine.points[last] + tail_pull + behind * (tip_r * sin(a2)),
 			spine.perps[last],
-			tail_half, back, tail_half * depth_ratio)
+			tail_half, tip_height, tail_half * depth_ratio)
 		station += 1
 
 	p.live = true
@@ -1259,6 +1283,14 @@ func _take_piece(members: PackedInt32Array) -> Piece:
 		p.corners_of(cell, _quad)
 		for k in 4:
 			piece.corners[i * 4 + k] = _quad[k]
+		# ...and the third coordinate of the same pose, which is where it falls
+		# from. Averaged over the cells rather than taken off one, because a piece
+		# is a whole structure and the height it drops from is the height of the
+		# thing as a whole: a leg taken off at the shoulder starts its fall from
+		# halfway down itself, not from the socket and not from the toe.
+		var band: Vector2 = p.band_of(cell)
+		piece.height += p.height_of(cell)
+		piece.thickness += (band.y - band.x) * 0.5
 		piece.fat_full[i] = FAT_HP * fat_reserve \
 			* plan.fat_at(p.key, col, p.row_centre(cell % p.rows))
 
@@ -1288,6 +1320,8 @@ func _take_piece(members: PackedInt32Array) -> Piece:
 	piece.link_start[piece.cells] = links.size()
 	piece.link_to = links
 	piece.share = piece.flesh / full_hp if full_hp > 0.0 else 0.0
+	piece.height /= float(piece.cells)
+	piece.thickness /= float(piece.cells)
 	return piece
 
 

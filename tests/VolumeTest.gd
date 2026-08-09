@@ -200,7 +200,14 @@ func _check_cells_agree_with_the_body(player: Creature) -> void:
 		# arbitrary station would only be measuring the taper.
 		var deepest: float = 0.0
 		var off_level: float = 0.0
+		var risen: float = 0.0
+		var descending: bool = true
+		var previous: float = INF
 		var back: float = stature.reference + stature.elevation
+		# Where the last thing holding the back up is. Between the neck and this the
+		# body is carried by its legs and is level; behind it there is nothing under
+		# it and it hangs, which is a different claim and is checked as one.
+		var hips: float = clampf(player.params.rear_limb_t, 0.0, 1.0)
 		for k in range(TissueGrid.TORSO_COLS):
 			var col: int = TissueGrid.HEAD_COLS + k
 			# One cross-section rather than a cell's worth of two. A cell that
@@ -209,17 +216,35 @@ func _check_cells_agree_with_the_body(player: Creature) -> void:
 			# right for a collision and wrong for a measurement of the animal.
 			var band: Vector2 = patch.column_band(col, col)
 			deepest = maxf(deepest, band.y - band.x)
-			# Past the neck the back is level, so every cross-section behind it has
-			# to be centred on the one height the whole vertical layer is measured
-			# from. A trunk that wandered up and down would be a body whose own
-			# bands disagree with the height it is standing at.
-			if float(k) / float(TissueGrid.TORSO_COLS) > TissueGrid.NECK_SHARE:
-				off_level = maxf(off_level, absf((band.x + band.y) * 0.5 - back))
+			var along: float = float(k) / float(TissueGrid.TORSO_COLS)
+			var centre: float = (band.x + band.y) * 0.5
+			if along <= TissueGrid.NECK_SHARE:
+				continue
+			if along <= hips:
+				# Between the neck and the hips the back is held level by the legs, so
+				# every cross-section has to be centred on the one height the whole
+				# vertical layer is measured from. A trunk that wandered up and down
+				# here would be a body whose own bands disagree with what it stands at.
+				off_level = maxf(off_level, absf(centre - back))
+				continue
+			# And behind them it hangs — see Droop. Not level, and not free either:
+			# a tail may only ever be *below* the back it comes off, and it may only
+			# ever go further down as it goes further out. A cross-section that rose
+			# would be a tail curling over the animal, which is not what weight does.
+			risen = maxf(risen, centre - back)
+			if centre > previous + 0.01:
+				descending = false
+			previous = centre
 		_check(absf(deepest - stature.depth) < 2.0,
 			"a %s's deepest trunk cells were %.1f px through where its stature says %.1f"
 				% [preset, deepest, stature.depth])
 		_check(off_level < 0.5,
-			"a %s's trunk wandered %.1f px off the height it stands at" % [preset, off_level])
+			"a %s's back wandered %.1f px off the height it stands at" % [preset, off_level])
+		_check(risen < 0.5,
+			"a %s's tail rode %.1f px above the back it hangs off" % [preset, risen])
+		_check(descending,
+			"a %s's tail rose again further out — weight does not curl a tail upward"
+				% preset)
 		var head: Vector2 = tissue.head_band()
 		_check(Volume.overlaps(head, stature.head),
 			"a %s's head cells (%s) and its head band (%s) were at different heights"

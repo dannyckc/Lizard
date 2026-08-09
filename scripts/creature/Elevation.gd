@@ -32,11 +32,16 @@ const FLYING: int = 3
 
 const STATE_NAMES: Array[String] = ["grounded", "leaping", "gliding", "flying"]
 
-## Pull toward the ground plane, in pixels per second squared. Sized against the
-## habitat rather than against Earth: bodies here are drawn a couple of hundred
-## pixels long, and a leap has to be over inside a second or it reads as the
-## creature being thrown rather than jumping.
-const GRAVITY: float = 1500.0
+## Pull toward the ground plane, in pixels per second squared.
+##
+## Aliased from `Gravity` rather than restated, and that is the whole of what
+## makes this file a creature under gravity rather than a creature with its own.
+## A severed leg, a dropped carcass and the animal that jumped over both are
+## pulled down at one rate, because there is one number and every one of them
+## reads it. Two descriptions of a pull is two things that can disagree, and the
+## day they do is the day a body falls at a different speed than the leg it just
+## lost.
+const GRAVITY: float = Gravity.PULL
 ## How hard a wing beat can climb, in pixels per second at one unit of lift.
 const CLIMB_SPEED: float = 220.0
 ## How fast a glide gives height up, at one unit of lift. Divided by lift, so a
@@ -58,8 +63,9 @@ const CEILING_SPAN: float = 2.4
 ## and can be reached by a leap; above it, it is simply gone.
 const HIGH_FLIGHT_SHARE: float = 0.45
 ## Below this the body is on the ground. Well under a pixel, so no leap can end
-## early and nothing can hover imperceptibly.
-const TOUCHDOWN: float = 0.05
+## early and nothing can hover imperceptibly. From `Gravity` for the same reason
+## the pull is: what counts as standing on something is not a per-file opinion.
+const TOUCHDOWN: float = Gravity.TOUCHDOWN
 
 ## Height above the ground plane, in world pixels — the same unit as x and y, so
 ## a leap is drawn to the same scale as the animal taking it.
@@ -99,7 +105,7 @@ func reset() -> void:
 func leap(peak: float, effort: float = 1.0) -> bool:
 	if not is_grounded() or peak <= 0.0 or effort <= 0.0:
 		return false
-	rate = sqrt(2.0 * GRAVITY * maxf(peak * effort, 0.0))
+	rate = Gravity.launch_rate(peak * effort)
 	height = TOUCHDOWN
 	return true
 
