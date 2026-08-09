@@ -12,11 +12,16 @@
 ## of movement speed for free — walk slowly and steps are rare, sprint and they
 ## come fast — and the creature is naturally still when idle.
 ##
-## Order within update(): retarget -> advance in-flight steps -> decide new
-## steps -> let the body down onto them -> solve IK. Steps are advanced before
-## new ones are chosen so the "is my diagonal partner busy?" test sees this
-## tick's truth, and the body is settled before the chains are posed so each leg
-## is solved to the height its own foot has just put the shoulder at.
+## Order within update(): retarget -> solve the footfall pattern -> advance
+## in-flight steps -> decide new steps -> let the body down onto them -> solve IK.
+## Steps are advanced before new ones are chosen so the "is anything from another
+## beat still in the air?" test sees this tick's truth, and the body is settled
+## before the chains are posed so each leg is solved to the height its own foot
+## has just put the shoulder at.
+##
+## Which foot goes next is not decided here — see Footfall, where it falls out of
+## the animal's proportions and how fast it is going for its size. What this file
+## owns is when a foot is *due*, which is still the distance rule above.
 class_name Gait
 extends RefCounted
 
@@ -98,6 +103,13 @@ var loco: Locomotion = Locomotion.new()
 ## walked, not a per-tick input, and every line below that reads it would
 ## otherwise have to be handed it.
 var posture: Posture = Posture.new()
+## In what order the four feet come down. Solved here each tick because every
+## input it takes is something this file has just measured — the travel each limb
+## has, how far apart the girdles are, how fast the sockets are going — and
+## because it is the one part of the gait that changes several times a second as
+## the animal speeds up. See Footfall: it is three numbers, and every gait a
+## terrestrial animal has is a point in them.
+var footfall: Footfall = Footfall.new()
 ## World-space contacts completed during the most recent update. This is motion
 ## state, not audio: Creature announces the landing and the world decides what
 ## sensory event, if any, it produces.
@@ -125,6 +137,75 @@ var measured: bool = false
 ## rather than set by anything outside: it is what the crouch *is*.
 var stance_extension: float = 0.78
 
+# --- how the body is tipped on its feet ---------------------------------------
+# The other half of the same measurement `shoulder_height` and `hip_height` are.
+# Four legs hold a body up at four corners, and a body held at four different
+# heights is a body that is tipped — nose down as it reaches, rolled toward the
+# side its weight is on. Both are read off the feet and neither is animated: a
+# camel rolls because the two legs on one side are up together, and a walking
+# elephant sways because it puts its weight over the three that are down.
+
+## How steeply the body is tipped, nose to tail and flank to flank: world height
+## gained per world pixel travelled along the animal, in its own frame. Positive
+## pitch is nose-up; positive roll is the +perp flank held high.
+##
+## A slope rather than a height difference, because the difference on its own is
+## meaningless without knowing what it is spread over — four pixels between the
+## shoulders and the hips is a level animal on a long body and a steep one on a
+## short body, and the thing that has to draw it needs the second answer. Measured
+## against the animal's actual stance, so a narrow-tracked build genuinely rolls
+## further for the same difference in how its two sides are held, which is exactly
+## why a narrow-tracked build rolls.
+var pitch: float = 0.0
+var roll: float = 0.0
+## Height each corner is being carried at, keyed as the limbs are. What `pitch`
+## and `roll` are the two differences of.
+var corner: Dictionary = {"FL": 0.0, "FR": 0.0, "RL": 0.0, "RR": 0.0}
+## How far the two ends of the animal have converged: +1 is a back folded right
+## up with the hind feet swung forward under the shoulders, -1 one stretched out
+## at full extension, 0 a body of its ordinary length.
+##
+## The measurement is the difference between where the hind feet are standing
+## fore-and-aft and where the fore feet are, and it tells the two regimes apart on
+## its own without being told which one it is in. Under any alternating gait the
+## limbs of a pair are half a cycle apart, so their offsets cancel and this stays
+## at nothing however hard the animal is working. Under a bound or a gallop the
+## pair moves *together* — both hind feet forward, both fore feet back — and it
+## swings across its whole range twice a stride, which is a back folding and
+## extending. Nothing had to detect a gallop to make the spine flex in one.
+var gather: float = 0.0
+
+# --- the beat -----------------------------------------------------------------
+# Two values and they are the whole of the sequencing state. Which foot last left
+# the ground, and how long ago — everything about which foot goes next is that
+# pair measured against the pattern `Footfall` has derived. No clock runs: this is
+# a stamp taken when something happens, so a creature standing still has a stale
+# one and nothing reads it.
+
+var _beat_key: String = ""
+var _beat_age: float = 0.0
+## Monotonic seconds this gait has been solved for. Only ever read as differences
+## — when did this limb last lift, how long ago was that — so it never has to be
+## reconciled with anything else's clock.
+var _clock: float = 0.0
+## How much of a new interval is believed at once. Half, because a cycle that
+## followed every stumble would be no more use than no cycle at all, and one that
+## crawled would still be describing the walk after the animal had broken into a
+## run.
+const CYCLE_BLEND: float = 0.5
+## Longest gap between two lifts of the same limb that still counts as a cycle
+## rather than as the animal having stopped and started again.
+const CYCLE_MAX: float = 4.0
+## Weight given to the pattern against sheer overdue-ness when the two disagree.
+## The pattern has to win most contests or it is not a pattern; it may never win
+## all of them or a limb held off the beat by an obstacle would be towed forever.
+## Every limb's beat comes round once a cycle, so this is a delay at worst.
+const BEAT_AUTHORITY: float = 2.4
+## Past this much of a cycle since anything last stepped, the beat is stale and
+## the body is simply standing. Sequencing off it would be sequencing off a
+## creature that stopped for a second and started again.
+const BEAT_STALE: float = 2.0
+
 
 func setup() -> void:
 	limbs.clear()
@@ -133,9 +214,10 @@ func setup() -> void:
 	var fr: Limb = Limb.new(); fr.setup("FR", Limb.FRONT, -1.0)
 	var rl: Limb = Limb.new(); rl.setup("RL", Limb.REAR, 1.0)
 	var rr: Limb = Limb.new(); rr.setup("RR", Limb.REAR, -1.0)
-	# Order matters: it is the tie-breaker when both diagonal pairs are equally
-	# overdue (e.g. moving in a perfectly straight line), and it is what stops
-	# all four feet lifting on the same tick.
+	# Order matters only as a last tie-breaker: two feet exactly as overdue as each
+	# other and exactly as close to their own beat are separated by this and
+	# nothing else. Interleaved rather than listed by girdle so that when it does
+	# decide, it does not hand a whole pair the same slot.
 	limbs = [fl, rr, fr, rl]
 
 
@@ -201,7 +283,13 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 	# --- 1. retarget: recompute each foot's ideal position ------------------
 	for limb in limbs:
 		_read_function(limb, state, impaired)
-		if airborne:
+		# Whether this limb is one of the ones the animal is standing on. False on
+		# a forelimb too short to reach the ground the hips are holding the body
+		# over — see Locomotion.BEARING_RATIO — and it is not an injury or a mode:
+		# the leg is sound, it is simply carried rather than walked, exactly as
+		# every limb is while the body is off the ground.
+		limb.bearing = limb.pair == Limb.REAR or loco.forelimbs_bear
+		if airborne or not limb.bearing:
 			# Nothing to stand on. The limb keeps every capability it had — this is
 			# not damage — it simply loses the ground those capabilities were being
 			# spent against, so its envelope draws in and it stops being placed.
@@ -271,6 +359,16 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		# Against where the sway puts the foot rather than where it rests, because
 		# the boundary is met at the worst instant of the wave and not at the
 		# average one.
+		# Nothing is added here for what the spine contributes to a stride, and that
+		# is deliberate rather than an omission. The back's share of a gallop is
+		# real, but it is not extra travel for the *limb*: it moves the shoulder,
+		# and a foot whose socket has been carried forward has covered more ground
+		# without having reached any further from it. It arrives on its own through
+		# `track_socket`, which measures where the socket actually went. Written in
+		# here instead it would be a stride longer than the envelope the same line
+		# clamps the foot into — and a stride longer than the travel a limb has is
+		# not a long stride, it is no stride at all: the trigger can never fire and
+		# the leg is towed for as long as the creature walks.
 		limb.sweep_limit = maxf(
 			loco.excursion(bone, wants.x if front else wants.y,
 				absf(limb.rest_lat) + limb.sway,
@@ -288,8 +386,16 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		#
 		# What is left over from the anatomy is the two things that are genuinely
 		# about this tick: a slow limb shuffles rather than lunging, and a limb with
-		# no force left in it reaches less far.
-		limb.stride = loco.stride(limb.sweep_limit, p.foot_lead) * posture.stride_gain \
+		# no force left in it reaches less far. Both of them only ever make the
+		# stride *shorter*, and that is not a coincidence — it is the invariant. The
+		# posture used to have a `stride_gain` here as well, a per-stance number
+		# that made an upright animal stride further than its own travel, and it was
+		# the same mistake the paragraph above is about, hidden behind a table: at
+		# 1.15 it spent exactly the headroom `Locomotion.STRIDE_SHARE` reserves, so
+		# the trigger fired only after the foot had been skidded along its own
+		# envelope for the last few pixels. A stance that wants a longer stride
+		# already has one, because it stands its legs at a different angle.
+		limb.stride = loco.stride(limb.sweep_limit, p.foot_lead) \
 			* (0.45 + 0.55 * limb.pace) * lerpf(STRIDE_FLOOR, 1.0, limb.drive)
 
 		limb.plan[0] = a.pos
@@ -321,7 +427,14 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		# carried with the socket instead of being left behind by it. This is the
 		# whole of the tuck: the error never grows, so nothing further down asks
 		# this limb to step, and a leg that is not stepping is a leg being held.
-		if airborne:
+		#
+		# The same is true of a forelimb that never reaches the ground, and it is
+		# the same line rather than a second one. There is no difference between an
+		# arm with no floor under it because the animal has jumped and an arm with
+		# no floor under it because the animal is standing on two legs — in both
+		# cases nothing is holding the limb out, so it comes in under the chest and
+		# is carried there.
+		if airborne or not limb.bearing:
 			limb.stepping = false
 			limb.planted = limb.planted.lerp(limb.ideal, 1.0 - exp(-TUCK_RESPONSE * delta))
 
@@ -341,7 +454,7 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		# always the floor — it is the top of whatever this foot is standing on, and
 		# on the open plain that is the same number it always was.
 		limb.surface = _surface_under(limb, limb.planted, scale, surface_query)
-		limb.foot_height = limb.surface
+		limb.foot_height = _hold(limb, airborne)
 		# Against what the joint can do rather than against the stride, and the two
 		# are different questions. `sweep_limit` is how far this limb *walks*: it is
 		# where the gait may choose to put a foot down. Where a foot may legally
@@ -353,13 +466,22 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		limb.planted = limb.clamp_to_envelope(a, limb.planted, _swing_fan(limb, swing))
 		limb.error = limb.planted.distance_to(limb.ideal)
 
+	# --- 1b. what pattern are these four feet in? ---------------------------
+	# Here rather than higher up because every input it takes is something the
+	# loop above has just measured: how far each limb actually travels, how fast
+	# its socket is going, how far apart the girdles have ended up on a body that
+	# is bent into a turn. Deriving it from the parameters instead would be a
+	# second opinion about a body that is already solved, and the two would
+	# disagree exactly when the animal was doing something interesting.
+	_solve_pattern(delta, body, p)
+
 	# --- 2. advance any step already in flight ------------------------------
 	for limb in limbs:
 		if _skip(limb):
 			continue
 		if not limb.stepping:
 			limb.ground = limb.planted
-			limb.foot_height = limb.surface
+			limb.foot_height = _hold(limb, airborne)
 			limb.visual = limb.planted + limb.rise()
 			continue
 
@@ -416,14 +538,12 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 				_solve_limb(limb, body, p, scale, collision_query)
 		return
 
-	var busy: Array[bool] = [false, false]
 	var aloft: int = 0
 	var candidates: Array[Limb] = []
 	for limb in limbs:
 		if _skip(limb):
 			continue
 		if limb.stepping:
-			busy[limb.group] = true
 			aloft += 1
 			continue
 		# Recompute against this tick's plant: step 2 may have just landed this
@@ -436,52 +556,63 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		if limb.error >= limb.stride:
 			candidates.append(limb)
 
-	# Most overdue foot first. This is what keeps the gait fair: the diagonal
-	# gate below can only ever let one pair through at a time, so with a fixed
-	# order the same pair wins every contest and the other pair is dragged along
-	# the ground indefinitely. Sorting by how far each foot has drifted means a
-	# blocked pair's error keeps climbing until it outbids the pair that has
-	# just re-planted, which is exactly the alternation we want.
+	# Best fit to the beat first, and overdue-ness is now the tie-breaker rather
+	# than the rule. This is where a footfall pattern actually becomes an order.
 	#
-	# Against each limb's own stride rather than in raw pixels, because the four
-	# are not asking the same question: an arm is shorter than a leg, strides
-	# shorter for it, and is due for a step at a smaller drift. Compared flat, the
-	# pair with the longer stride is permanently the more overdue-looking of the
-	# two and takes every slot — which on a single-support build is the whole of
-	# the gait.
+	# Overdue-ness alone was what the gait had, and it is not a pattern: it says
+	# only that a foot that has drifted a long way should go before one that has
+	# not, so the sequence that came out was whatever the geometry happened to
+	# produce — which, on every build in the game, was the same near-trot. What
+	# each candidate is scored on now is how close lifting it *this tick* comes to
+	# the phase `Footfall` says it belongs at, measured from whichever foot last
+	# left the ground. The pattern wins most contests, because it has to be a
+	# pattern; it cannot win all of them, because a foot held off its beat by an
+	# obstacle would then be towed forever. Both are one number: BEAT_AUTHORITY.
+	#
+	# Overdue-ness is still quoted against each limb's own stride rather than in
+	# raw pixels, because the four are not asking the same question: an arm is
+	# shorter than a leg, strides shorter for it, and is due at a smaller drift.
+	var elapsed: float = _beat_phase()
 	candidates.sort_custom(func(a: Limb, b: Limb) -> bool:
-		return a.error / maxf(a.stride, 0.001) > b.error / maxf(b.stride, 0.001))
+		return _bid(a, elapsed) > _bid(b, elapsed))
 
-	# How many feet this build will lift at once. Two for a body that can throw
-	# itself between diagonals; one for a columnar animal, which has to keep
-	# three legs under a great deal of weight and therefore ambles rather than
-	# trots. It is the posture's one hard rule, and it is the reason a heavy
-	# stance reads as deliberate without anything having slowed it down.
-	var limit: int = posture.airborne_limit()
-	var coupling: float = clampf(p.diagonal_coupling * posture.coupling_gain, 0.0, 1.0)
+	# How many feet this build will lift at once — see Footfall.lift_limit. One
+	# while the animal still has to be standing at every instant, two through any
+	# ordinary symmetrical gait, and every foot at once only for a body going fast
+	# enough, and built well enough, to genuinely throw itself.
+	var limit: int = footfall.lift_limit
+	var coupling: float = clampf(p.beat_coupling * posture.coupling_gain, 0.0, 1.0)
 
 	for limb in candidates:
 		if limb.stepping:
 			continue
 		if aloft >= limit:
 			break
-		# Never lift a foot while the opposite diagonal is airborne: that is
-		# what keeps at least two feet down and the creature standing.
-		if busy[1 - limb.group]:
+		# Never lift a foot while one that belongs to a *different* beat is still
+		# in the air. That is what keeps the animal standing, and it is the same
+		# rule the hard-wired diagonal gate used to be — only now which limbs are
+		# opposed is read off the pattern instead of off which corner of the body
+		# a leg happens to be on. In a trot the diagonal is the partner; in a pace
+		# it is the leg on the same side; in a bound it is the other girdle.
+		if _beat_blocked(limb):
 			continue
 
 		_start_step(limb, body, p, scale, surface_query)
-		busy[limb.group] = true
+		_mark_beat(limb)
 		aloft += 1
 
-		# Pull the diagonal partner onto the same beat if it is anywhere near
-		# due. This is the difference between a readable trot and four legs
-		# doing their own thing; coupling 0 disables it entirely.
+		# ...and pull anything that shares this beat onto it, if it is anywhere
+		# near due. This is the difference between a readable gait and four legs
+		# doing their own thing, and it is what makes a pair land *together*: a
+		# bound, a pace and a pronk are all this line firing on limbs the pattern
+		# has put in phase. Coupling 0 disables it entirely.
 		for other in limbs:
-			if other == limb or other.group != limb.group or other.stepping:
+			if other == limb or other.stepping:
 				continue
 			if aloft >= limit:
 				break
+			if not footfall.shares_beat(limb.key, other.key):
+				continue
 			# The same gate as the contest above, and it has to be here too: a beat
 			# is an invitation, not an order. Without this a dead limb is pulled
 			# into its partner's step and picks itself up, which is the one thing a
@@ -509,13 +640,169 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 	for limb in limbs:
 		if _skip(limb):
 			continue
-		limb.socket_height = shoulder_height if limb.pair == Limb.FRONT else hip_height
+		# Its *own* corner, not its girdle's. The two are the same on a body
+		# standing square and they part company the moment it is not: a shoulder on
+		# the side the animal has its weight over is genuinely carried higher than
+		# the one on the side that is swinging through, so that leg is solved more
+		# extended and its partner more folded. Which is what a roll is — and it is
+		# a fact about the limb rather than a lean drawn over the top of one, so it
+		# reaches the picture through the leg poses whether anything ever draws the
+		# torso tipped or not.
+		limb.socket_height = float(corner[limb.key])
 
 	# --- 5. solve the limbs ---------------------------------------------------
 	for limb in limbs:
 		if _skip(limb):
 			continue
 		_solve_limb(limb, body, p, scale, collision_query)
+
+
+## Re-derives the footfall pattern from the limbs as they have just been solved.
+##
+## Everything handed over is a measurement taken this tick. The speed is the mean
+## of the four sockets rather than the body's linear speed, for the reason every
+## other timing in this file is: a creature pivoting on the spot has a linear
+## speed of zero and hips going as fast as they ever do. The girdle gap is
+## measured between the sockets on one flank, so a body curled into a turn reports
+## the shorter distance its own feet actually have to share — which is exactly
+## when a long-legged animal's feet start interfering.
+func _solve_pattern(delta: float, body: BodyShape, p: CreatureParams) -> void:
+	_clock += delta
+	_beat_age += delta
+	var pace: float = 0.0
+	var walking: int = 0
+	var fore: float = 0.0
+	var rear: float = 0.0
+	var lead_left: float = 0.0
+	var lead_right: float = 0.0
+	for limb in limbs:
+		if _skip(limb):
+			continue
+		pace += limb.socket_speed
+		walking += 1
+		if limb.pair == Limb.FRONT:
+			fore = maxf(fore, limb.sweep_limit)
+		else:
+			rear = maxf(rear, limb.sweep_limit)
+			# Which way the animal is coming round, measured rather than asked for:
+			# the hind socket on the outside of a turn sweeps the wider arc. On a
+			# body running straight the two are equal and the gallop below has no
+			# lead at all, which is honest — a straight-line asymmetric gait is a
+			# bound, and animals pick a lead when they turn.
+			if limb.side > 0.0:
+				lead_left = limb.socket_speed
+			else:
+				lead_right = limb.socket_speed
+	var speed: float = pace / maxf(float(walking), 1.0)
+	var gap: float = 0.0
+	if body.anchors.has("FL") and body.anchors.has("RL"):
+		gap = (body.anchors["FL"] as Spine.Frame).pos.distance_to(
+			(body.anchors["RL"] as Spine.Frame).pos)
+	var lead: float = (lead_left - lead_right) / maxf(speed, 1.0)
+
+	footfall.update(posture, loco, p, maxf(hip_height, 1.0), speed,
+		Vector2(fore, rear), gap, lead, loco.forelimbs_bear)
+	_measure_gather(body)
+
+
+## Reads how far the two ends of the animal have converged — see `gather`.
+##
+## Each foot's offset from its own socket along the body, as a share of the travel
+## that limb has. The hind pair's mean less the fore pair's: positive when the
+## hind feet have come forward and the fore feet have gone back, which is the two
+## girdles closing on each other, which is a folded back.
+func _measure_gather(body: BodyShape) -> void:
+	var ends := Vector2.ZERO
+	var counted := Vector2.ZERO
+	for limb in limbs:
+		if _skip(limb) or not limb.bearing or not body.anchors.has(limb.key):
+			continue
+		var a: Spine.Frame = body.anchors[limb.key]
+		var along: float = limb.local(a, limb.ground - a.pos).y - limb.rest_fore
+		var share: float = clampf(along / maxf(limb.sweep_limit, 0.001), -1.0, 1.0)
+		if limb.pair == Limb.FRONT:
+			ends.x += share
+			counted.x += 1.0
+		else:
+			ends.y += share
+			counted.y += 1.0
+	if counted.y <= 0.0:
+		gather = 0.0
+		return
+	var hind: float = ends.y / counted.y
+	# With no forelimbs on the ground there is nothing at the front to converge
+	# with, so what the hind pair alone says is the whole of it. That is a hop
+	# rather than a bound, and a hopping body does fold — over its hips.
+	var forelimb: float = ends.x / counted.x if counted.x > 0.0 else 0.0
+	gather = clampf((hind - forelimb) * 0.5, -1.0, 1.0)
+
+
+## How far through a cycle it is since the last foot left the ground.
+##
+## Negative when there is no beat to measure from — nothing has stepped recently,
+## or the body has been standing long enough that what did step is no longer
+## telling us anything. Sequencing a creature that stopped and started again off
+## a stamp from before it stopped would be sequencing off a coincidence.
+func _beat_phase() -> float:
+	if _beat_key.is_empty():
+		return -1.0
+	var cycle: float = _measured_cycle()
+	if cycle <= 0.0001 or _beat_age > cycle * BEAT_STALE:
+		return -1.0
+	return _beat_age / cycle
+
+
+## How long one limb's whole cycle is actually taking, averaged over the legs
+## that have done one.
+##
+## The observed interval rather than the predicted one, and the difference
+## matters here in a way it does not anywhere else in this file. `_body_cycle`
+## divides the stride a limb is *about to* take by the speed its socket is going,
+## which is the right answer for how quickly a body should settle onto its feet;
+## it is the wrong one for placing a beat, because the beat has to be placed
+## against the last beat that really happened. Falls back to the prediction until
+## the legs have stepped twice and there is an interval to measure.
+func _measured_cycle() -> float:
+	var total: float = 0.0
+	var count: int = 0
+	for limb in limbs:
+		if _skip(limb) or not limb.bearing or limb.cycle <= 0.0:
+			continue
+		total += limb.cycle
+		count += 1
+	return total / float(count) if count > 0 else _body_cycle()
+
+
+## What one candidate is worth this tick: how overdue it is, less how far off its
+## own beat lifting it now would be.
+func _bid(limb: Limb, elapsed: float) -> float:
+	var overdue: float = limb.error / maxf(limb.stride, 0.001)
+	if elapsed < 0.0:
+		return overdue
+	return overdue - BEAT_AUTHORITY * footfall.off_beat(limb.key, _beat_key, elapsed)
+
+
+## Whether a limb still in the air belongs to a different part of the cycle than
+## this one — in which case this foot waits, because the two were never meant to
+## be off the ground together.
+func _beat_blocked(limb: Limb) -> bool:
+	for other in limbs:
+		if other == limb or not other.stepping:
+			continue
+		if not footfall.may_overlap(limb.key, other.key):
+			return true
+	return false
+
+
+## Marks this limb as the beat everything else is now placed against.
+##
+## Only the limb that *won* the contest does this, not the ones pulled onto its
+## beat with it: a beat is one event however many feet leave the ground on it, and
+## stamping each of them in turn would make a bounding pair read as two beats a
+## fraction of a second apart.
+func _mark_beat(limb: Limb) -> void:
+	_beat_key = limb.key
+	_beat_age = 0.0
 
 
 ## How high the four feet are actually holding the body, and how the body follows
@@ -534,8 +821,16 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 ## Only feet that are down are asked. A limb in the air is not carrying anything,
 ## and a limb that cannot bear weight has already said so.
 func _carry_body(delta: float, p: CreatureParams, wants: Vector2) -> void:
-	var front: float = _pair_support(Limb.FRONT, p, wants.x)
 	var rear: float = _pair_support(Limb.REAR, p, wants.y)
+	# A girdle with nothing under it is not held up by legs — it is held up by the
+	# back. That is what the front of a two-legged animal is doing, and it is why
+	# nothing had to write a special pose for one: the shoulders ride level over
+	# the hips because the spine between them is what is carrying them, and the
+	# tail is what makes that balance possible. Everything else about the body —
+	# the height bands, the bite reach, the drawn attitude — follows without a
+	# single line knowing the creature is bipedal.
+	var front: float = rear if not loco.forelimbs_bear \
+		else _pair_support(Limb.FRONT, p, wants.x)
 	# Weight takes a moment to settle onto a leg, but a body that has just been
 	# built is not settling onto anything — it is already standing there. Easing
 	# in from the posture's guess instead would spend the first third of a second
@@ -560,6 +855,101 @@ func _carry_body(delta: float, p: CreatureParams, wants: Vector2) -> void:
 	shoulder_height = minf(lerpf(shoulder_height, front, response), _pair_ceiling(Limb.FRONT, p))
 	hip_height = minf(lerpf(hip_height, rear, response), _pair_ceiling(Limb.REAR, p))
 	support = (shoulder_height + hip_height) * 0.5
+	_carry_corners(response, p, wants)
+
+
+## The same measurement again, one leg at a time, and the whole of the creature's
+## weight transfer.
+##
+## `_pair_support` above asks what a *pair* of legs is holding its end of the body
+## at and answers with whichever of the two is doing worse, because the body
+## cannot ride higher than the shortest reach underneath it. That is right for the
+## height, and it throws away the thing that makes a walk read as heavy: the two
+## legs of a pair are usually holding their own corners at different heights, and
+## a body held at four different heights is a body that is *tipped*.
+##
+## So the same Pythagoras, per corner, and the two differences between the four
+## are the attitude. Nothing here is animated and nothing here is a lean anybody
+## authored:
+##
+##   * a pacing animal has both legs on one side in the air at once, so that side
+##     drops and the body rolls — which is a camel's roll, and it is the footfall
+##     pattern showing up in the picture rather than a second system agreeing with
+##     it;
+##   * a bounding one has a whole girdle off the ground, so it pitches nose-up and
+##     nose-down over the stride, which is what a bound is;
+##   * a heavy animal walking one foot at a time leans onto the three that are
+##     down, because that is where its legs are holding it;
+##   * and a two-legged one pitches from its hips alone, because that is the only
+##     girdle it has anything under.
+##
+## A limb in the air holds nothing, so its corner eases toward the *pair's* height
+## rather than toward the floor — the body over an unsupported corner is held by
+## the girdle and the back, not dropped.
+func _carry_corners(response: float, p: CreatureParams, wants: Vector2) -> void:
+	for limb in limbs:
+		var held: float = shoulder_height if limb.pair == Limb.FRONT else hip_height
+		if not _skip(limb) and limb.bearing and not limb.stepping \
+				and limb.carry >= SUPPORT_MIN:
+			var wanted: float = wants.x if limb.pair == Limb.FRONT else wants.y
+			held = lerpf(limb.support_height(stance_extension),
+				limb.surface + wanted, loco.absorbed)
+		# Eased toward what the leg is offering, and *then* cut off at what it can
+		# physically reach — the same two-step the girdles get and in the same
+		# order, which is the whole of why the order matters. Clamping the target
+		# before the ease only limits where the corner is heading: a ceiling that
+		# drops this tick leaves the corner sitting above it all the way down, and a
+		# socket above what its own leg can reach is a body floating on that leg.
+		# It applies to a corner with a foot in the air too — that limb is carrying
+		# nothing, but it is still attached, and the body may not ride away from it.
+		var settled: float = lerpf(float(corner[limb.key]), held, response)
+		if not _skip(limb) and limb.bearing and limb.carry >= SUPPORT_MIN:
+			settled = minf(settled, limb.carry_ceiling(_max_reach(limb, p)))
+		corner[limb.key] = settled
+
+	# The two differences, over the two lengths they are spread across. The levers
+	# are the animal's own stance — how far apart the girdles are and how wide it
+	# is standing — so both slopes come out of the geometry rather than out of a
+	# constant, and a build whose feet fall close under the midline tips further
+	# for the same difference in how its sides are held than one standing splayed.
+	var along: float = maxf(_span(Limb.FRONT, Limb.REAR), 1.0)
+	var across: float = maxf(_track(), 1.0)
+	pitch = (shoulder_height - hip_height) / along
+	roll = ((float(corner["FL"]) + float(corner["RL"]))
+		- (float(corner["FR"]) + float(corner["RR"]))) * 0.5 / across
+
+
+## Distance between the two girdles' sockets, measured on the ground plane.
+func _span(a: int, b: int) -> float:
+	var first: Vector2 = Vector2.ZERO
+	var second: Vector2 = Vector2.ZERO
+	for limb in limbs:
+		if limb.pair == a:
+			first = limb.plan[0]
+		elif limb.pair == b:
+			second = limb.plan[0]
+	return first.distance_to(second)
+
+
+## How wide this animal is actually standing: the mean gap between the feet on
+## one side and the feet on the other. The lever a roll turns about, and the whole
+## reason a columnar build rolls where a sprawled one merely leans.
+func _track() -> float:
+	var left: Vector2 = Vector2.ZERO
+	var right: Vector2 = Vector2.ZERO
+	var counted := Vector2.ZERO
+	for limb in limbs:
+		if _skip(limb) or not limb.bearing:
+			continue
+		if limb.side > 0.0:
+			left += limb.ground
+			counted.x += 1.0
+		else:
+			right += limb.ground
+			counted.y += 1.0
+	if counted.x <= 0.0 or counted.y <= 0.0:
+		return 0.0
+	return (left / counted.x).distance_to(right / counted.y)
 
 
 ## The height one pair of legs is holding its end of the body at: whichever of the
@@ -586,7 +976,7 @@ func _pair_support(pair: int, p: CreatureParams, wants: float) -> float:
 	var held: float = INF
 	var floor_height: float = INF
 	for limb in limbs:
-		if limb.pair != pair or _skip(limb) or limb.stepping:
+		if limb.pair != pair or _skip(limb) or limb.stepping or not limb.bearing:
 			continue
 		if limb.carry < SUPPORT_MIN:
 			continue
@@ -616,10 +1006,27 @@ func _pair_support(pair: int, p: CreatureParams, wants: float) -> float:
 func _pair_ceiling(pair: int, p: CreatureParams) -> float:
 	var ceiling: float = INF
 	for limb in limbs:
-		if limb.pair != pair or _skip(limb) or limb.carry < SUPPORT_MIN:
+		if limb.pair != pair or _skip(limb) or not limb.bearing \
+				or limb.carry < SUPPORT_MIN:
 			continue
 		ceiling = minf(ceiling, limb.carry_ceiling(_max_reach(limb, p)))
 	return ceiling
+
+
+## How high a foot that is not taking a step is being held.
+##
+## On the surface it is standing on, which is the answer for the overwhelming
+## majority of feet and the only answer this solver used to have. A limb that is
+## not standing on anything is hung from its own socket instead — see
+## Limb.hang_height — and that covers both bodies with no ground under them and
+## forelimbs that never had any business on it. Without it a vestigial arm is
+## solved to a floor a whole leg below its shoulder, which is a target it cannot
+## reach and is drawn as a spike; and a leaping animal's legs hang at their full
+## standing length beneath a body that is in the air.
+func _hold(limb: Limb, airborne: bool) -> float:
+	if not airborne and limb.bearing:
+		return limb.surface
+	return limb.hang_height(TUCK_REACH)
 
 
 ## Limbs this solver has no business touching: the ones that are not there, and
@@ -676,12 +1083,13 @@ func _read_function(limb: Limb, state: BodyState, impaired: bool) -> void:
 
 ## Whether this limb can pick itself up at all.
 ##
-## Two ways to fail it, and they are different animals: no command reaching the
-## limb, and not enough of it left to stand the body on while the diagonal is in
-## the air. Either way the leg still exists, is still solved and is still dragged;
-## it is only never *asked*.
+## Three ways to fail it, and they are different animals: no command reaching the
+## limb, not enough of it left to stand the body on while the rest of the beat is
+## in the air, and — the one that is not a failure at all — a limb that never had
+## the ground under it to push off. Any of them and the leg still exists, is still
+## solved and is still carried; it is only never *asked*.
 func _can_step(limb: Limb) -> bool:
-	return limb.command >= CONTROL_MIN and limb.carry >= SUPPORT_MIN
+	return limb.bearing and limb.command >= CONTROL_MIN and limb.carry >= SUPPORT_MIN
 
 
 ## The reach and the fan this limb may currently be placed inside. Both narrow
@@ -697,6 +1105,15 @@ func _swing_fan(limb: Limb, swing: float) -> float:
 
 func _start_step(limb: Limb, body: BodyShape, p: CreatureParams, scale: float,
 		surface_query: Callable) -> void:
+	# How long this limb has taken to come round to itself again. Every lift is a
+	# reading, whether the limb won the contest or was pulled onto somebody else's
+	# beat, because it is this limb's own cycle either way.
+	if limb.last_lift >= 0.0:
+		var span: float = _clock - limb.last_lift
+		if span > 0.0 and span < CYCLE_MAX:
+			limb.cycle = span if limb.cycle <= 0.0 \
+				else lerpf(limb.cycle, span, CYCLE_BLEND)
+	limb.last_lift = _clock
 	limb.step_from = limb.planted
 	limb.step_from_surface = limb.surface
 	limb.step_index += 1
@@ -782,7 +1199,7 @@ func _body_cycle() -> float:
 	var total: float = 0.0
 	var count: int = 0
 	for limb in limbs:
-		if _skip(limb):
+		if _skip(limb) or not limb.bearing:
 			continue
 		total += limb.stride / maxf(limb.socket_speed, 1.0)
 		count += 1

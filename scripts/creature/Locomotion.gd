@@ -103,8 +103,20 @@ const SWING_FLOOR: float = 0.045
 ## says. The posture already sets the base — three feet down on a columnar build,
 ## two on the others — and this is weight leaning on top of it.
 const DUTY_LOAD: float = 0.10
-const DUTY_MIN: float = 0.45
+const DUTY_MIN: float = 0.35
 const DUTY_MAX: float = 0.86
+
+## Least a forelimb may be, against the hind leg it would have to stand beside,
+## and still reach the ground the hips are holding the body over.
+##
+## This is the whole of what being two-legged is, and it is a measurement rather
+## than a category. A shoulder is carried at the height the hind legs set; an arm
+## shorter than that cannot be put on the floor without the animal pitching onto
+## its face, so it is not put on the floor. Comfortably below any real quadruped —
+## the shortest-armed one in the file is at 0.85 of its own leg — and comfortably
+## above the vestigial forelimbs of anything that walks on two, so the threshold
+## itself never has to be argued about.
+const BEARING_RATIO: float = 0.46
 
 ## How much of the rise and fall of a vaulting leg the animal takes up in its own
 ## joints rather than showing in its back. A leg with a foot planted lifts the
@@ -135,6 +147,19 @@ const SETTLE_MAX: float = 22.0
 ## almost no clearance to clear.
 const LIFT_SHARE: float = 0.22
 
+## Total turn a spine has to be able to make, end to end, to count as a fully
+## flexible back — a body that could curl round into a ring. Dimensionless, and
+## deliberately so: it is a statement about the animal against itself, so a long
+## body of many small bends and a short one of few large ones are compared on the
+## terms that matter rather than on their length.
+const FLEXIBLE_SPINE: float = TAU
+## How much of its own length a fully flexible back adds and removes over a
+## stride when the two girdles are working as pairs. This is the other half of a
+## gallop's stride and it is not a small term: an animal that folds and extends
+## its back covers a good deal more ground per stride than its legs alone reach,
+## which is precisely why a bounding gait is fast.
+const BUNCH_SHARE: float = 0.16
+
 ## Force per unit of weight, against the reference build. Muscle goes as
 ## mass^(2/3) and weight as mass, so this falls as the cube root of size all on
 ## its own — and every slow thing about a large animal below is this one number.
@@ -144,12 +169,24 @@ var power: float = 1.0
 var extension: float = 0.78
 ## Share of its cycle each limb must have a foot on the ground.
 var duty: float = 0.5
+## Whether the forelimbs reach the ground at all — see BEARING_RATIO. False
+## leaves the hind pair walking on their own, which is what two-legged means.
+var forelimbs_bear: bool = true
+## How many limbs are actually carrying the animal. Two or four, and it is what
+## every share of the body's weight and every duty factor is quoted against.
+var bearing_limbs: int = 4
 ## Ground acceleration, in pixels per second squared.
 var accel: float = 800.0
 ## Turn rate, in radians per second, before speed falloff and steering losses.
 var turn_rate: float = 0.0
 ## Share of the vault the joints swallow — see ABSORB_BASE.
 var absorbed: float = 0.75
+## How freely this back folds along its own length: the total turn the chain can
+## make from end to end, against a body that could curl into a half circle, taken
+## down by whatever muscle tone is holding it straight. One is a cat, near zero is
+## an elephant. Read by everything that asks what the spine contributes to
+## walking, so the two consumers cannot disagree about it.
+var spine_freedom: float = 1.0
 
 
 ## Re-derives everything from the body that has just been solved.
@@ -171,6 +208,15 @@ func update(posture: Posture, physique: Physique, p: CreatureParams, scale: floa
 	extension = clampf(minf(p.stance_reach, p.limb_max_reach - EXTENSION_MARGIN),
 		0.2, 0.98)
 
+	# Whether there are four legs under this animal or two. Nothing selects it: an
+	# arm too short to reach the floor from a shoulder the hind legs are holding up
+	# is an arm that is carried, and a body with two of those is walking on two
+	# legs. Which is why a T. rex and a Kangaroo need no posture of their own to be
+	# bipedal and a Gorilla, whose arms are *longer* than its legs, is emphatically
+	# not — its knuckles are on the ground because they reach it.
+	forelimbs_bear = p.arm_length >= p.leg_length * BEARING_RATIO
+	bearing_limbs = 4 if forelimbs_bear else 2
+
 	accel = p.acceleration * scale * posture.drive * power
 
 	# Torque over rotational inertia. A rod's inertia goes as its mass times the
@@ -185,10 +231,28 @@ func update(posture: Posture, physique: Physique, p: CreatureParams, scale: floa
 	# How much of its cycle a foot spends on the ground. The posture already says
 	# how many feet stay down, which is exactly what a duty factor is; weight leans
 	# on it, because a heavy animal is unwilling to be caught on fewer legs.
-	duty = clampf(float(posture.feet_down) / 4.0 + DUTY_LOAD * (1.0 - power),
-		DUTY_MIN, DUTY_MAX)
+	#
+	# Against the legs that are carrying rather than against four, because that is
+	# what the fraction means: one foot down out of two is a two-legged walk, and
+	# quoted against a girdle the animal is not standing on it would read as a
+	# creature permanently in the air.
+	# Never all of them: a build has to be able to pick a foot up, and a posture
+	# asking for three feet down on an animal standing on two is asking for a
+	# statue. The cap is on the posture's caution rather than on the anatomy —
+	# whatever the stance would prefer, something has to be free to move.
+	var down: int = mini(posture.feet_down, bearing_limbs - 1)
+	duty = clampf(float(down) / float(bearing_limbs)
+		+ DUTY_LOAD * (1.0 - power), DUTY_MIN, DUTY_MAX)
 
 	absorbed = clampf(ABSORB_BASE * power, ABSORB_MIN, ABSORB_MAX)
+
+	# What the back can do about walking: the total turn it could make from end to
+	# end, against a body that could curl right round. Both halves of it are
+	# already on the animal — how far one joint bends and how many joints there
+	# are — and it is what makes an elephant's back a beam and a cat's a spring
+	# without either of them carrying a flexibility number.
+	spine_freedom = clampf(deg_to_rad(p.max_bend_deg) * float(p.segment_count - 1)
+		/ FLEXIBLE_SPINE, 0.0, 1.0)
 
 
 ## The span a limb of this bone stands at — the radius of the sphere its foot
@@ -331,3 +395,29 @@ func settle(cycle: float) -> float:
 ## is applied. See LIFT_SHARE for why it is the larger of the two.
 func lift(socket_height: float, bone: float) -> float:
 	return maxf(socket_height, bone) * LIFT_SHARE
+
+
+## How much shorter the body is drawn, given how far the two ends of it have
+## converged. Signed: positive is a back folded up with the hind feet forward
+## under the shoulders, negative is one stretched out at full extension.
+##
+## This is the whole of the spine's contribution to a stride and it needs no
+## second term anywhere else. A body that is shorter this tick than it was last
+## tick has carried its own shoulders backward relative to its hips; the limb
+## sockets ride on the spine, so `Limb.track_socket` measures that as socket
+## travel and the stride, the step timing and the landing prediction all follow
+## from it exactly as they follow from the animal walking. Writing the back's
+## share into the limb's own reach as well would be the same ground counted twice
+## — and would hand the foot a stride longer than the envelope it is clamped
+## into, which is a leg that can never become overdue and is towed instead.
+## `gathering` is how much of the asymmetric regime the animal is actually in —
+## see Footfall.aerial — and it is here so that the answer is *exactly* nothing
+## under any alternating gait rather than merely nearly nothing. The measurement
+## `gather` comes from very nearly cancels on its own when the limbs of a pair are
+## half a cycle apart, but "very nearly" is not a rest length: a body whose spine
+## is a thousandth of a pixel short every tick is a body the invariants can no
+## longer be stated about, and a back that folds only when the girdles work as
+## pairs is the truthful claim anyway.
+func bunch(gather: float, gathering: float) -> float:
+	return clampf(gather, -1.0, 1.0) * clampf(gathering, 0.0, 1.0) \
+		* BUNCH_SHARE * spine_freedom

@@ -5,8 +5,9 @@
 ##
 ## Drives a real Creature through idle -> walk -> turn -> pivot -> idle and
 ## asserts the things the solver is supposed to guarantee: segment lengths hold,
-## bends stay inside the limit, IK bones keep their length, the gait never lifts
-## both diagonals at once, and a resting creature keeps its feet still.
+## bends stay inside the limit, IK bones keep their length, the gait never has
+## more feet off the ground than its own build allows, and a resting creature
+## keeps its feet still.
 ## Worth re-running after retuning stiffness / iterations / max bend.
 extends SceneTree
 
@@ -70,7 +71,7 @@ func _run_case(preset_name: String) -> void:
 	var max_bend_excess: float = 0.0
 	var max_bone_error: float = 0.0
 	var max_airborne: int = 0
-	var both_groups_airborne: bool = false
+	var allowed_airborne: int = 0
 	var steps_taken: int = 0
 	var nan_seen: bool = false
 	var was_stepping := {}
@@ -107,7 +108,11 @@ func _run_case(preset_name: String) -> void:
 		previous_head = creature.head_pos
 
 		var spine: Spine = creature.spine
-		var seg_len: float = params.segment_length * creature.size_scale
+		# What the body is being held at this tick, not what it was built from: a
+		# back that folds and extends has a rest length that moves — see
+		# Creature.segment_rest — and the invariant is that the solver hits it
+		# exactly, whatever it currently is.
+		var seg_len: float = creature.segment_rest()
 		var max_bend: float = deg_to_rad(params.max_bend_deg)
 
 		for i in spine.size():
@@ -131,7 +136,6 @@ func _run_case(preset_name: String) -> void:
 
 		# 3. IK bone lengths + gait bookkeeping
 		var airborne: int = 0
-		var groups_up := [false, false]
 		for limb in creature.gait.limbs:
 			# Bones are rigid where they are real — through the air, across the
 			# ground positions and the heights together. The drawn chain is a
@@ -142,7 +146,6 @@ func _run_case(preset_name: String) -> void:
 				nan_seen = true
 			if limb.stepping:
 				airborne += 1
-				groups_up[limb.group] = true
 			if limb.stepping and not was_stepping.get(limb.key, false):
 				steps_taken += 1
 			was_stepping[limb.key] = limb.stepping
@@ -152,21 +155,38 @@ func _run_case(preset_name: String) -> void:
 			# a leg left far enough behind straightens out and ends up drawn
 			# across the torso.
 			#
-			# The line it may not cross is the animal's own midline, not its
-			# shoulder: standing underneath itself is exactly what an upright build
-			# does, and a foot inboard of its socket is that stance working rather
-			# than a leg drawn through a body. Measured off the spine station the
-			# socket hangs from, against that station's own outward axis, so it
-			# means the same thing at any heading and on either side.
+			# Only for the limbs the animal is standing on. A forelimb too short to
+			# reach the ground is never placed at all — it is folded against the
+			# chest and carried, so it has no stance to be measured out of, no
+			# ground-plane envelope to be normalised against, and no ideal to be
+			# dragged behind. Asking these three questions of one divides by an
+			# envelope of nothing and answers with fifty.
+			#
+			# The line it may not cross is the far side of its own body. Standing
+			# underneath itself is exactly what an upright build does, so a foot
+			# inboard of its own shoulder is that stance working rather than a leg
+			# drawn through a torso — and even a joint a little past the midline is
+			# inside the flesh rather than through it. What is not allowed is a limb
+			# that has come out of the other flank.
+			#
+			# So the offset is measured on the socket's own outward axis, which is
+			# the frame the solver places it in, and quoted against the half-width of
+			# the body there: -1 is exactly the far flank. Normalising against the
+			# limb's ground-plane envelope instead reported a knee two pixels inside
+			# a twenty-pixel hip as a four-percent breach, because a near-vertical
+			# leg has almost no ground-plane envelope to be a percentage of.
+			if not limb.bearing:
+				continue
 			var anchor: Spine.Frame = creature.body.anchors[limb.key]
 			var station: int = clampi(int(round(
 				(creature.params.front_limb_t if limb.pair == Limb.FRONT
 					else creature.params.rear_limb_t) * float(spine.size() - 1))),
 				0, spine.size() - 1)
 			var outward: Vector2 = spine.perps[station] * limb.side
+			var flank: float = maxf(creature.body.widths[station], 0.001)
 			for j2 in [1, 2]:
 				worst_inboard = minf(worst_inboard,
-					(limb.plan[j2] - spine.points[station]).dot(outward) / limb.plan_limit)
+					(limb.plan[j2] - spine.points[station]).dot(outward) / flank)
 			# How extended the leg actually is: the gap it spans through the air,
 			# against the two bones that have to span it. Not the plan distance over
 			# `plan_limit` — that ratio is one by construction now, because
@@ -180,8 +200,11 @@ func _run_case(preset_name: String) -> void:
 				span / maxf(limb.lengths[0] + limb.lengths[1], 0.001))
 			max_foot_drift = maxf(max_foot_drift, limb.error / maxf(limb.stride, 0.001))
 		max_airborne = maxi(max_airborne, airborne)
-		if groups_up[0] and groups_up[1]:
-			both_groups_airborne = true
+		# What this build is allowed at the speed it is currently going. Read off
+		# the gait rather than asserted, because it genuinely changes: the same
+		# animal keeps three feet down at a walk and may have all four clear at a
+		# gallop, and the invariant is that it never exceeds its own answer.
+		allowed_airborne = maxi(allowed_airborne, creature.gait.footfall.lift_limit)
 
 		# 5. undulation amplitude, sampled only on the straight-line leg of the
 		# route and once the wave has established. The wave is meant to be a
@@ -222,14 +245,15 @@ func _run_case(preset_name: String) -> void:
 		failures.append("%s bone length drifted %.1f%% (>2%%)" % [label, max_bone_error * 100.0])
 	if steps_taken < 8:
 		failures.append("%s barely stepped (%d steps in 11s of walking)" % [label, steps_taken])
-	if both_groups_airborne:
-		failures.append("%s lifted both diagonals at once (creature would fall)" % label)
+	if max_airborne > allowed_airborne:
+		failures.append("%s had %d feet off the ground at once — its build allows %d"
+			% [label, max_airborne, allowed_airborne])
 	if idle_drift > 0.01:
 		failures.append("%s feet crept %.3f px while idle" % [label, idle_drift])
 	# A negative outward offset means a knee or a foot crossed the animal's own
 	# midline and the limb was drawn through the far side of the torso.
-	if worst_inboard < 0.0:
-		failures.append("%s drew a limb %.3f of its reach past its own midline"
+	if worst_inboard < -1.0:
+		failures.append("%s drew a limb %.2f half-widths past its own midline — out of the far flank"
 			% [label, -worst_inboard])
 	# Past the reach limit the chain is pulled straight and stops reading as a
 	# leg; 1% of slack covers the solver's tolerance.

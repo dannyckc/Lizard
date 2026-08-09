@@ -438,10 +438,17 @@ func _check_reaching_down(player: Creature) -> void:
 	# reach its own feet: the fold and the neck grew with nothing, and the height
 	# they have to cover grew with the legs. One parameter, and the whole of what
 	# a tall short-necked browser's problem is.
+	# The multiplier has to be large, and it is larger than it used to be for a
+	# good reason: the Elephant is no longer built on stilts. Its legs used to be
+	# four tenths of its own body long and stood it a third higher than it was deep
+	# through the chest, so it was already most of the way to not reaching its feet
+	# and a modest stretch tipped it over. Proportioned like an animal, it takes a
+	# real distortion to put the ground out of its reach — which is the honest
+	# version of the same claim.
 	_apply(player, "Elephant")
 	var on_its_legs: float = player.stature.bite.x
-	player.params.arm_length *= 1.8
-	player.params.leg_length *= 1.8
+	player.params.arm_length *= 2.6
+	player.params.leg_length *= 2.6
 	player.reset(Vector2.ZERO, 0.0)
 	for _tick in 30:
 		player._physics_process(TICK)
@@ -466,7 +473,11 @@ func _check_reaching_down(player: Creature) -> void:
 	player.aim_at(down)
 	for _tick in 60:
 		player._physics_process(TICK)
-	_check(player.crouch > 0.2,
+	# That it folds at all, rather than how much: how much is a consequence of how
+	# far its mouth has to travel, and a correctly proportioned animal needs less
+	# of its legs to reach its own feet than one on stilts did. The claim with teeth
+	# in it is the next one — that the fold arrives at the body.
+	_check(player.crouch > 0.1,
 		"an elephant told to feed at its feet folded %.0f%% of its legs" % (player.crouch * 100.0))
 	_check(player.gait.support < upright - 2.0,
 		"the crouch never reached the body: it rode %.1f px before and %.1f px after"
@@ -491,13 +502,21 @@ func _check_refusing_what_it_cannot_reach(player: Creature, target: Creature) ->
 	for _tick in 30:
 		player._physics_process(TICK)
 		target._physics_process(TICK)
-	# Stood right beside the elephant's nearest leg, because the claim being made
-	# is about height and nothing else: a target the lizard cannot reach because it
-	# is on the far side of the paddock would pass the same check for the wrong
-	# reason. Everything below is within its jaws horizontally, and the only
-	# question left is how far off the ground it is.
-	var near: Limb = _nearest_limb(target, player.head_pos)
-	player.reset(near.plan[2] - Vector2(40.0, 0.0), 0.0)
+	# Stood beside the elephant's nearest foot and facing across it, because the
+	# claim being made is about height and nothing else: a target the lizard cannot
+	# reach because it is on the far side of the paddock would pass the same check
+	# for the wrong reason. Both things it is about to be asked for — the foot and
+	# the back directly over it — are within its jaws horizontally, and the only
+	# question left is how far off the ground each of them is.
+	#
+	# Offset across the body rather than along it, and that is not tidiness. Where
+	# the feet are is exactly what a posture changes: a columnar animal stands its
+	# legs close underneath itself, so a lizard placed a fixed distance up the road
+	# from a foot ends up somewhere quite different beside a sprawled animal and a
+	# stacked one. Across the flank, the same offset means the same thing to both.
+	var beside: Limb = _nearest_limb(target, player.head_pos)
+	var across: Vector2 = target.body.anchors[beside.key].perp * beside.side
+	player.reset(beside.plan[2] + across * 26.0, (-across).angle())
 	for _tick in 20:
 		player._physics_process(TICK)
 		target._physics_process(TICK)

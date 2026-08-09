@@ -235,6 +235,14 @@ var flex: float = 1.0
 var command: float = 1.0
 ## What it can bear. Below Gait.SUPPORT_MIN the leg folds instead of carrying.
 var carry: float = 1.0
+## Whether this limb is one of the ones the animal walks on.
+##
+## Not a capability and not damage — an arm too short to reach the floor from the
+## shoulder its own hind legs are holding up is a perfectly sound arm that is
+## being carried, and the whole of what a two-legged animal is. It sits beside
+## the four above rather than among them because it is a fact about proportion
+## rather than about condition: it is the same on a fresh body and a chewed one.
+var bearing: bool = true
 ## How far it can still be extended, as a multiple of its working envelope.
 var reach: float = 1.0
 ## Off the animal entirely. A severed limb is not solved, not drawn and not
@@ -252,6 +260,14 @@ var carried: bool = false
 ## so the error is fixed for the duration of a step rather than shivering every
 ## frame, and is reproducible run to run.
 var step_index: int = 0
+## When this limb last left the ground, on the gait's own clock, and how long it
+## has been taking to come round again. Both measured rather than predicted: a
+## cycle worked out from the stride and the socket's speed is a good estimate of
+## a walk that has not happened yet, and the footfall pattern needs to know what
+## the animal is *actually* doing — it is placing this beat against the last one.
+## Negative until the limb has stepped twice and there is an interval to have.
+var last_lift: float = -1.0
+var cycle: float = -1.0
 
 
 func setup(p_key: String, p_pair: int, p_side: float) -> void:
@@ -332,6 +348,25 @@ func carry_ceiling(reach_share: float) -> float:
 	var span: float = (lengths[0] + lengths[1]) * reach_share
 	var out: float = ground.distance_to(plan[0])
 	return foot_height + sqrt(maxf(span * span - out * out, 0.0))
+
+
+## How high the foot of a limb that is not standing on anything hangs.
+##
+## A carried limb is not reaching for the floor — there is either no floor under
+## it or no intention of putting it there — so it hangs from its own socket by
+## whatever of itself is not drawn up, and where that leaves the foot is
+## Pythagoras on the part of the limb that is not already spent going sideways.
+## Never below the surface, because a leg cannot hang through the ground.
+##
+## The distinction it draws is the one thing a vestigial forelimb needs: an arm a
+## fifth of the leg beside it, told to reach a floor its shoulder is a whole leg
+## above, is solved to a target it cannot come near and is drawn as a rigid spike
+## pointing at the ground. Hung instead, it is simply a short arm held against the
+## chest, which is what it is.
+func hang_height(share: float) -> float:
+	var span: float = (lengths[0] + lengths[1]) * clampf(share, REACH_MIN, 1.0)
+	var out: float = planted.distance_to(plan[0])
+	return maxf(socket_height - sqrt(maxf(span * span - out * out, 0.0)), surface)
 
 
 ## The heights one drawn part of this limb occupies: 0 and 1 are the two bones,

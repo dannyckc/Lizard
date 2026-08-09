@@ -87,6 +87,10 @@ var physique: Physique = Physique.new()
 ## and the posture, once per tick and ahead of everything that uses it — not
 ## settings, see Locomotion.
 var locomotion: Locomotion = Locomotion.new()
+## Rest length the spine was last actually solved to — see `segment_rest`. Zero
+## until the first tick has run, which is what makes the accessor fall back to the
+## parameter for a body that has not moved yet.
+var _segment_rest: float = 0.0
 
 # --- motion state -----------------------------------------------------------
 var head_pos: Vector2 = Vector2.ZERO
@@ -562,7 +566,21 @@ func _physics_process(delta: float) -> void:
 	# The body is solved from `head_pos` alone, which stays the creature's honest
 	# position: the strike must not accumulate into the motion integrator or a
 	# bite would teleport the creature forward by its own reach.
-	var seg_len: float = params.segment_length * size_scale
+	# How long the body is *this tick*. Not a constant any more, and the reason is
+	# the other way a spine walks: a back folding and extending along its own
+	# length. The gait has just measured how far the two ends of the animal have
+	# converged — see Gait.gather — and this turns that into the body actually
+	# being shorter, so the silhouette gathers and stretches, the tissue lattice
+	# goes with it, and the limb sockets are genuinely carried forward and back by
+	# the spine rather than by anything pretending to be one.
+	#
+	# It is nothing at all on an alternating gait, because the measurement it comes
+	# from is nothing there: a trot's two hind feet are half a cycle apart and
+	# cancel. So a walking animal's body is exactly as long as it always was, and
+	# only one working its girdles as pairs bunches.
+	_segment_rest = params.segment_length * size_scale \
+		* (1.0 - locomotion.bunch(gait.gather, gait.footfall.aerial))
+	var seg_len: float = _segment_rest
 	# Undulation is a way of walking — a sprawled body lengthening its stride by
 	# throwing itself side to side — so it is scaled by how much of the walking
 	# this stance does with its spine, and switched off entirely when there is no
@@ -2180,6 +2198,30 @@ func mouth_radius() -> float:
 
 func body_length() -> float:
 	return spine.arc_length() if spine != null else 100.0
+
+
+## How long one segment of this body is being held at *right now*.
+##
+## `segment_length` is the animal's own rest length and is still the whole of what
+## it is built from — but a back that folds and extends is a back whose rest
+## length is not the same on every tick, and the spine is solved to this rather
+## than to the parameter. Exposed because it is an invariant several things check
+## against: the chain's segments must be exactly this long after a solve, and a
+## check against the parameter instead would be measuring the gallop and calling
+## it a stretched body.
+##
+## Identical to the parameter on anything not working its girdles as pairs, which
+## is every animal at a walk and every gait a stiff-backed one has — see
+## Gait.gather, which is nothing at all under an alternating footfall.
+##
+## Stored rather than recomputed on demand, and that is the difference between an
+## invariant and a near miss. The gait re-measures the fold *after* the spine has
+## been solved, so a body asked what its rest length is at the end of a tick would
+## answer with the length it is about to be held at next tick — and on a galloping
+## animal the two differ by several percent, which reads as a chain that stretches
+## and is nothing of the kind.
+func segment_rest() -> float:
+	return _segment_rest if _segment_rest > 0.0 else params.segment_length * size_scale
 
 
 func feed(amount: int = 1) -> void:

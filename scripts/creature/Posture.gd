@@ -34,20 +34,34 @@
 ##     envelope and the fold plane are all read off it below.
 ##
 ## The rest of the table is per-posture tuning, and it is deliberately a table
-## rather than three code paths. Nothing below names a gait, a species or a
+## rather than four code paths. Nothing below names a gait, a species or a
 ## behaviour: they are multipliers on numbers the existing systems already read,
 ## so a posture is a set of leanings — this build accelerates hard and turns
 ## flat, that one carries weight and turns wide — rather than a mode anything
 ## switches into.
+##
+## What a posture deliberately does *not* decide is the gait. It used to decide
+## rather too much of it — `feet_down` was a hard limit on how many feet could be
+## in the air, so a stance chose between an amble and a trot once and for all —
+## and that is most of why every animal in the game moved like a scaled lizard.
+## In what order the feet come down, and how many of them may be off the ground,
+## are questions about how fast a body is going for its size and about what its
+## legs and back can do; they live in Footfall, which reads this file as one input
+## among several. The same erect build walks, trots and gallops.
 class_name Posture
 extends RefCounted
 
+## Ordered by the trait itself — how far the limbs are carried out of the ground
+## plane — so the index is the stance and everything that follows from it comes
+## out monotonic. A stance inserted anywhere else would be a table whose rows no
+## longer say what the file says they say.
 const SPRAWLED: int = 0
 const SEMI_UPRIGHT: int = 1
-const COLUMNAR: int = 2
-const COUNT: int = 3
+const ERECT: int = 2
+const COLUMNAR: int = 3
+const COUNT: int = 4
 
-const NAMES: Array[String] = ["sprawled", "semi-upright", "columnar"]
+const NAMES: Array[String] = ["sprawled", "semi-upright", "erect", "columnar"]
 
 ## How far the drawn view is tilted off vertical, as screen pixels down per pixel
 ## of world height. Zero would be a true plan view; one would be a side-on
@@ -91,7 +105,6 @@ const TABLE: Array[Dictionary] = [
 		"feet_down": 2,
 		"coupling_gain": 1.0,
 		"step_height_gain": 1.0,
-		"stride_gain": 1.0,
 		"agility": 1.0,
 		"drive": 1.0,
 		"neck_reach": 0.10,
@@ -109,17 +122,52 @@ const TABLE: Array[Dictionary] = [
 		"feet_down": 2,
 		"coupling_gain": 1.15,
 		"step_height_gain": 1.35,
-		"stride_gain": 1.15,
 		"agility": 1.30,
 		"drive": 1.45,
 		"neck_reach": 0.16,
 	},
 	{
+		# Limbs under the body and swinging in the sagittal plane alone — the
+		# stance a long-striding runner stands in, and the one an animal that walks
+		# on two legs has to be in, because a limb rowing out to the side cannot
+		# carry a body that has nothing on the other end to counterbalance it.
+		#
+		# It is emphatically not a *bipedal* posture, and the distinction is the
+		# whole reason it is a stance rather than a species: nothing here says how
+		# many legs are on the ground. An Ostrich, a T. rex, a Horse and a Gazelle
+		# all stand like this, and what separates the first two from the second two
+		# is the length of their arms — see Locomotion.BEARING_RATIO. The row below
+		# is the same either way.
+		#
+		# `feet_down` is one, and on a four-legged build that is not carelessness:
+		# it is what lets an erect animal have two feet — or on the run, all four —
+		# off the ground at once, which is what a springing gait is made of.
+		"tilt_deg": 66.0,
+		# Sockets barely inboard. The limb is already directly beneath the shoulder
+		# at this tilt, and drawing the socket in as well would put the whole leg
+		# inside the silhouette on an animal that is defined by the length of its
+		# stride.
+		"socket_inset": 0.22,
+		"depth_ratio": 0.88,
+		# Almost nothing left in the back laterally. What flexion this stance has
+		# goes fore-and-aft — see Locomotion.bunch — and a body throwing itself side to
+		# side is a body wasting a stride it has already bought with its legs.
+		"wave_gain": 0.10,
+		"feet_down": 1,
+		"coupling_gain": 1.25,
+		"step_height_gain": 1.15,
+		"agility": 1.15,
+		"drive": 1.35,
+		"neck_reach": 0.24,
+	},
+	{
 		# Legs as pillars directly beneath the body, which is held a whole leg
-		# clear of the ground. Weight is the point: three feet stay down at all
-		# times, the diagonal beat is nearly gone — a heavy animal ambles, it does
-		# not trot — and what it gives up for that is the ability to turn or
-		# accelerate quickly.
+		# clear of the ground. Weight is the point: this stance prefers three feet
+		# down at all times, so what it gets is a four-beat amble rather than a
+		# trot — and what it gives up for that is the ability to turn or accelerate
+		# quickly. It does not *forbid* anything faster, and no longer needs to: an
+		# animal built like this is going slowly for its size whatever it does, so
+		# the walking regime is where its own proportions leave it.
 		"tilt_deg": 72.0,
 		# Less inset than the semi-upright stance, not more, and the reason is the
 		# view rather than the anatomy: a columnar body is drawn high enough that
@@ -133,7 +181,6 @@ const TABLE: Array[Dictionary] = [
 		"feet_down": 3,
 		"coupling_gain": 0.45,
 		"step_height_gain": 0.55,
-		"stride_gain": 0.95,
 		"agility": 0.55,
 		"drive": 0.55,
 		"neck_reach": 0.20,
@@ -150,10 +197,16 @@ var socket_inset: float = 0.0
 ## belongs to the posture and not to the silhouette.
 var depth_ratio: float = 0.6
 var wave_gain: float = 1.0
+## How many feet this stance prefers to keep on the floor. A *leaning* and no
+## longer a limit: how many may actually be off the ground at any instant is
+## Footfall's answer, because it is a question about how fast a body is going for
+## its size rather than about how it stands — the same erect build walks with
+## three feet down, runs with two and gallops with none, and a posture cannot say
+## all three. What it still does is set the base of the duty factor, which is
+## where weight leans on it. See Locomotion.duty.
 var feet_down: int = 2
 var coupling_gain: float = 1.0
 var step_height_gain: float = 1.0
-var stride_gain: float = 1.0
 var agility: float = 1.0
 var drive: float = 1.0
 ## How far the jaws can be carried from their resting height, as a fraction of
@@ -176,7 +229,6 @@ func configure(p_kind: int) -> void:
 	feet_down = int(row["feet_down"])
 	coupling_gain = float(row["coupling_gain"])
 	step_height_gain = float(row["step_height_gain"])
-	stride_gain = float(row["stride_gain"])
 	agility = float(row["agility"])
 	drive = float(row["drive"])
 	neck_reach = float(row["neck_reach"])
@@ -223,12 +275,6 @@ func drawn_reach(limb_length: float) -> float:
 	return limb_length * sqrt(flat * flat + up * up)
 
 
-## Most feet this posture will lift at once. A body that has to stay held up
-## picks fewer of them up.
-func airborne_limit() -> int:
-	return maxi(4 - feet_down, 1)
-
-
 func name() -> String:
 	return NAMES[kind]
 
@@ -239,3 +285,33 @@ func name() -> String:
 ## the whole of how height reads in a top-down picture.
 static func drop(h: float, reference: float) -> Vector2:
 	return Vector2(0.0, (reference - h) * PERSPECTIVE)
+
+
+## The same projection, for a body that is not level.
+##
+## `drop` answers for one height, which is all a body standing square on four
+## equal legs ever has. A body on four legs holding four different heights is
+## tipped, and a tip is not one offset — it is an offset that grows with how far
+## along and across the animal you have got. `pitch` and `roll` are those two
+## gradients, in world height per world pixel (see Gait), and a gradient through
+## this projection is a shear of the drawn body: exactly the same transform as
+## `drop`, with two more terms that vary over the animal instead of being constant
+## across it.
+##
+## So there is still no second renderer and no lean drawn on top of anything. A
+## nose-down animal is drawn nose-down because its front legs are holding it
+## lower than its back ones, in the same units and through the same constant as
+## everything else about its height.
+##
+## `centre` is the point the tip turns about — the middle of the four legs doing
+## the holding — and `fwd` is the animal's own axis, so both gradients mean the
+## same thing at any heading. `base` is whatever uniform displacement the body
+## already had, which is `drop` of its own reference plane.
+static func tip(centre: Vector2, fwd: Vector2, pitch: float, roll: float,
+		base: Vector2) -> Transform2D:
+	var perp := Vector2(-fwd.y, fwd.x)
+	var gradient: Vector2 = (fwd * pitch + perp * roll) * -PERSPECTIVE
+	return Transform2D(
+		Vector2(1.0, gradient.x),
+		Vector2(0.0, 1.0 + gradient.y),
+		base - Vector2(0.0, gradient.dot(centre)))

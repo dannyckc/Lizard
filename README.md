@@ -5,6 +5,11 @@ no animation clips: the head is dragged around by player input and *everything
 else* — spine curve, body silhouette, limb poses, footfalls — falls out of
 positional constraints and inverse kinematics solved fresh every physics tick.
 
+That extends to the gait itself. Nothing stores a trot, a pace, a gallop or a
+hop; what order the feet come down in is read off the animal's proportions, its
+mass, its back and how fast it is going *for its size*, so the same body walks,
+runs and gallops and two different bodies do not move alike. See **Gait**.
+
 ## Setup
 
 Requires **Godot 4.2 or newer** (developed and verified on 4.7.1). No addons, no
@@ -515,7 +520,7 @@ is decided by where the feet ended up rather than by anything declaring a climb.
 ### Posture
 
 Every creature used to be sprawled — flat on the floor with its legs out to the
-sides. There are three stances now, and they are one trait:
+sides. There are four stances now, and they are one trait:
 
 > **the angle the limbs are carried out of the ground plane.**
 
@@ -529,7 +534,16 @@ they are most of what a posture looks like:
 |---|---|---|---|---|---|---|
 | sprawled | 12° | 98% of the leg | 20% | 96% | 2 | undulates fully |
 | semi-upright | 50° | 64% | 77% | 41% | 2 | 30% |
+| erect | 66° | 41% | 91% | 17% | 1 | 10% |
 | columnar | 72° | 31% | 95% | 10% | 3 | 8% |
+
+What a posture deliberately does **not** decide is the gait. It used to decide
+rather too much of it — `feet_down` was a hard ceiling on how many feet could be
+in the air, so a stance chose once and for all between an amble and a trot and
+the same animal then moved identically at every speed it had. That is most of why
+every build in the game read as a scaled lizard. The column above is a *leaning*
+now; in what order the feet come down, and how many may be off the ground, are
+questions for the section after next.
 
 A third projection decides how the limb *travels*, and it is the same cosine
 taken out a second time. Coming up out of the ground plane and swinging round
@@ -550,10 +564,17 @@ and an Elephant's *inside* its own silhouette.
   a decision to stop drawing part of a leg; limbs are drawn *under* the body, so a
   shoulder inboard of the silhouette is a shoulder the animal is standing over.
   Strong acceleration and flat, quick turns.
-- **Columnar** — an Elephant. Legs as pillars, the body held nearly a whole leg
-  clear of the ground, three feet down at all times and the diagonal beat mostly
-  gone — a heavy animal ambles, it does not trot. It carves rather than turns, and
-  it cannot leave the ground at all: nothing forbids it, its `leap_height` is zero.
+- **Erect** — a Horse, a Cheetah, an Ostrich, a T. rex. Limbs under the body and
+  swinging in the sagittal plane alone: the longest stride available to a
+  terrestrial build, and the stance an animal that walks on two legs has to be in,
+  because a limb rowing out to the side cannot carry a body with nothing on the
+  other end to counterbalance it. It is emphatically **not** a bipedal posture —
+  nothing in it says how many legs are on the ground. See *Two legs is a
+  measurement* below.
+- **Columnar** — an Elephant. Legs as pillars, the body slung between them, and
+  weight the whole point: it prefers three feet down, so what it gets is a
+  four-beat amble rather than a trot. It carves rather than turns, and it cannot
+  leave the ground at all: nothing forbids it, its `leap_height` is zero.
 
 Two things do *not* come from the projection, and both would be wrong if they did.
 Limb thickness is priced off the bone rather than off its plan view, or a columnar
@@ -584,10 +605,18 @@ downstream of the same one angle.
 ### Gait
 
 Purely reactive, no timeline. Each foot has an ideal position derived from the
-body’s current pose; a planted foot stays nailed to the world until it drifts
-further than `stride_distance` from that ideal, then arcs to a spot slightly
-*ahead* and re-plants. Step frequency therefore falls out of speed for free, and
-an idle creature is genuinely still.
+body’s current pose; a planted foot stays nailed to the world until it drifts a
+**stride** from that ideal, then arcs to a spot slightly *ahead* and re-plants.
+Step frequency therefore falls out of speed for free, and an idle creature is
+genuinely still.
+
+A stride is not a parameter and cannot be one. It is the fore-and-aft travel that
+limb actually has — a foot is a point on a sphere of the leg's own radius about
+its socket, so how far it can move across the ground is a question about the leg's
+length, the angle it is carried at and how far the body is willing to sink while
+it passes over it. A stride longer than that travel is not a long stride but *no*
+stride at all: the envelope clamps the foot on its boundary, the distance trigger
+never fires, and the leg is towed for as long as the animal walks.
 
 #### A leg is solved from the foot up
 
@@ -653,12 +682,160 @@ one structure that spans the whole gap underneath an animal, so it is the only
 part of a tall one a low one can reach, and a body is pushed out of any leg whose
 band it shares. That is the pass a lizard meets on its way past an elephant.
 
-Diagonal pairs (front-left + rear-right, front-right + rear-left) share a beat,
-and a foot may never lift while the opposite diagonal is airborne — that is what
-keeps two feet down at all times. Candidates are sorted **most-overdue-first**,
-which is what keeps it fair: the gate only lets one pair through at a time, so
-with a fixed order the same pair wins every contest and the other pair gets
-dragged along the ground indefinitely.
+#### In what order the feet come down
+
+This is the part that used to be missing, and its absence is most of why every
+creature moved like a scaled lizard. The diagonal pairs were wired into the limb
+at construction — front-left with rear-right, front-right with rear-left — a foot
+could never lift while its opposite diagonal was airborne, and the only thing a
+posture could change was how far and how fast each of the four moved. Every build
+in the game trotted, at every speed it had. An Elephant was a Lizard with longer
+legs and a slower beat.
+
+A footfall pattern is **three numbers**, and every terrestrial gait is a point in
+them:
+
+- **girdle lag** — how far after the hind girdle the fore girdle follows. 0 is a
+  pace (the legs on one side move together), ¼ is the four-beat lateral-sequence
+  walk nearly every heavy quadruped uses, ½ is a trot.
+- **hind split** and **fore split** — how far apart the two limbs *within* a
+  girdle are. ½ is alternating; 0 is the pair working as one, which is a bound, a
+  gallop or a hop depending on what the other girdle is doing.
+
+| | girdle lag | hind split | fore split |
+|---|---|---|---|
+| lateral-sequence walk | ¼ | ½ | ½ |
+| trot | ½ | ½ | ½ |
+| pace | 0 | ½ | ½ |
+| transverse / rotary gallop | ~⅗ | small, signed | small, signed |
+| bound | ½ | ~0 | ~0 |
+| pronk | 0 | ~0 | ~0 |
+| two-legged stride | — | ½ | — |
+| hop | — | ~0 | — |
+
+Nothing in the simulation stores those names. They are what a phase measurement
+is called afterwards. What sets the three numbers is:
+
+- **Froude number** — `v² / g·h`, the one dimensionless statement of how fast an
+  animal is going *for its size*, where `h` is how high its hips are actually
+  being carried. A leg is a pendulum over a hip, so this is the ratio of the
+  body's kinetic energy to the work of vaulting over that leg — and it, alone,
+  decides whether a creature has to be standing at every instant or can be caught
+  mid-fall. It is why an Elephant cannot gallop however hard it tries: its hip is
+  a whole leg off the ground, so at the top speed its own mass allows it never
+  leaves the walking regime. Nothing forbade it.
+- **Whether the girdles can throw the body.** Two limbs working as one pair is a
+  launch, and a launch needs three things a body may or may not have: legs that
+  point along the animal rather than out beside it (`sin θ` of the posture's own
+  tilt), a back that folds (`max_bend_deg × segments`, against a body that could
+  curl into a ring), and the ability to leave the ground at all (`leap_height`,
+  already zero on the Elephant). They multiply, so failing any one is failing all
+  three — which is why a sprawled animal trots flat out instead of bounding
+  without any rule saying a sprawled creature may not.
+- **Whether the feet on one side would collide.** A hind foot swinging forward
+  past a planted forefoot on the same side is a real problem for long legs on a
+  short trunk, and moving that pair together is the way out of it. That is the
+  whole reason a Camel paces, and it is measured off the limbs — the girdle gap
+  against the travel the two feet have — rather than named.
+
+*Whether* an animal has an asymmetric gait is a property of its build; *how far
+into one* it is is its speed. The two are not multiplied, deliberately: a creature
+barely capable of bounding does not spend its life quarter-bounding — it trots
+until the speed is there and then commits, which is what animals do. A build
+between the two thresholds gets a half-bound, which is a real gait rather than an
+averaging artefact.
+
+The reactive rule underneath is untouched. A limb still only steps when it is
+*due* — when its foot has drifted a stride from its ideal — so step frequency
+still falls out of speed and an idle creature is still genuinely still. What
+changed is which of the due feet goes first: candidates are scored on how close
+lifting them *this tick* comes to the phase the pattern says they belong at,
+measured from whichever foot last left the ground, with overdue-ness as the
+tie-break rather than the rule. The pattern wins most contests because it has to
+be a pattern; it cannot win all of them, or a foot held off its beat by an
+obstacle would be towed forever. Both are one constant.
+
+Two derived rules replace what the hard-wired pairing used to do:
+
+- a foot may not lift while one belonging to a *different* beat is still in the
+  air — which is the same gate, with the opposition read off the pattern instead
+  of off which corner of the body a leg is on. In a trot the opposite limb is the
+  diagonal; in a pace it is the leg on the same side; in a bound it is the other
+  girdle.
+- when a foot lifts, anything that *shares* its beat and is anywhere near due is
+  pulled onto it. That one line is what makes a pair land together: a bound, a
+  pace and a pronk are all it firing on limbs the pattern has put in phase.
+
+How many feet may be off the ground at once comes off the same regime: one while
+the animal still has to be standing at every instant, two through any ordinary
+symmetrical gait, and all four only for a body going fast enough — and built well
+enough — to genuinely throw itself.
+
+#### Two legs is a measurement
+
+Nothing anywhere says a creature is bipedal. An arm shorter than roughly half the
+hind leg beside it cannot reach a floor its own shoulder is a whole leg above, so
+it is not put on the floor — and a body with two limbs it cannot stand on stands
+on the other two. Everything else is the rest of the simulation noticing: the
+shoulders are carried level over the hips by the back rather than by the
+forelimbs, the duty factor is quoted against two legs instead of four, the
+footfall pattern loses its fore girdle, and the arms hang folded against the chest
+because nothing is holding them out.
+
+A T. rex and a Kangaroo need no posture of their own for this, and a Gorilla —
+whose arms are *longer* than its legs — is emphatically not bipedal, because its
+knuckles reach the ground. The same collapse of the hind girdle that turns a
+Cheetah's gallop into a bound turns a Kangaroo's stride into a hop; there is one
+mechanism, and a body with only two legs on the floor makes it look like a
+different animal. Below its transition speed a Kangaroo goes back to alternating
+steps, which is right: one moving slowly does not hop either.
+
+#### The back is part of the gait
+
+A galloping animal's stride is longer than its legs reach, because the spine
+between its girdles folds and extends — the hind feet swing forward under the
+shoulders and the whole body stretches out again as they drive back. That is a
+real length change and it is drawn as one: the spine's *rest* segment length is
+shorter on the tick the animal is gathered, so the silhouette bunches, the tissue
+lattice goes with it, and the limb sockets are genuinely carried fore and aft by
+the back rather than by anything pretending to be one. Stride, step timing and
+landing prediction all follow for free, because they are already read off how fast
+each socket is travelling.
+
+What decides whether it happens is a measurement that tells the two regimes apart
+on its own: the hind pair's fore-and-aft foot offset less the fore pair's. Under
+any alternating gait the limbs of a pair are half a cycle apart, so it cancels and
+the back does not fold however hard the animal is working. Under a bound or a
+gallop the pair moves *together* and it swings across its whole range twice a
+stride. Nothing had to detect a gallop to make the spine flex in one.
+
+#### Weight transfer
+
+`Gait` reads the height off the feet per **corner**, not just per girdle, and the
+two differences between the four are the body's attitude: how far it is tipped
+nose to tail, and how far it is rolled flank to flank. Both are slopes — world
+height per world pixel, measured against the animal's own stance, so a
+narrow-tracked build genuinely rolls further for the same difference in how its
+two sides are held, which is exactly why a narrow-tracked build rolls.
+
+Nothing about it is animated:
+
+- a **pacing** animal has both legs of one side in the air at once, so that side
+  drops and the body rolls — the footfall pattern showing up in the picture rather
+  than a second system agreeing with it;
+- a **bounding** one has a whole girdle off the ground, so it pitches nose-up and
+  nose-down over the stride;
+- a **heavy** one walking a foot at a time leans onto the three that are down;
+- a **two-legged** one pitches from its hips alone, because that is the only
+  girdle it has anything under.
+
+It reaches the picture twice. Each socket rides at its *own* corner's height, so a
+shoulder on the side the animal has its weight over is carried higher and that leg
+is solved more extended than its partner — a fact about the limb rather than a
+lean drawn over one. And the drawn torso is sheared by the same two gradients
+through the same `PERSPECTIVE` constant everything else about height goes through:
+a gradient in a top-down projection *is* a shear, so it is one `Transform2D` and
+no extra geometry.
 
 #### Every limb keeps its own clock
 
@@ -1663,14 +1840,16 @@ The parameters worth reaching for first:
 | Stop it bending too far | `max_bend_deg` down (hard limit; 15–25° reads best) |
 | More / less body sway | `body_wave`, `wave_frequency`, `wave_speed` |
 | Silhouette | `head/chest/waist/hip/tail_tip_width`, `body_width` |
-| Longer stride, fewer steps | `stride_distance` up |
-| Snappier footfalls | `step_duration` down, `step_height` up |
-| Sprawled, semi-upright or columnar | `posture` — one trait; stance width, clearance, occlusion, undulation, support and turn character all follow |
+| Longer stride, fewer steps | none — stride is the travel the limb has, off `leg_length`, `posture` and how far the body will sink. See *Gait* |
+| Sprawled, semi-upright, erect or columnar | `posture` — one trait; stance width, clearance, occlusion, undulation and turn character all follow. It does *not* set the gait |
 | Sprawling vs. tucked legs *within* a stance | `stance_width`, `stance_reach`, `arm/leg_length` |
 | Taller, or reaching higher | `leg_length` up (the body rides on it), `neck_lift` up (the jaws do) |
 | Something that can jump | `leap_height` — a multiple of the animal's own standing height; 0 is a body that cannot leave the ground |
 | Something that can fly | `wing_lift` up from 0 — the only thing separating gliding and high flight from a leap |
-| Marching vs. loose legs | `diagonal_coupling` (1 = strict trot, 0 = independent) |
+| Marching vs. loose legs | `beat_coupling` (1 = a pair that lands as one, 0 = four independent legs). *Which* limbs share a beat is derived — see *Gait* |
+| Walks on two legs | `arm_length` under ~0.46 of `leg_length` — an arm that cannot reach the floor is carried, and nothing else is needed |
+| Gallops, bounds or hops | `leap_height` up, `max_bend_deg` up, an upright `posture` — all three, because a launch needs legs that point along the body, a back that folds and somewhere to push to |
+| Paces, and rolls doing it | long legs on a short trunk: `leg_length` up against `rear_limb_t - front_limb_t` |
 | Wider / tighter leg sweep | `limb_swing_deg`, `limb_max_reach` |
 | Jaws that close harder | `bite_damage` up — force at the jaws, not depth in the flesh; the teeth decide what it becomes |
 | Punctures instead of bruising | `tooth_sharpness` up and `tooth_count` down — less tooth on the flesh is more pressure through it |
@@ -1687,11 +1866,12 @@ The parameters worth reaching for first:
 
 Four couplings are easy to trip over:
 
-- **`body_wave` must stay well under `stride_distance`.** Sway wider than a
-  stride makes the feet chase the wobble instead of the direction of travel; the
-  legs on one diagonal end up permanently over threshold and starve the other
-  pair. Budget for peak sway landing a little under 3x `body_wave`, for the
-  accumulation reason described above.
+- **`body_wave` must stay well under the stride the legs have.** Sway wider than
+  a stride makes the feet chase the wobble instead of the direction of travel; the
+  legs on one beat end up permanently over threshold and starve the rest. Budget
+  for peak sway landing a little under 3x `body_wave`, for the accumulation reason
+  described above. The stance itself is squeezed first rather than the stride —
+  both are spent out of one disc — but the wave can still outrun both.
 - **Turn radius is `move_speed / turn_rate`, and wants to exceed body length**
   (`segment_count * segment_length`). Otherwise the creature carves a circle
   tighter than itself and coils into a hook. `turn_speed_falloff` is what buys
@@ -1817,9 +1997,10 @@ the other senses.
 
 ## Tests
 
-Seventeen headless checks cover controls, movement feel, simulation, rendering,
+Eighteen headless checks cover controls, movement feel, simulation, rendering,
 UI, combat, sight, smell, hearing, anatomy, feeding, the bodies in the habitat,
-the vertical axis, the three stances and getting past things:
+the vertical axis, the four stances, how the feet come down and getting past
+things:
 
 ```sh
 godot --headless --path . --script tests/ControlsTest.gd # input/head-look isolation
@@ -1835,7 +2016,8 @@ godot --headless --path . --script tests/RagdollTest.gd   # the dead body
 godot --headless --path . --script tests/AnatomyTest.gd   # structure -> function -> gait
 godot --headless --path . --script tests/FeedingTest.gd   # severed parts, carrying, eating
 godot --headless --path . --script tests/HeightTest.gd    # the vertical axis and what it gates
-godot --headless --path . --script tests/PostureTest.gd   # the three stances, from one angle
+godot --headless --path . --script tests/PostureTest.gd   # the four stances, from one angle
+godot --headless --path . --script tests/FootfallTest.gd  # what order the feet come down in
 godot --headless --path . --script tests/LocomotionTest.gd # legs solved from the foot up
 godot --headless --path . --script tests/VolumeTest.gd    # every cell in three axes
 godot --headless --path . --script tests/TraversalTest.gd # under, over, onto or stopped

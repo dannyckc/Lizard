@@ -137,12 +137,19 @@ func _draw() -> void:
 		return
 
 	var lift := Vector2(0.0, 5.0 * creature.size_scale)
-	# How far the whole animal is off the ground, as a screen offset. Zero on
-	# anything standing on it, which is nearly everything nearly always — and the
-	# only reason this is applied to the drawing rather than to the simulation is
-	# that the simulation is the ground plane. See Stature.
+	# How the whole animal sits above the ground, as a screen transform. Zero on
+	# anything standing level on the floor, which is nearly everything nearly
+	# always — and the only reason this is applied to the drawing rather than to
+	# the simulation is that the simulation is the ground plane. See Stature.
+	#
+	# Two parts and both are measurements. The translation is how far off the
+	# ground the body is; the shear is how far it is tipped, because four legs
+	# holding four different heights are a body that is nose-down or rolled onto
+	# one side. Neither is animated and neither is a lean — see Gait, which reads
+	# both off the feet.
 	var stature: Stature = creature.stature
-	var aloft: Vector2 = stature.drop(stature.reference + stature.elevation)
+	var aloft: Transform2D = _attitude(body, stature)
+	var carried: Vector2 = aloft * body.head.pos - body.head.pos
 	# Where the ground is, relative to the plane the torso is drawn on. A body
 	# lying on the floor casts its shadow under itself; one held a leg's length
 	# clear of it casts it well below, and the growing gap is the whole of how
@@ -155,7 +162,7 @@ func _draw() -> void:
 	for limb in creature.gait.limbs:
 		var limb_patch: TissueGrid.Patch = tissue.patch(limb.key)
 		if _build(limb_patch, 0, TissueGrid.LIMB_BONE_COLS) > 0:
-			_flush_flat(lift, COL_SHADOW_LIMB)
+			_flush_flat(Transform2D(0.0, lift), COL_SHADOW_LIMB)
 			_flush_at(aloft)
 			_draw_tissue_grain(limb_patch, 0, TissueGrid.LIMB_BONE_COLS, aloft)
 
@@ -163,16 +170,18 @@ func _draw() -> void:
 	# shadow from the reference without a sprite or a blur texture; they are the
 	# body's own mesh, so a hole in the creature is a hole in its shadow too.
 	if _build(torso, 0, TissueGrid.BODY_COLS) > 0:
-		_flush_flat(ground + Vector2(0.0, 12.0 * creature.size_scale), COL_SHADOW_FAR)
-		_flush_flat(ground + Vector2(0.0, 8.0 * creature.size_scale), COL_SHADOW_MID)
-		_flush_flat(ground + lift, COL_SHADOW_NEAR)
+		_flush_flat(Transform2D(0.0, ground + Vector2(0.0, 12.0 * creature.size_scale)), COL_SHADOW_FAR)
+		_flush_flat(Transform2D(0.0, ground + Vector2(0.0, 8.0 * creature.size_scale)), COL_SHADOW_MID)
+		_flush_flat(Transform2D(0.0, ground + lift), COL_SHADOW_NEAR)
 		_flush_at(aloft)
 	_draw_tissue_grain(torso, 0, TissueGrid.BODY_COLS, aloft)
 	# Under the eyes, so a lizard looking at you over its own open mouth still
 	# has eyes to look with. Both ride with the head, so both take the same lift
-	# off the ground the torso did.
-	_draw_jaws(body, aloft)
-	_draw_eyes(body, torso, aloft)
+	# off the ground the torso did — as a plain displacement rather than the whole
+	# transform, because both are drawn about the head and a shear evaluated at the
+	# point it is drawn about is a translation.
+	_draw_jaws(body, carried)
+	_draw_eyes(body, torso, carried)
 
 	# Feet, over the torso — same reason the limb bones went under it.
 	# A shadow is the one thing a stripped patch cannot suppress by being empty:
@@ -185,12 +194,36 @@ func _draw() -> void:
 	for limb in creature.gait.limbs:
 		var foot_patch: TissueGrid.Patch = tissue.patch(limb.key)
 		if _build(foot_patch, TissueGrid.LIMB_BONE_COLS, TissueGrid.LIMB_COLS) > 0:
-			_flush_flat(lift, COL_SHADOW_LIMB)
+			_flush_flat(Transform2D(0.0, lift), COL_SHADOW_LIMB)
 			_flush_at(aloft)
 			_draw_tissue_grain(foot_patch, TissueGrid.LIMB_BONE_COLS, TissueGrid.LIMB_COLS, aloft)
 
 	if debug:
 		_draw_debug()
+
+
+## Where and how this body is drawn: lifted by however far off the ground it is,
+## and sheared by however far it is tipped.
+##
+## The tip turns about the middle of the four legs holding it, because that is the
+## rectangle the heights were measured at the corners of — turn it about anything
+## else and a body that is merely nose-down comes out translated as well. The
+## animal's own axis is taken from the same four: shoulders to hips, which is the
+## one line on a creature that does not swing when it looks at something.
+func _attitude(body: BodyShape, stature: Stature) -> Transform2D:
+	var base: Vector2 = stature.drop(stature.reference + stature.elevation)
+	var gait: Gait = creature.gait
+	if gait == null or not gait.measured or body.anchors.size() < 4:
+		return Transform2D(0.0, base)
+	var fore: Vector2 = ((body.anchors["FL"] as Spine.Frame).pos
+		+ (body.anchors["FR"] as Spine.Frame).pos) * 0.5
+	var rear: Vector2 = ((body.anchors["RL"] as Spine.Frame).pos
+		+ (body.anchors["RR"] as Spine.Frame).pos) * 0.5
+	var axis: Vector2 = fore - rear
+	if axis.length_squared() < 0.0001:
+		return Transform2D(0.0, base)
+	return Posture.tip((fore + rear) * 0.5, axis.normalized(),
+		gait.pitch, gait.roll, base)
 
 
 # ------------------------------------------------------------------ body ----
@@ -421,24 +454,25 @@ func _flush() -> void:
 		get_canvas_item(), _mesh_indices, _mesh_points, _mesh_colors)
 
 
-## The same, lifted off the ground. Zero on anything standing on it, so a
-## grounded creature goes down through the identical path it always did.
-func _flush_at(offset: Vector2) -> void:
-	if offset == Vector2.ZERO:
+## The same, lifted off the ground and tipped onto whatever its legs are holding
+## it at. The identity on anything standing level on the floor, so a grounded
+## creature goes down through the same path it always did.
+func _flush_at(at: Transform2D) -> void:
+	if at == Transform2D.IDENTITY:
 		_flush()
 		return
-	draw_set_transform(offset, 0.0, Vector2.ONE)
+	draw_set_transform_matrix(at)
 	_flush()
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	draw_set_transform_matrix(Transform2D.IDENTITY)
 
 
-## Issues the built mesh again, offset and in one flat colour — a shadow.
-func _flush_flat(offset: Vector2, color: Color) -> void:
+## Issues the built mesh again, displaced and in one flat colour — a shadow.
+func _flush_flat(at: Transform2D, color: Color) -> void:
 	_flat[0] = color
-	draw_set_transform(offset, 0.0, Vector2.ONE)
+	draw_set_transform_matrix(at)
 	RenderingServer.canvas_item_add_triangle_array(
 		get_canvas_item(), _mesh_indices, _mesh_points, _flat)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	draw_set_transform_matrix(Transform2D.IDENTITY)
 
 
 ## The colour of whatever layer is now uppermost in a cell.
@@ -512,7 +546,7 @@ static func tissue_color(hp: PackedFloat32Array, base: int, fat_capacity: float,
 ## one continuous membrane through sparse longitudinal tension lines, while a
 ## revealed muscle cell carries several close fibres along the anatomy's grain.
 func _draw_tissue_grain(patch: TissueGrid.Patch, from_col: int, to_col: int,
-		offset: Vector2 = Vector2.ZERO) -> void:
+		at: Transform2D = Transform2D.IDENTITY) -> void:
 	if patch == null or not patch.live:
 		return
 	_skin_lines.resize(0)
@@ -544,14 +578,14 @@ func _draw_tissue_grain(patch: TissueGrid.Patch, from_col: int, to_col: int,
 				_muscle_lines.append(_quad[3].lerp(_quad[2], across))
 	if _skin_lines.is_empty() and _muscle_lines.is_empty():
 		return
-	if offset != Vector2.ZERO:
-		draw_set_transform(offset, 0.0, Vector2.ONE)
+	if at != Transform2D.IDENTITY:
+		draw_set_transform_matrix(at)
 	if not _skin_lines.is_empty():
 		draw_multiline(_skin_lines, COL_SKIN_TENSION, 0.75, true)
 	if not _muscle_lines.is_empty():
 		draw_multiline(_muscle_lines, COL_MUSCLE_FIBRE, 0.9, true)
-	if offset != Vector2.ZERO:
-		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	if at != Transform2D.IDENTITY:
+		draw_set_transform_matrix(Transform2D.IDENTITY)
 
 
 # ----------------------------------------------------------------- debug ----

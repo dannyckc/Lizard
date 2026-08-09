@@ -49,12 +49,18 @@ extends Resource
 # -------------------------------------------------------------- posture ----
 @export_group("Posture")
 ## How this animal holds its legs under it: 0 sprawled, 1 semi-upright, 2
-## columnar. See Posture — one trait, and the stance width, the body clearance,
-## how much of the upper limb the torso stands over, how much the spine
-## undulates, how many feet stay down and how readily the animal turns all come
-## out of it. It is an anatomical category, not a tuning group: two creatures
+## columnar, 3 erect. See Posture — one trait, and the stance width, the body
+## clearance, how much of the upper limb the torso stands over, how much the
+## spine undulates, how many feet stay down and how readily the animal turns all
+## come out of it. It is an anatomical category, not a tuning group: two creatures
 ## with the same numbers and different postures are different animals.
-@export_range(0, 2, 1) var posture: int = Posture.SPRAWLED
+##
+## Note that it does not say how many legs the animal walks on. Whether the
+## forelimbs reach the ground is a question about how long they are, and it is
+## answered in Locomotion off `arm_length` against `leg_length` — so an erect
+## build with long arms is a fast quadruped and a semi-upright one with vestigial
+## arms is bipedal, and neither needed a category of its own.
+@export_range(0, 3, 1) var posture: int = Posture.SPRAWLED
 
 # --------------------------------------------------------------- height ----
 @export_group("Height")
@@ -109,8 +115,11 @@ extends Resource
 # an animal places its feet, and how tightly it keeps its diagonals together.
 ## How far ahead of the body feet aim while moving (fraction of stride).
 @export_range(0.0, 1.5, 0.01) var foot_lead: float = 0.45
-## How eagerly the diagonal partner joins the same beat. 0 = independent legs.
-@export_range(0.0, 1.0, 0.01) var diagonal_coupling: float = 0.55
+## How eagerly a limb joins a beat one of its partners has just started. Which
+## limbs share a beat is not a setting — see Footfall, where it falls out of the
+## body's proportions and how fast it is going — so this is only how tightly they
+## keep to it. 1 is a pair that lands as one; 0 is four independent legs.
+@export_range(0.0, 1.0, 0.01) var beat_coupling: float = 0.55
 ## Fore/aft placement of the rest stance (+ forward, - backward).
 @export_range(-1.0, 1.0, 0.01) var front_foot_bias: float = 0.30
 @export_range(-1.0, 1.0, 0.01) var rear_foot_bias: float = -0.25
@@ -247,7 +256,7 @@ const SCHEMA: Array = [
 	{"prop": "rear_limb_t", "label": "Hip pos", "min": 0.2, "max": 0.9, "step": 0.01},
 
 	{"group": "Posture"},
-	{"prop": "posture", "label": "Stance (0/1/2)", "min": 0.0, "max": 2.0, "step": 1.0},
+	{"prop": "posture", "label": "Stance (0-3)", "min": 0.0, "max": 3.0, "step": 1.0},
 
 	{"group": "Height"},
 	{"prop": "neck_lift", "label": "Neck lift", "min": 0.0, "max": 0.6, "step": 0.01},
@@ -265,7 +274,7 @@ const SCHEMA: Array = [
 
 	{"group": "Gait"},
 	{"prop": "foot_lead", "label": "Foot lead", "min": 0.0, "max": 1.5, "step": 0.01},
-	{"prop": "diagonal_coupling", "label": "Diagonal coupling", "min": 0.0, "max": 1.0, "step": 0.01},
+	{"prop": "beat_coupling", "label": "Beat coupling", "min": 0.0, "max": 1.0, "step": 0.01},
 	{"prop": "front_foot_bias", "label": "Front foot bias", "min": -1.0, "max": 1.0, "step": 0.01},
 	{"prop": "rear_foot_bias", "label": "Rear foot bias", "min": -1.0, "max": 1.0, "step": 0.01},
 
@@ -371,16 +380,29 @@ const PRESETS: Dictionary = {
 	# forbids it, its `leap_height` is simply zero.
 	"Elephant": {
 		"posture": Posture.COLUMNAR,
-		"segment_count": 16, "segment_length": 20.0, "max_bend_deg": 10.0,
+		"segment_count": 16, "segment_length": 19.0, "max_bend_deg": 10.0,
 		"spine_stiffness": 0.95, "spine_damping": 0.50, "body_wave": 3.0,
-		"head_width": 26.0, "chest_width": 38.0, "waist_width": 34.0,
-		"hip_width": 36.0, "tail_tip_width": 2.0,
-		"front_limb_t": 0.20, "rear_limb_t": 0.52,
-		# Legs longer than the animal is wide, and held nearly vertical: the
-		# clearance is most of the leg and the plan-view reach is under a third of
-		# it, which is what makes the feet land close underneath the body.
-		"arm_length": 126.0, "leg_length": 132.0,
-		"stance_width": 0.75, "stance_reach": 0.95,
+		"head_width": 24.0, "chest_width": 32.0, "waist_width": 29.0,
+		"hip_width": 31.0, "tail_tip_width": 2.0,
+		"front_limb_t": 0.22, "rear_limb_t": 0.54,
+		# Held nearly vertical, so the clearance is most of the leg and the
+		# plan-view reach is under a third of it — which is what makes the feet land
+		# close underneath the body.
+		#
+		# The length is against the *trunk*, and that is the correction: at 132 px
+		# on a 300 px body these were legs four tenths of the animal long, standing
+		# it a third higher off the ground than it was deep through the chest. What
+		# that draws is an elephant-coloured animal on stilts. A heavy quadruped's
+		# belly clearance is about its own depth — it is a body slung between its
+		# legs, not perched on them — and at 82 px under a 67 px-deep chest this one
+		# now is. Nothing else in the file had to move: the height, the bands, what
+		# can walk under it and what its trunk can reach are all read off the legs.
+		"arm_length": 86.0, "leg_length": 90.0,
+		# ...and not locked out. `stance_reach` at 0.95 was a leg standing at the
+		# very limit of its own envelope, which is a leg with nothing left to walk
+		# with — see Locomotion.EXTENSION_MARGIN, which was quietly capping it
+		# anyway. A standing animal's legs are bent.
+		"stance_width": 0.75, "stance_reach": 0.86,
 		# ...and no acceleration or turn rate here either, for the opposite reason:
 		# nothing needed to say this animal is slow off the mark. It is twenty-three
 		# times the Lizard's weight and its muscle only grew with the square of
@@ -390,14 +412,150 @@ const PRESETS: Dictionary = {
 		"turn_speed_falloff": 0.70,
 		"turn_responsiveness": 5.0, "turn_pivot": 110.0,
 		"sprint_multiplier": 1.30, "reverse_speed_factor": 0.40,
-		"density": 1.9, "muscle_power": 1.3, "jaw_power": 5.0, "fat_reserve": 1.6,
-		"bite_damage": 2.8, "bite_reach": 34.0, "bite_radius": 24.0,
+		"density": 2.9, "muscle_power": 1.3, "jaw_power": 5.5, "fat_reserve": 1.6,
+		"bite_damage": 2.8, "bite_reach": 34.0, "bite_radius": 22.0,
 		"bite_cooldown": 0.70, "chew_interval": 0.60,
 		"neck_lift": 0.14, "leap_height": 0.0,
 		# Broad flat molars. The bluntest mouth here: it spreads a very large bite
 		# over a very large area, so it crushes and grinds where the Cat opens.
 		"tooth_count": 6, "tooth_size": 0.16, "tooth_sharpness": 0.15,
 		"jaw_gape_deg": 46.0, "tooth_variation": 0.14,
+	},
+
+	# --- and four builds that exist to show the range -------------------------
+	# None of the four below carries a gait, a footfall order or an animation.
+	# They are bones, weights and angles, exactly as the three above are, and what
+	# comes out of them is a pace, a rotary gallop, a two-legged stride and a hop —
+	# because those are what bodies of those proportions do. The interesting thing
+	# about each is which single number is responsible, and that is what the
+	# comments say.
+
+	# Erect, long-legged, short-bodied. The legs are so long against the gap
+	# between the girdles that a hind foot swinging forward arrives where the
+	# forefoot on the same side is standing — and the way out of that is to move
+	# the pair together, which is a pace. It is the one build in the file whose
+	# footfall pattern is decided by neither speed nor spring but by the plain
+	# geometry of not treading on itself, and the number doing it is
+	# `rear_limb_t - front_limb_t` against `leg_length`.
+	#
+	# Everything else here is a browser: a long neck, a great deal of stored fat,
+	# grinding teeth, and no leap worth the name — which keeps it out of the
+	# asymmetric regime however fast it is pushed, so the roll never turns into a
+	# bound.
+	"Camel": {
+		"posture": Posture.ERECT,
+		"segment_count": 13, "segment_length": 17.0, "max_bend_deg": 14.0,
+		"spine_stiffness": 0.93, "spine_damping": 0.55, "body_wave": 3.5,
+		"wave_frequency": 0.7, "wave_speed": 1.3,
+		"head_width": 8.0, "chest_width": 17.0, "waist_width": 15.0,
+		"hip_width": 16.0, "tail_tip_width": 1.2,
+		"front_limb_t": 0.26, "rear_limb_t": 0.48,
+		"arm_length": 76.0, "leg_length": 78.0,
+		"stance_width": 0.80, "stance_reach": 0.84,
+		"move_speed": 190.0,
+		"turn_speed_falloff": 0.60, "turn_responsiveness": 7.0, "turn_pivot": 70.0,
+		"sprint_multiplier": 1.50, "reverse_speed_factor": 0.50,
+		"density": 1.2, "muscle_power": 1.1, "jaw_power": 1.4, "fat_reserve": 2.2,
+		"bite_damage": 1.8, "bite_reach": 30.0, "bite_radius": 10.0,
+		"bite_cooldown": 0.60, "chew_interval": 0.55,
+		"neck_lift": 0.30, "leap_height": 0.25,
+		"tooth_count": 8, "tooth_size": 0.14, "tooth_sharpness": 0.20,
+		"jaw_gape_deg": 50.0, "tooth_variation": 0.16,
+	},
+
+	# The same erect stance with the opposite emphasis: a back that folds twice as
+	# far as anything else here, legs that can throw the whole animal three times
+	# its own height, and almost no weight to throw. Those three are what make a
+	# gallop available at all — see Footfall.launch — and speed is what makes it
+	# happen, so this build walks, trots and then commits to a suspended,
+	# spine-driven bound as it comes up through its own Froude number.
+	"Cheetah": {
+		"posture": Posture.ERECT,
+		"segment_count": 14, "segment_length": 15.0, "max_bend_deg": 34.0,
+		"spine_stiffness": 0.80, "spine_damping": 0.70, "body_wave": 4.0,
+		"wave_frequency": 0.9, "wave_speed": 2.2,
+		"head_width": 9.0, "chest_width": 14.0, "waist_width": 9.0,
+		"hip_width": 13.0, "tail_tip_width": 1.4,
+		"front_limb_t": 0.16, "rear_limb_t": 0.52,
+		"arm_length": 52.0, "leg_length": 58.0,
+		"stance_width": 0.70, "stance_reach": 0.84,
+		"move_speed": 420.0,
+		"turn_speed_falloff": 0.50, "turn_responsiveness": 13.0, "turn_pivot": 44.0,
+		"sprint_multiplier": 2.00, "reverse_speed_factor": 0.45,
+		"density": 0.85, "muscle_power": 2.0, "jaw_power": 1.0, "fat_reserve": 0.4,
+		"bite_damage": 2.2, "bite_reach": 34.0, "bite_radius": 12.0,
+		"bite_cooldown": 0.30, "chew_interval": 0.38,
+		"neck_lift": 0.08, "leap_height": 3.0,
+		"tooth_count": 8, "tooth_size": 0.28, "tooth_sharpness": 0.90,
+		"jaw_gape_deg": 54.0, "tooth_variation": 0.18,
+	},
+
+	# Two legs, and nothing anywhere says so. `arm_length` is a fifth of
+	# `leg_length`, so an arm cannot reach a floor its own shoulder is a whole hind
+	# leg above — see Locomotion.BEARING_RATIO — and a body with two limbs it
+	# cannot stand on stands on the other two. Everything that follows is the rest
+	# of the simulation noticing: the shoulders are carried level over the hips by
+	# the back instead of by the forelimbs, the duty factor is quoted against two
+	# legs rather than four, the footfall pattern loses its fore girdle, and the
+	# arms are held folded against the chest because nothing is holding them out.
+	#
+	# The heavy head and the long deep tail are the counterweight that makes it
+	# possible, and they are ordinary silhouette numbers doing it: mass is read off
+	# the drawn body, so a tail is genuinely weight behind the hips.
+	"T. rex": {
+		"posture": Posture.ERECT,
+		"segment_count": 15, "segment_length": 18.0, "max_bend_deg": 12.0,
+		"spine_stiffness": 0.93, "spine_damping": 0.55, "body_wave": 2.5,
+		"wave_frequency": 0.7, "wave_speed": 1.4,
+		"head_width": 17.0, "chest_width": 19.0, "waist_width": 15.0,
+		"hip_width": 20.0, "tail_tip_width": 1.5,
+		"front_limb_t": 0.20, "rear_limb_t": 0.46,
+		"arm_length": 16.0, "leg_length": 86.0,
+		# Narrow, but not on the midline. A two-legged animal tracks close to its
+		# own centreline and cannot track *through* it: the feet have to stay either
+		# side of the body they are carrying, and a leg this near vertical has very
+		# little fold plane left to keep its knee outboard with.
+		"stance_width": 0.72, "stance_reach": 0.86,
+		"move_speed": 210.0,
+		"turn_speed_falloff": 0.60, "turn_responsiveness": 7.0, "turn_pivot": 90.0,
+		"sprint_multiplier": 1.35, "reverse_speed_factor": 0.45,
+		"density": 1.5, "muscle_power": 1.5, "jaw_power": 7.0, "fat_reserve": 0.9,
+		"bite_damage": 4.0, "bite_reach": 40.0, "bite_radius": 20.0,
+		"bite_cooldown": 0.60, "chew_interval": 0.55,
+		"neck_lift": 0.16, "leap_height": 0.30,
+		"tooth_count": 11, "tooth_size": 0.30, "tooth_sharpness": 0.70,
+		"jaw_gape_deg": 62.0, "tooth_variation": 0.22,
+	},
+
+	# The same two-legged arithmetic with the spring turned all the way up. Arms a
+	# third of the legs, so it is bipedal for exactly the reason the T. rex is —
+	# and a `leap_height` of three and a half body-heights, so the moment it is
+	# going fast enough for its size the two hind limbs stop alternating and land
+	# together. That is a hop, and it is the same collapse of `hind_split` that
+	# turns a Cheetah's gallop into a bound; there is one mechanism, and a body
+	# with only two legs on the ground makes it look like a different animal.
+	#
+	# Below the transition it goes back to alternating steps, which is right: a
+	# kangaroo moving slowly does not hop either.
+	"Kangaroo": {
+		"posture": Posture.ERECT,
+		"segment_count": 12, "segment_length": 16.0, "max_bend_deg": 20.0,
+		"spine_stiffness": 0.88, "spine_damping": 0.62, "body_wave": 2.0,
+		"wave_frequency": 0.8, "wave_speed": 1.6,
+		"head_width": 7.0, "chest_width": 13.0, "waist_width": 11.0,
+		"hip_width": 16.0, "tail_tip_width": 2.5,
+		"front_limb_t": 0.20, "rear_limb_t": 0.44,
+		"arm_length": 22.0, "leg_length": 62.0,
+		"stance_width": 0.50, "stance_reach": 0.80,
+		"move_speed": 300.0,
+		"turn_speed_falloff": 0.55, "turn_responsiveness": 9.0, "turn_pivot": 60.0,
+		"sprint_multiplier": 1.60, "reverse_speed_factor": 0.40,
+		"density": 0.9, "muscle_power": 2.2, "jaw_power": 0.8, "fat_reserve": 0.8,
+		"bite_damage": 1.6, "bite_reach": 26.0, "bite_radius": 9.0,
+		"bite_cooldown": 0.50, "chew_interval": 0.45,
+		"neck_lift": 0.12, "leap_height": 3.50,
+		"tooth_count": 8, "tooth_size": 0.12, "tooth_sharpness": 0.15,
+		"jaw_gape_deg": 44.0, "tooth_variation": 0.14,
 	},
 }
 

@@ -238,28 +238,48 @@ func _sway(player: Creature, preset: String) -> float:
 	return hi - lo
 
 
-## Weight support. A body held a whole leg off the ground keeps three feet under
-## it; one lying close to the floor can throw itself between diagonals. It is the
-## posture's one hard rule and the reason a heavy stance reads as deliberate.
+## Weight support, which is no longer the posture's to decide — and this check is
+## here to say so.
+##
+## It used to be. `feet_down` was a hard ceiling on how many feet could be off the
+## ground, so a stance chose once and for all between an amble and a trot, and the
+## same creature moved identically at every speed it had. That is most of why every
+## build in the game read as a scaled lizard, and it is now Footfall's answer:
+## whether a body may be caught mid-fall is a question about how fast it is going
+## *for its size*, and whether it can throw itself clear of the ground at all is a
+## question about its legs, its back and whether it can leap.
+##
+## So the claim reverses. One creature, two speeds, and the number has to change;
+## and a build that cannot leave the ground may not reach a suspension however
+## fast it is driven.
 func _check_support(player: Creature) -> void:
-	var aloft: Array[int] = []
-	for preset in ["Lizard", "Cat", "Elephant"]:
-		aloft.append(_max_feet_up(player, preset))
-	_check(aloft[0] == 2 and aloft[1] == 2,
-		"a sprawled or semi-upright creature stopped trotting (%d, %d feet up)"
-			% [aloft[0], aloft[1]])
-	_check(aloft[2] == 1,
-		"a columnar creature lifted %d feet at once — it is trotting, not ambling" % aloft[2])
+	var strolling: int = _max_feet_up(player, "Cat", 0.3)
+	var running: int = _max_feet_up(player, "Cat", 1.0)
+	_check(strolling < running,
+		"a Cat lifted as many feet strolling as it did at a flat run (%d, %d) — the gait is not changing with speed"
+			% [strolling, running])
+	_check(strolling <= 2,
+		"a strolling Cat had %d feet off the ground at once" % strolling)
+
+	# The Elephant is the control, and its `leap_height` of zero is the whole of
+	# why: an animal with no way to push itself off the floor has no asymmetric
+	# gait to reach, so speed buys it nothing but a quicker amble. Nothing forbids
+	# it — there is no rule about columnar builds anywhere in the solver.
+	_check(_max_feet_up(player, "Elephant", 1.0) == 1,
+		"an Elephant lifted more than one foot at a time — it is trotting, not ambling")
 
 
-func _max_feet_up(player: Creature, preset: String) -> int:
+func _max_feet_up(player: Creature, preset: String, throttle: float) -> int:
 	_apply(player, preset)
 	var drive := MovementInput.Command.new()
-	drive.throttle = 1.0
+	drive.throttle = throttle
+	drive.sprint = throttle > 0.9
 	var worst: int = 0
-	for _tick in 300:
+	for tick in 420:
 		player.command = drive
 		player._physics_process(TICK)
+		if tick < 120:
+			continue
 		var up: int = 0
 		for limb in player.gait.limbs:
 			if limb.stepping:

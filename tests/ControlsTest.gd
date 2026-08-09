@@ -213,7 +213,10 @@ func _run_aimed_route(facing: float, aim_offset: float) -> Dictionary:
 
 
 func _check_pose_invariants(creature: Creature, label: String) -> void:
-	var seg_len: float = creature.params.segment_length * creature.size_scale
+	# The rest length the spine is actually being solved to — see
+	# Creature.segment_rest. Identical to the parameter on anything that is not
+	# folding its back, which is every creature this file drives.
+	var seg_len: float = creature.segment_rest()
 	var max_bend: float = deg_to_rad(creature.params.max_bend_deg)
 	for i in range(1, creature.spine.size()):
 		var actual: float = creature.spine.points[i - 1].distance_to(creature.spine.points[i])

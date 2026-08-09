@@ -40,6 +40,12 @@ func _run_checks() -> void:
 	# its mark; the carcass's own behaviour is RagdollTest's subject.
 	_check(not target.alive, "the habitat's body was not placed as a carcass")
 	target.alive = true
+	# ...and an empty floor to have the contest on. The habitat scatters things to
+	# climb over, and every fixture below is two animals walking up to each other
+	# on ground the measurement assumes is flat: a rock between them is a refused
+	# strike for a reason that has nothing to do with jaws. Terrain is checked
+	# where it belongs, in TraversalTest.
+	main.terrain.clear()
 	target.reset(target.spawn_position, target.spawn_heading)
 
 	_check(target.head_pos.is_equal_approx(Vector2(360.0, 0.0)),
@@ -298,12 +304,21 @@ func _check_grip(player: Creature, target: Creature) -> void:
 			"a hold that survived reported itself already failed (%.2f strain)"
 				% player.grip.strain())
 	# What it does not get to do is stay clean. Jaws that keep hold keep chewing
-	# the flesh they are on, and the tally is on the limb rather than on the body:
-	# the Cat never reached the body, and the vertical layer is why.
+	# the flesh they are on.
 	_check(target.anatomy.tissue.integrity() < 1.0,
 		"a hold on a leg left the animal it was attached to untouched")
-	_check(target.anatomy.tissue.patch(TissueGrid.BODY_KEY).gone_count == 0,
-		"a Cat that can only reach an Elephant's legs opened a hole in its body")
+	# ...and what it reaches is still decided by height and nothing else. The claim
+	# used to be that a Cat could not touch an Elephant's body at all, and that was
+	# an artefact of an Elephant built on stilts: its belly stood higher than a
+	# Cat's jaws went because its legs were four tenths of its own length. Given
+	# the proportions of an animal, its underside is exactly where a Cat can get
+	# at it — which is what a small predator does to a large one — and the thing
+	# that stays out of reach is its back, a whole body-depth higher again. That is
+	# the honest version of the same mechanic, and it is a band rather than a wall.
+	_check(not Stature.overlaps(player.stature.bite,
+			Vector2(target.stature.torso.y - 4.0, target.stature.torso.y)),
+		"a Cat's jaws reached the top of an Elephant's back (%s against %s)"
+			% [Volume.describe(player.stature.bite), Volume.describe(target.stature.torso)])
 
 	# Depth is what is left of the jaws' force after holding on, so the same bite
 	# cuts deeper into something that has stopped fighting.
@@ -333,6 +348,14 @@ func _check_grip(player: Creature, target: Creature) -> void:
 func _hold(biter: Creature, victim: Creature, biter_name: String, victim_name: String,
 		mode: String, seconds: float, at_leg: bool = false) -> float:
 	biter.set_bite_held(false)
+	# Both of them on their feet. Every fixture here is a contest between two
+	# living creatures, and a victim the previous fixture chewed to a standstill is
+	# a carcass: it has no gait, so its legs are wherever the ragdoll left them
+	# splayed, and the biter walks up to a leg that is not being stood on. Saying
+	# so is the fixture's job — whether an animal dies of what it has been through
+	# is exactly what the checks above are for.
+	biter.alive = true
+	victim.alive = true
 	biter.params.apply_preset(biter_name)
 	victim.params.apply_preset(victim_name)
 	biter.reset(Vector2.ZERO, 0.0)
@@ -359,8 +382,17 @@ func _hold(biter: Creature, victim: Creature, biter_name: String, victim_name: S
 		# the animal closes the last of it on its own feet — which is both what a
 		# predator does and the only stand-off that is guaranteed to be the one the
 		# contact pass will actually allow.
+		#
+		# Off where the foot *is* rather than where it is drawn. A tall animal's
+		# leg is projected a long way down the screen from the ground it stands
+		# on — far enough that a columnar build's drawn forefoot lands on its own
+		# midline — so a stand-off computed from the picture puts the biter inside
+		# the body it was trying to stand beside, and the contact pass then throws
+		# it clear and it walks off in whatever direction it was left pointing.
+		# Approaching is a manoeuvre on the ground plane; the projection has no
+		# business in it.
 		for _pass in 2:
-			var foot: Vector2 = victim.gait.limbs[0].joints[2]
+			var foot: Vector2 = victim.gait.limbs[0].plan[2]
 			var away: Vector2 = (foot - victim.head_pos).normalized()
 			var stand: Vector2 = foot + away * 44.0
 			biter.reset(stand, (foot - stand).angle())
@@ -375,7 +407,7 @@ func _hold(biter: Creature, victim: Creature, biter_name: String, victim_name: S
 		var close := MovementInput.Command.new()
 		close.throttle = 1.0
 		for _i in 60:
-			var foot: Vector2 = victim.gait.limbs[0].joints[2]
+			var foot: Vector2 = victim.gait.limbs[0].plan[2]
 			if biter.head_pos.distance_to(foot) <= biter.params.bite_reach * biter.size_scale:
 				break
 			biter.command = close
@@ -383,11 +415,36 @@ func _hold(biter: Creature, victim: Creature, biter_name: String, victim_name: S
 			victim._physics_process(TICK)
 		biter.command = MovementInput.Command.new()
 
+	# Pointed at the leg before striking at it, because a strike goes where the
+	# head is looking and the leg has been moving the whole way in: the gait routes
+	# a limb around whatever has just walked up beside it, so by the time the biter
+	# has closed the last of the distance the foot is somewhere else — as much as
+	# its own adduction limit inboard, which on a columnar build is most of the way
+	# to the animal's midline. A fixed aim point out in the world was scaffolding
+	# that happened to line up with where a leg used to stand.
+	if at_leg:
+		var leg: Limb = victim.gait.limbs[0]
+		var mark := Reticle.Pick.new()
+		mark.at = leg.plan[2]
+		mark.band = victim.anatomy.tissue.limb_band(leg.key, 2)
+		biter.aim_at(mark)
+		for _i in 12:
+			biter._physics_process(TICK)
+			victim._physics_process(TICK)
+		mark.at = leg.plan[2]
+
 	biter.set_bite_held(true)
-	biter.request_bite(Vector2(200.0, 0.0))
-	for _i in 20:
+	biter.request_bite(victim.gait.limbs[0].plan[2] if at_leg
+		else Vector2(200.0, 0.0))
+	# Long enough for the whole strike, not for most of it. A lunge is a wind-up,
+	# a throw and a closing, and a heavy-jawed animal's takes longer than a quick
+	# one's — twenty ticks is inside the window for the pairs that square up nose
+	# to nose and short of it for one that has had to walk round a leg first.
+	for _i in 45:
 		biter._physics_process(TICK)
 		victim._physics_process(TICK)
+		if biter.grip != null:
+			break
 	if biter.grip == null:
 		failures.append("%s never got hold of %s to begin with" % [biter_name, victim_name])
 		return 0.0
