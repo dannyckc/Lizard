@@ -16,6 +16,9 @@
 ## that would be easy to get wrong by taking the projection too literally — an
 ## upright leg is stout rather than spindly, and every stance has to be able to
 ## walk at all.
+##
+## How a limb *travels* rather than how it stands is LocomotionTest's, and so is
+## the vertical solve that puts the foot on the floor underneath it.
 extends SceneTree
 
 const TICK: float = 1.0 / 60.0
@@ -105,14 +108,24 @@ func _check_trait_is_the_only_difference(player: Creature) -> void:
 ##
 ## Two things have to be true at once and they pull against each other: the upper
 ## limb has to disappear under the body — that is what an upright shoulder *is* —
-## while the foot still has to come out past the silhouette, because a leg you
-## cannot see is a leg the animal does not appear to have.
+## while the animal still has to visibly have legs, because a leg you cannot see
+## is a leg it does not appear to have.
+##
+## What resolves them is that they are answered in different views. Seen from
+## *above*, an upright animal's feet come inside its own flanks and that is the
+## stance working: the legs are under the body because they are pillars under a
+## body. Seen on the *screen* they are still clear of it, because the feet are on
+## the floor and the floor is drawn below a torso held a leg's length off it. So
+## the plan view is asked whether the stance is upright, and the drawn view is
+## asked whether you can see it — and the second is exactly the 2.5D projection
+## rather than a second stance-width dial.
 func _check_stance_width(player: Creature) -> void:
 	var lines: Array[String] = []
 	for preset in ["Lizard", "Cat", "Elephant"]:
 		_apply(player, preset)
 		var socket_out: float = 0.0
 		var foot_out: float = 0.0
+		var drawn_clear: float = -INF
 		var flank: float = 0.0
 		for limb in player.gait.limbs:
 			var a: Spine.Frame = player.body.anchors[limb.key]
@@ -120,17 +133,47 @@ func _check_stance_width(player: Creature) -> void:
 			var axis: Vector2 = player.spine.points[station]
 			var perp: Vector2 = player.spine.perps[station]
 			socket_out = maxf(socket_out, absf((a.pos - axis).dot(perp)))
-			foot_out = maxf(foot_out, absf((limb.joints[2] - axis).dot(perp)))
+			foot_out = maxf(foot_out, absf((limb.plan[2] - axis).dot(perp)))
+			# The drawn body is registered to its own reference plane, so what a
+			# foot has to clear on screen is the silhouette at that plane.
+			drawn_clear = maxf(drawn_clear,
+				(limb.joints[2] - axis).length() - player.body.widths[station])
 			flank = maxf(flank, player.body.widths[station])
-		_check(foot_out > flank,
-			"%s's feet (%.1f) never came out past its own flank (%.1f)"
-				% [preset, foot_out, flank])
+		_check(drawn_clear > 0.0,
+			"%s's feet were drawn inside its own silhouette (%.1f px short of clear)"
+				% [preset, -drawn_clear])
 		if player.posture.socket_inset > 0.0:
 			_check(socket_out < flank,
 				"%s's shoulder (%.1f) sat outside the body (%.1f) that is meant to hide it"
 					% [preset, socket_out, flank])
 		lines.append("%s track %.0f/flank %.0f" % [preset, foot_out, flank])
+	# Sprawled feet fall outside the animal and columnar ones underneath it, which
+	# is the difference between legs held out to the side and legs held as pillars.
+	_apply(player, "Lizard")
+	var sprawled: float = _plan_track(player)
+	_apply(player, "Elephant")
+	var columnar: float = _plan_track(player)
+	_check(sprawled > 1.0, "a sprawled animal's feet did not fall outside its own flanks (%.2f)"
+		% sprawled)
+	_check(columnar < 1.0, "a columnar animal's feet did not fall under its own body (%.2f)"
+		% columnar)
 	summary = " · ".join(lines)
+
+
+## How far out the feet stand, seen from above, as a multiple of the flank at the
+## same station. Over one is a foot outside the silhouette; under one is a foot
+## beneath it.
+func _plan_track(player: Creature) -> float:
+	var widest: float = 0.0
+	for limb in player.gait.limbs:
+		var t: float = player.params.front_limb_t if limb.pair == Limb.FRONT \
+			else player.params.rear_limb_t
+		var station: int = clampi(int(round(t * float(player.spine.size() - 1))),
+			0, player.spine.size() - 1)
+		var out: float = absf(
+			(limb.plan[2] - player.spine.points[station]).dot(player.spine.perps[station]))
+		widest = maxf(widest, out / maxf(player.body.widths[station], 0.001))
+	return widest
 
 
 ## Clearance, and what it does to the bands. A columnar animal's belly is above a

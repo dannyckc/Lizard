@@ -14,8 +14,8 @@
 ## it is not double-jointed, and it does not lie through its own ribcage.
 ##
 ## Gravity, in a view that has no vertical axis, is these two facts together: the
-## limb has no lift, and it has no tone. `Limb.lift` is held at zero — a dead foot
-## is on the ground and its shadow is tight under it — and nothing anywhere here
+## limb has no lift, and it has no tone. `Limb.foot_height` is held at zero — a
+## dead foot is on the ground and its shadow is tight under it — and nothing anywhere here
 ## holds a limb out, so what is drawn is only ever what the constraints and the
 ## friction left.
 class_name Ragdoll
@@ -65,8 +65,7 @@ func settle(body: BodyShape, limbs: Array[Limb], p: CreatureParams, scale: float
 	var sprawl: float = deg_to_rad(SPRAWL_DEG)
 	for limb in limbs:
 		var a: Spine.Frame = body.anchors[limb.key]
-		limb.set_lengths((p.arm_length if limb.pair == Limb.FRONT else p.leg_length) * scale)
-		limb.set_rest_dir(a, p)
+		_lay_flat(limb, a, p, scale)
 
 		# Straight out to the side, wandered fore or aft, at a slack reach. Then
 		# through the same envelope projection the gait uses, so a sprawl can
@@ -85,6 +84,26 @@ func settle(body: BodyShape, limbs: Array[Limb], p: CreatureParams, scale: float
 		limb.initialised = true
 		limb.carried = true
 		_publish(limb)
+
+
+## The stance of a limb nothing is holding out.
+##
+## Every number the standing solve reads is a statement about a leg being carried
+## at an angle by a body at a height, and none of those is true here: the limb is
+## on the floor at its full length, so it is solved flat, drawn where it is, and
+## free to lie anywhere on its own side of the animal that its bones can reach.
+## The fan the caller passes is the only thing narrowing it, which is why a
+## carcass sprawls rather than standing to attention.
+func _lay_flat(limb: Limb, a: Spine.Frame, p: CreatureParams, scale: float) -> void:
+	limb.set_lengths((p.arm_length if limb.pair == Limb.FRONT else p.leg_length) * scale)
+	limb.socket_height = 0.0
+	limb.foot_height = 0.0
+	limb.reference = 0.0
+	limb.plan_limit = limb.total_length
+	limb.inboard_limit = 0.0
+	# Straight out to the side: a limp limb has no swing plane to have rotated,
+	# so the whole of its rest radius is lateral.
+	limb.set_stance(a, p, limb.total_length * p.stance_reach, 1.0)
 
 
 ## Takes over four limbs exactly where the gait left them.
@@ -130,8 +149,7 @@ func step(delta: float, body: BodyShape, limbs: Array[Limb], p: CreatureParams,
 		if limb.severed or not limb.carried:
 			continue
 		var a: Spine.Frame = body.anchors[limb.key]
-		limb.set_lengths((p.arm_length if limb.pair == Limb.FRONT else p.leg_length) * scale)
-		limb.set_rest_dir(a, p)
+		_lay_flat(limb, a, p, scale)
 		limb.track_socket(a.pos, delta, a.fwd)
 		if not _prev.has(limb.key):
 			_prev[limb.key] = PackedVector2Array([limb.joints[1], limb.joints[2]])
@@ -261,9 +279,15 @@ func _push_clear(limb: Limb, query: Callable, scale: float) -> void:
 	var foot_radius: float = limb.foot_radius(scale)
 	var cap: float = maxf(limb.total_length * 0.22, 4.0 * scale)
 	for _iteration in CONTACT_ITERATIONS:
-		var upper: Vector2 = query.call(limb.key, 0, limb.joints[0], limb.joints[1], upper_radius)
-		var lower: Vector2 = query.call(limb.key, 1, limb.joints[1], limb.joints[2], lower_radius)
-		var foot: Vector2 = query.call(limb.key, 2, limb.joints[2], limb.joints[2], foot_radius)
+		# A limp limb is on the floor, so every part of it carries a band at ground
+		# level and it collides with whatever else is down there — which is the same
+		# rule a standing leg goes through, arrived at from a body with no height.
+		var upper: Vector2 = query.call(limb.key, 0, limb.joints[0], limb.joints[1],
+			upper_radius, limb.segment_band(0, scale))
+		var lower: Vector2 = query.call(limb.key, 1, limb.joints[1], limb.joints[2],
+			lower_radius, limb.segment_band(1, scale))
+		var foot: Vector2 = query.call(limb.key, 2, limb.joints[2], limb.joints[2],
+			foot_radius, limb.segment_band(2, scale))
 		if upper.length_squared() + lower.length_squared() + foot.length_squared() \
 				<= CONTACT_SLOP * CONTACT_SLOP:
 			return
@@ -284,7 +308,6 @@ func _push_clear(limb: Limb, query: Callable, scale: float) -> void:
 func _publish(limb: Limb) -> void:
 	limb.stepping = false
 	limb.step_t = 0.0
-	limb.lift = 0.0
 	limb.pace = 0.0
 	limb.error = 0.0
 	limb.ground = limb.joints[2]
@@ -294,3 +317,14 @@ func _publish(limb: Limb) -> void:
 	limb.step_from = limb.joints[2]
 	limb.step_to = limb.joints[2]
 	limb.stride = maxf(limb.total_length * 0.5, 1.0)
+	# A limp limb is lying on the floor, so it has no height and no view to be
+	# drawn into — where it is *is* where it is drawn, which is what makes this
+	# solver's flat chain the whole truth about it. Said explicitly because these
+	# are the numbers a limb was walking on a moment ago and they would otherwise
+	# go on describing a leg that was still holding a body up.
+	limb.socket_height = 0.0
+	limb.foot_height = 0.0
+	limb.reference = 0.0
+	for i in 3:
+		limb.plan[i] = limb.joints[i]
+		limb.heights[i] = 0.0

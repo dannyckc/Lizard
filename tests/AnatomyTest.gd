@@ -662,7 +662,7 @@ func _check_broken_limb_dangles(c: Creature) -> void:
 		_walk(c, 1)
 		steps += 1 if hurt.stepping else 0
 		sound_steps += 1 if sound.stepping else 0
-		lift = maxf(lift, hurt.lift)
+		lift = maxf(lift, hurt.foot_height)
 		stretched = maxf(stretched, absf(
 			hurt.joints[0].distance_to(hurt.joints[1]) - hurt.lengths[0]))
 		stretched = maxf(stretched, absf(

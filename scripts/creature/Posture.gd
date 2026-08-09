@@ -20,6 +20,19 @@
 ##     measured in. A creature does not carry a "how tall am I" number; it stands
 ##     on its legs and the answer falls out.
 ##
+## A third projection decides how the limb *travels*, and it is the one that
+## makes an upright animal walk differently rather than merely stand differently:
+##
+##   * `track` — how far out to the side the foot is carried, which is the same
+##     cosine applied a second time. Coming up out of the ground plane and
+##     swinging round underneath the body are one movement in a real shoulder: a
+##     sprawled limb rows in the frontal plane, so its foot is flung wide and the
+##     arc it sweeps is carried out there with it, while an erect one pendulums
+##     parasagittally, directly beneath its own shoulder. That is why a cat's and
+##     an elephant's feet fall in two lines under the body and a lizard's in two
+##     lines outside it, and it is the whole of the difference — the stride, the
+##     envelope and the fold plane are all read off it below.
+##
 ## The rest of the table is per-posture tuning, and it is deliberately a table
 ## rather than three code paths. Nothing below names a gait, a species or a
 ## behaviour: they are multipliers on numbers the existing systems already read,
@@ -37,12 +50,28 @@ const COUNT: int = 3
 const NAMES: Array[String] = ["sprawled", "semi-upright", "columnar"]
 
 ## How far the drawn view is tilted off vertical, as screen pixels down per pixel
-## of world height. Zero would be a true plan view, in which a tall animal's feet
-## are hidden underneath it and posture is invisible; one would be a side-on
-## platformer. Small, because the game is still read from above — this is the
-## whole of the "2.5" in 2.5D, and it is a presentation constant rather than a
-## simulation one. Nothing gameplay-facing reads it.
-const PERSPECTIVE: float = 0.13
+## of world height. Zero would be a true plan view; one would be a side-on
+## platformer. This is the whole of the "2.5" in 2.5D, and it is a presentation
+## constant rather than a simulation one — nothing gameplay-facing reads it.
+##
+## How upright a build may stand and how far the view is tilted are one decision
+## made twice, and this is the second half of it. In a true plan view an animal
+## standing on legs held underneath itself has no legs at all: the feet are
+## directly beneath the shoulders, so every part of every limb lands inside the
+## silhouette and the creature draws as a slug. A sprawled animal is indifferent —
+## its feet are flung out beside it and legible from any angle — which is why the
+## number could stay tiny for as long as everything was sprawled, and why bringing
+## the legs in under the body is what forced it up.
+##
+## It is bounded at the other end by the one thing the whole picture is registered
+## to: a body is drawn where the simulation puts it, and its legs are drawn
+## hanging below that. Push the tilt far enough and a tall animal's feet are drawn
+## clear of its own silhouette — all four of them below it rather than two either
+## side — and there is no longer anything to walk between. So it is held under
+## what a wide, tall body is half as wide as, which is a real ceiling on this
+## projection rather than a taste one: lifting it means registering every body to
+## the ground rather than to itself, and that is a different picture.
+const PERSPECTIVE: float = 0.22
 
 ## Per-posture tuning. Each row is a complete description; nothing falls back.
 ##
@@ -153,8 +182,8 @@ func configure(p_kind: int) -> void:
 	neck_reach = float(row["neck_reach"])
 
 
-## What a limb of this length measures seen from above — the length the flat IK
-## chain is actually solved at.
+## What a limb of this length measures seen from above — the radius of the disc
+## its foot may be set down anywhere inside.
 func plan_reach(limb_length: float) -> float:
 	return limb_length * cos(tilt)
 
@@ -162,6 +191,36 @@ func plan_reach(limb_length: float) -> float:
 ## How far off the ground a limb of this length holds the body.
 func clearance(limb_length: float) -> float:
 	return limb_length * sin(tilt)
+
+
+## How far out to the side the same limb carries its foot: the plan reach with
+## the same cosine taken out of it again, because the plane the limb swings in
+## has rotated by the same angle the limb itself has.
+##
+## What is left of the plan reach after this is the fore-and-aft excursion — the
+## stride — so the two together say that an upright animal spends its reach
+## walking and a sprawled one spends it standing wide.
+func track(limb_length: float) -> float:
+	return plan_reach(limb_length) * cos(tilt)
+
+
+## How far inboard of its own socket a foot may be set down, as a fraction of
+## the socket's own offset from the spine. Zero on a sprawled limb, which cannot
+## bring its foot in under the shoulder at all; most of the way to the midline on
+## a columnar one, whose entire stance is standing underneath itself.
+func adduction() -> float:
+	return 1.0 - cos(tilt)
+
+
+## How much of itself the same limb measures *on the screen*, which is neither of
+## the two above: the picture shows the plan reach across, plus whatever the
+## perspective makes of the height it is holding the body at. Used only to
+## normalise — how far a drawn leg is extended, how thick to draw it — never to
+## decide where a foot goes.
+func drawn_reach(limb_length: float) -> float:
+	var flat: float = cos(tilt)
+	var up: float = sin(tilt) * PERSPECTIVE
+	return limb_length * sqrt(flat * flat + up * up)
 
 
 ## Most feet this posture will lift at once. A body that has to stay held up

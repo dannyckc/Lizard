@@ -366,7 +366,7 @@ func rebuild() -> void:
 	if alive:
 		ragdoll = null
 		gait.update(0.0, body, move_dir, 0.0, params, size_scale, Callable(), null,
-			_ground_drop(), elevation.is_airborne())
+			stature.reference, elevation.is_airborne())
 	else:
 		ragdoll = Ragdoll.new()
 		ragdoll.settle(body, gait.limbs, params, size_scale, rng)
@@ -382,15 +382,13 @@ func rebuild() -> void:
 ## same reason: both are descriptions of the pose that has just been solved, and
 ## both would be a tick stale anywhere else.
 func _update_stature() -> void:
+	# How high the feet have the body, rather than how high the stance would like
+	# it: the gait has just measured it off four planted feet, and a body is only
+	# ever as tall as the legs under it can hold it. Before the gait has run once
+	# there is nothing to read, and the posture answers instead.
+	var held: float = gait.support if gait != null and gait.measured else -1.0
 	stature.update(posture, body, params, size_scale, body_length(),
-		elevation.height, gape_radius(), alive)
-
-
-## How far down the screen the ground sits from the plane the torso is drawn on —
-## what makes a tall animal's legs visibly run down to it. Presentation only:
-## nothing that decides an outcome reads it.
-func _ground_drop() -> float:
-	return stature.reference * Posture.PERSPECTIVE
+		elevation.height, gape_radius(), alive, held)
 
 
 ## The generator a carcass's resting shape is drawn from.
@@ -541,7 +539,7 @@ func _physics_process(delta: float) -> void:
 		or (absf(speed) <= 0.01 and command.throttle < 0.0) else move_dir
 	gait.update(delta, body, gait_dir, speed_norm, params, size_scale,
 		Callable(self, "_limb_contact_push"), anatomy.state,
-		_ground_drop(), elevation.is_airborne())
+		stature.reference, elevation.is_airborne())
 	_carry_limp_limbs(delta)
 	for contact in gait.landed:
 		var footfall: float = (0.07 + minf(0.11, absf(speed) / 1600.0)) * size_scale
@@ -753,8 +751,6 @@ func _dead_process(delta: float) -> void:
 	body.build(spine, params, size_scale, posture)
 	ragdoll.step(delta, body, gait.limbs, params, size_scale,
 		Callable(self, "_limb_contact_push"))
-	for limb in gait.limbs:
-		limb.ground_drop = _ground_drop()
 	anatomy.update(self, delta)
 	_release_severed()
 	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
@@ -1105,15 +1101,6 @@ func _resolve_contacts() -> void:
 		# world still collides with both, and the limbs still route around both.
 		if _is_joined_to(other):
 			continue
-		# Two bodies that are not at the same height are not in each other's way,
-		# and this one line is the whole of "jump over the charge". It sits beside
-		# the grip exemption above rather than inside the narrow phase because it
-		# is the same kind of statement: a reason this pair has no contact to
-		# resolve at all, decided before either body is measured against the
-		# other. Both parties reach it from the same two bands, so neither ever
-		# collides with something that is not colliding with it.
-		if not Stature.overlaps(stature.whole, other.stature.whole):
-			continue
 		# The body's bound is from its last solved pose, while the authoritative
 		# head has already integrated this tick. Inflate by that small sweep so a
 		# fast nose cannot cross the broad-phase boundary unnoticed.
@@ -1121,7 +1108,26 @@ func _resolve_contacts() -> void:
 		if bounds_center.distance_to(other.bounds_center) \
 				> bounds_radius + other.bounds_radius + head_sweep:
 			continue
-		var push: Vector2 = _push_out_of_creature(other)
+		# Two things that are not at the same height are not in each other's way —
+		# and that is now asked of each pair of *parts* rather than of the two
+		# animals. This walk compares trunks, so what it wants to know is whether
+		# the two trunks are at the same height; the legs are a second question
+		# with a second answer, because a leg spans the whole gap underneath an
+		# animal and the trunk it hangs off does not.
+		#
+		# That split is the entire mechanic. A lizard fails the trunk test against
+		# an elephant and walks under its belly, and passes the leg test against
+		# the foot that is on the floor — so it goes underneath the body, into the
+		# planted foot, and under the one that has been picked up. Nothing in it is
+		# about elephants: it is two bands per part, asked in the order the parts
+		# are met. Both parties reach the same answer from the same bands, so
+		# neither ever collides with something that is not colliding with it.
+		var push: Vector2 = Vector2.ZERO
+		if Stature.overlaps(stature.trunk, other.stature.trunk):
+			push = _push_out_of_creature(other)
+		var underfoot: Vector2 = _push_out_of_limbs(other)
+		if underfoot.length_squared() > push.length_squared():
+			push = underfoot
 		if push == Vector2.ZERO:
 			continue
 		var share: float = _contact_share(other)
@@ -1201,6 +1207,72 @@ func _push_out_of_creature(other: Creature) -> Vector2:
 			out = normal * overlap
 			_contact_spine_t = (float(i) + uv.x) / float(maxi(spine.size() - 1, 1))
 	return out
+
+
+## Deepest penetration of this creature's trunk into any of `other`'s legs, as
+## the vector this whole creature must move to get clear.
+##
+## The counterpart of the limb contact pass, and it has to exist separately for
+## the same reason the trunk band does: a leg is the one structure that spans the
+## gap under an animal, so it is the only part of a tall one a low one can walk
+## into. Without this a lizard passing beneath an elephant meets nothing at all
+## on the way through — the belly is out of its reach and the legs were never
+## asked about — and the animal reads as a hologram on four sticks.
+##
+## Height decides it part by part rather than animal by animal. A foot on the
+## floor occupies the band a small body is in and stops it; the same foot at the
+## top of a step occupies a band above it and does not. Neither is a rule about
+## feet: it is one band test, asked once per drawn piece of leg.
+##
+## On the ground plane, like the rest of the contact pass and for the reason given
+## at length in Gait._solve_limb: a body passes underneath a leg by being in the
+## same place at a different height, and the picture is not a frame in which that
+## sentence can be written.
+##
+## Only a leg that is standing on something. A limb in mid-swing is already free
+## to go round whatever is in the way — that is what the gait's own contact pass
+## does with it, and a foot that steps over an obstacle has not collided with it.
+## A planted one has no such option: it is carrying the animal, so it is the
+## obstacle, and what moves is whatever walked into it. The distinction costs one
+## line and it is the difference between legs that read as legs and legs that
+## read as a cowcatcher.
+##
+## Only this creature is moved, as everywhere else in the contact pass. The limbs
+## stay kinematic — being walked into does not push the leg aside, and the animal
+## whose leg it is feels nothing.
+func _push_out_of_limbs(other: Creature) -> Vector2:
+	if other.gait == null or spine == null or body == null:
+		return Vector2.ZERO
+	var deepest: Vector2 = Vector2.ZERO
+	var toward: Vector2 = other.bounds_center - bounds_center
+	for limb in other.gait.limbs:
+		if limb.severed or limb.stepping:
+			continue
+		# A leg with this creature's teeth in it is held rather than resolved, for
+		# the same reason a gripped body is: jaws hold flesh by being inside it, so
+		# a correction whose whole job is getting one out of the other points
+		# against the tether and the pair buzzes. It matters most exactly here —
+		# a leg is the only part of a tall animal a low one can reach, so without
+		# it the vertical layer's own mechanic would shove every attacker off the
+		# only target it has.
+		if grip != null and grip.is_alive() and grip.victim == other \
+				and grip.holds_limb() and grip.limb_key == limb.key:
+			continue
+		for segment in 3:
+			if not Stature.overlaps(stature.trunk, limb.segment_band(segment, other.size_scale)):
+				continue
+			var solid: float = other.anatomy.tissue.limb_solid(limb.key, segment)
+			if solid <= 0.0:
+				continue
+			var radius: float = limb.foot_radius(other.size_scale) if segment == 2 \
+				else limb.girth(other.size_scale) * (0.5 if segment == 0 else 0.36)
+			# `push_capsule_out_of_body` answers for the capsule; this body is the
+			# one that yields, so it goes the other way.
+			var clear: Vector2 = push_capsule_out_of_body(
+				limb.plan[segment], limb.plan[mini(segment + 1, 2)], radius * solid, toward)
+			if clear.length_squared() > deepest.length_squared():
+				deepest = -clear
+	return deepest
 
 
 ## Translates the pose as one piece and cancels the same shift out of the gait's
@@ -1312,10 +1384,19 @@ func _coincident_contact_normal(other: Creature, a0: Vector2, a1: Vector2,
 
 ## Collision callback consumed by Gait while it solves a limb. Limbs only react
 ## to other creatures' bodies: their own torso is already excluded by the gait's
-## anatomical swing envelope, and limb-vs-limb contacts would make four light,
+## anatomical stance envelope, and limb-vs-limb contacts would make four light,
 ## kinematic chains snag one another without a useful notion of mass.
+##
+## `a` and `b` are on the ground plane, where the limb actually is, and `band` is
+## the heights this piece of it occupies. Both matter and the second is the new
+## one: a leg reaching down past a tall animal's belly passes through the band a
+## short one is standing in, so it has to be routed around that body — while the
+## same animal's own trunk, held a leg's length overhead, is not in its way at
+## all. Without the band a tall creature's legs would shoulder aside things its
+## body is nowhere near.
 func _limb_contact_push(limb_key: String, limb_segment: int,
-		a: Vector2, b: Vector2, radius: float) -> Vector2:
+		a: Vector2, b: Vector2, radius: float,
+		band: Vector2 = Stature.UNBOUNDED) -> Vector2:
 	if not is_inside_tree() or radius <= 0.0:
 		return Vector2.ZERO
 	var solid: float = anatomy.tissue.limb_solid(limb_key, limb_segment)
@@ -1346,6 +1427,12 @@ func _limb_contact_push(limb_key: String, limb_segment: int,
 			continue
 		if midpoint.distance_to(other.bounds_center) \
 				> capsule_bound + other.bounds_radius:
+			continue
+		# The same one rule the body pass uses, asked of this piece of leg against
+		# that animal's trunk. A foot swinging through the air over something small
+		# is not touching it, and a leg reaching down past a tall animal's belly to
+		# the floor is touching everything down there.
+		if not Stature.overlaps(band, other.stature.trunk):
 			continue
 		var push: Vector2 = other.push_capsule_out_of_body(
 			a, b, collision_radius, bounds_center - other.bounds_center)
@@ -1836,7 +1923,9 @@ func _drag_grip(held: Grip, offset: Vector2) -> void:
 		1:
 			max_reach = limb.lengths[0] + limb.lengths[1] * held.limb_u
 		_:
-			max_reach = limb.total_length
+			# Bone units, like the two above it: the chain the hold is measured
+			# along is the real limb, not the shortened one the picture shows.
+			max_reach = limb.anatomical_length
 	var reach: Vector2 = held.anchor() - limb.joints[0]
 	var distance: float = reach.length()
 	if distance > max_reach and distance > 0.0001:

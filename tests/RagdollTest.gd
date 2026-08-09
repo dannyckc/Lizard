@@ -132,7 +132,7 @@ func _check_limbs_limp(body: Creature) -> void:
 	var reach: float = 0.0
 	for limb in body.gait.limbs:
 		_check(not limb.stepping, "a carcass took a step")
-		_check(is_zero_approx(limb.lift), "a dead foot was %.2f px in the air" % limb.lift)
+		_check(is_zero_approx(limb.foot_height), "a dead foot was %.2f px in the air" % limb.foot_height)
 		_check(limb.ground.is_equal_approx(limb.joints[2]),
 			"a dead foot's shadow was not under the foot")
 		reach = maxf(reach, limb.joints[0].distance_to(limb.joints[2]) / limb.total_length)

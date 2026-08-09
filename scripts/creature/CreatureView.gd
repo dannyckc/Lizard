@@ -338,12 +338,18 @@ func _draw_jaws(body: BodyShape, offset: Vector2 = Vector2.ZERO) -> void:
 func _draw_foot_shadow(limb: Limb) -> void:
 	var s: float = creature.size_scale
 	var r: float = limb.foot_radius(s)
-	var shadow_r: float = r * (1.0 - 0.35 * clampf(limb.lift / maxf(r * 3.0, 1.0), 0.0, 1.0))
-	# Under the foot as it is *drawn*, which on a tall animal is well below where
-	# the gait put it — the same displacement the leg itself was solved through.
-	draw_set_transform(limb.ground + Vector2(0.0, limb.ground_drop + 5.0 * s),
+	# How far the foot has come up, against how far it comes up at the top of a
+	# full step. The gap between foot and shadow is small in a view from directly
+	# overhead however high the foot goes, so this is what actually reads as a
+	# lift: the shadow shrinks and pales under a foot that has left the ground.
+	var raised: float = clampf(limb.foot_height / maxf(r * 2.0, 1.0), 0.0, 1.0)
+	var shadow_r: float = r * (1.0 - 0.35 * raised)
+	# Under the foot where it really is, which on a tall animal is well below
+	# where the leg is drawn — the same displacement the whole body is drawn
+	# through, and the reason a shadow stays on the floor when a foot does not.
+	draw_set_transform(limb.ground + Posture.drop(0.0, limb.reference) + Vector2(0.0, 5.0 * s),
 		0.0, Vector2(1.05, 0.70))
-	draw_circle(Vector2.ZERO, shadow_r, Color(INK, maxf(0.035, 0.13 - limb.lift * 0.004)))
+	draw_circle(Vector2.ZERO, shadow_r, Color(INK, maxf(0.035, 0.13 - raised * 0.09)))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
@@ -598,13 +604,19 @@ func _draw_debug() -> void:
 		draw_arc(limb.ideal, 4.0, 0.0, TAU, 12, COL_DBG_IDEAL, 1.5, true)
 		draw_line(limb.planted, limb.ideal, Color(INK, 0.28), 1.0, true)
 
-		# The envelope the foot is confined to: the fan it may swing through and
-		# the reach limit it skids along when the body outruns it.
+		# The region the foot may be set down in, drawn on the ground plane where
+		# it lives: the arc the leg reaches across and the fore-and-aft ends of the
+		# line it walks along. Both are read off the limb rather than recomputed, so
+		# the overlay can never disagree with the solver about where a foot may go.
 		var a2: Spine.Frame = creature.body.anchors[limb.key]
-		var swing: float = deg_to_rad(p.limb_swing_deg)
-		var rest: float = limb.rest_dir.angle()
-		draw_arc(a2.pos, limb.total_length * p.limb_max_reach, rest - swing, rest + swing,
-			20, COL_DBG_RANGE, 1.0, true)
+		var out: Vector2 = a2.perp * limb.side
+		var far: float = limb.plan_limit * p.limb_max_reach
+		var rest: float = (out * limb.rest_lat + a2.fwd * limb.rest_fore).angle()
+		draw_arc(a2.pos, far, rest - PI * 0.5, rest + PI * 0.5, 24, COL_DBG_RANGE, 1.0, true)
+		for end in [limb.sweep_limit, -limb.sweep_limit]:
+			var stop: Vector2 = a2.pos + out * limb.rest_lat \
+				+ a2.fwd * (limb.rest_fore + end)
+			draw_line(a2.pos, stop, Color(INK, 0.16), 1.0, true)
 
 		# The IK chain, including the ground target the solver was given.
 		draw_line(limb.joints[0], limb.joints[1], COL_DBG_LIMB, 1.0, true)
@@ -613,8 +625,10 @@ func _draw_debug() -> void:
 		if limb.stepping:
 			draw_line(limb.step_from, limb.step_to, COL_DBG_LIMB, 1.0, true)
 			draw_arc(limb.step_to, 3.0, 0.0, TAU, 12, COL_DBG_LIMB, 1.5, true)
-			# Lift is fake height, drawn as the gap between foot and shadow.
-			draw_line(limb.ground, limb.joints[2], Color(INK, 0.35), 1.0, true)
+		# How far the drawn foot has been displaced from where it really is: down
+		# the screen by the ground's own drop, back up by however high the step has
+		# carried it. The line between them is the whole 2.5D projection, per foot.
+		draw_line(limb.ground, limb.joints[2], Color(INK, 0.35), 1.0, true)
 
 	# Heading and velocity of the head.
 	draw_line(creature.head_pos, creature.head_pos + creature.move_dir * 34.0, Color(INK, 0.65), 1.5, true)

@@ -42,6 +42,10 @@ const SWALLOW_SPREAD: float = 0.11
 
 ## "FL" / "FR" / "RL" / "RR" -> Spine.Frame positioned at the limb socket.
 var anchors: Dictionary = {}
+## The same keys -> how far that socket sits off the spine, in world pixels. What
+## "under the body" is measured against: a foot brought this far inboard of its
+## own shoulder is a foot on the animal's midline.
+var socket_out: Dictionary = {}
 ## Index of the last spine point included in the silhouette (tail clipping).
 var last_index: int = 0
 var tail_tip: Vector2 = Vector2.ZERO
@@ -149,8 +153,10 @@ func _set_anchor(spine: Spine, p: CreatureParams, key: String, t: float, side: f
 	var f: Spine.Frame = spine.sample(t)
 	var n: int = spine.points.size()
 	var idx: int = clampi(int(round(t * float(n - 1))), 0, n - 1)
-	f.pos = f.pos + f.perp * (side * widths[idx] * 0.85 * inset)
+	var out: float = widths[idx] * 0.85 * inset
+	f.pos = f.pos + f.perp * (side * out)
 	anchors[key] = f
+	socket_out[key] = out
 
 
 ## Uniform Catmull-Rom through `knots`, clamped at both ends.

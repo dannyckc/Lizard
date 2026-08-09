@@ -169,15 +169,20 @@ func _check_weight(player: Creature, target: Creature) -> void:
 		"two identical creatures no longer split a contact down the middle (%.3f)"
 			% player._contact_share(target))
 
-	var light_gain: float = _shove(player, target, "Cat", "Elephant")
-	var heavy_gain: float = _shove(player, target, "Elephant", "Cat")
+	# Between two builds of the same stance, so what is being measured is mass and
+	# only mass. An Elephant against a Cat is no longer a test of weight at all —
+	# its belly is above a Cat's back, so it walks over one with its feet either
+	# side and the pair barely touch. That is the height layer working, and it is
+	# LocomotionTest's to check; a shove has to be two animals in each other's way.
+	var light_gain: float = _shove(player, target, "Lizard", "Lizard", 0.25, 4.0)
+	var heavy_gain: float = _shove(player, target, "Lizard", "Lizard", 4.0, 0.25)
 	_check(heavy_gain > light_gain * 3.0,
-		"weight bought nothing in a shove: an Elephant moved a Cat %.0f px and a Cat moved an Elephant %.0f px"
+		"weight bought nothing in a shove: a heavy body moved a light one %.0f px and a light one moved a heavy one %.0f px"
 			% [heavy_gain, light_gain])
 	_check(light_gain < 40.0,
-		"a Cat walked an Elephant %.0f px across the world" % light_gain)
+		"a light body walked a heavy one %.0f px across the world" % light_gain)
 	_check(heavy_gain > 60.0,
-		"an Elephant leaning on a Cat only moved it %.0f px — nothing is being shoved at all"
+		"a heavy body leaning on a light one only moved it %.0f px — nothing is being shoved at all"
 			% heavy_gain)
 
 	player.params.apply_preset("Lizard")
@@ -187,10 +192,17 @@ func _check_weight(player: Creature, target: Creature) -> void:
 
 
 ## How far a creature of `pusher_name` shoves a stationary one of `pushee_name`
-## by walking into it for two seconds.
-func _shove(pusher: Creature, pushee: Creature, pusher_name: String, pushee_name: String) -> float:
+## by walking into it for two seconds. The two densities are how the same body is
+## made heavy or light without changing anything about its shape or its stance —
+## which is what lets weight be measured on its own.
+func _shove(pusher: Creature, pushee: Creature, pusher_name: String, pushee_name: String,
+		pusher_density: float = -1.0, pushee_density: float = -1.0) -> float:
 	pusher.params.apply_preset(pusher_name)
 	pushee.params.apply_preset(pushee_name)
+	if pusher_density > 0.0:
+		pusher.params.density = pusher_density
+	if pushee_density > 0.0:
+		pushee.params.density = pushee_density
 	pusher.reset(Vector2.ZERO, 0.0)
 	pushee.reset(Vector2(150.0, 0.0), PI)
 	var start: Vector2 = pushee.head_pos
@@ -339,13 +351,37 @@ func _hold(biter: Creature, victim: Creature, biter_name: String, victim_name: S
 		# reach is the legs, because a leg is the one structure that runs all the
 		# way down to the ground the two of them are standing on — so it goes for
 		# one, which is what the whole vertical layer is for.
-		var foot: Vector2 = victim.gait.limbs[0].joints[2]
-		var away: Vector2 = (foot - victim.head_pos).normalized()
-		var stand: Vector2 = foot + away * 44.0
-		biter.reset(stand, (foot - stand).angle())
-		for _i in 20:
+		#
+		# Squared up twice and then walked in, because a leg is not furniture: the
+		# gait routes it around whatever has just appeared beside it, so a stand-off
+		# computed from where the foot *was* leaves the biter short by the width of
+		# that dodge. The second pass takes aim at where the leg settled, and then
+		# the animal closes the last of it on its own feet — which is both what a
+		# predator does and the only stand-off that is guaranteed to be the one the
+		# contact pass will actually allow.
+		for _pass in 2:
+			var foot: Vector2 = victim.gait.limbs[0].joints[2]
+			var away: Vector2 = (foot - victim.head_pos).normalized()
+			var stand: Vector2 = foot + away * 44.0
+			biter.reset(stand, (foot - stand).angle())
+			for _i in 20:
+				biter._physics_process(TICK)
+				victim._physics_process(TICK)
+		# ...and then walked the last of it, stopping when the leg is within reach.
+		# Nothing else stops it: the contact pass keeps a body out of a leg on the
+		# ground plane, and a tall animal's leg is *drawn* some way from the ground
+		# it stands on — so an approach measured in strides walks straight past the
+		# leg it was aiming at. Closing to reach is what a predator is doing anyway.
+		var close := MovementInput.Command.new()
+		close.throttle = 1.0
+		for _i in 60:
+			var foot: Vector2 = victim.gait.limbs[0].joints[2]
+			if biter.head_pos.distance_to(foot) <= biter.params.bite_reach * biter.size_scale:
+				break
+			biter.command = close
 			biter._physics_process(TICK)
 			victim._physics_process(TICK)
+		biter.command = MovementInput.Command.new()
 
 	biter.set_bite_held(true)
 	biter.request_bite(Vector2(200.0, 0.0))
@@ -1046,7 +1082,7 @@ func _check_contacts(player: Creature, target: Creature) -> void:
 	# instead of drawing the same penetrating pose again on every tick.
 	player.reset(Vector2.ZERO, 0.0)
 	var contact_limb: Limb = player.gait.limbs[0]
-	var obstacle_at: Vector2 = contact_limb.joints[1].lerp(contact_limb.joints[2], 0.55)
+	var obstacle_at: Vector2 = contact_limb.plan[1].lerp(contact_limb.plan[2], 0.55)
 	var relative_knee_before: Vector2 = contact_limb.joints[1] - contact_limb.joints[0]
 	target.reset(obstacle_at, -PI * 0.5)
 	var torso_overlap: float = player._push_out_of_creature(target).length()
@@ -1056,7 +1092,12 @@ func _check_contacts(player: Creature, target: Creature) -> void:
 	_check(limb_overlap_before > 8.0,
 		"limb collision case did not start deeply intersecting (%.2f px)" % limb_overlap_before)
 
-	for _i in 12:
+	# Long enough for a deep overlap to unfold. The corrections are deliberately
+	# capped so a leg spawned inside a body walks its way out over adjacent frames
+	# rather than teleporting, and a foot that has to route round a shank-deep
+	# obstruction re-plants and is nudged again on each pass — so this is about a
+	# second of it, not a fifth.
+	for _i in 60:
 		player._physics_process(TICK)
 	var limb_overlap_after: float = _limb_body_overlap(player, contact_limb, target)
 	var relative_knee_after: Vector2 = contact_limb.joints[1] - contact_limb.joints[0]
@@ -1064,11 +1105,9 @@ func _check_contacts(player: Creature, target: Creature) -> void:
 		"procedural limb stayed inside the other body (%.2f px)" % limb_overlap_after)
 	_check(relative_knee_after.distance_to(relative_knee_before) > 2.0,
 		"colliding limb did not change its bend around the obstacle")
-	for bone in 2:
-		var actual: float = contact_limb.joints[bone].distance_to(contact_limb.joints[bone + 1])
-		_check(absf(actual - contact_limb.lengths[bone]) < 0.05,
-			"limb collision changed bone %d length by %.2f px" \
-				% [bone, absf(actual - contact_limb.lengths[bone])])
+	_check(contact_limb.bone_error() * contact_limb.anatomical_length < 0.05,
+		"limb collision changed a bone length by %.2f px"
+			% (contact_limb.bone_error() * contact_limb.anatomical_length))
 
 	# Sparse, narrow chains crossing halfway along two long segments. None of
 	# their spine points is inside the other body, so the former point-probe
@@ -1128,16 +1167,17 @@ func _worst_segment_error(creature: Creature) -> float:
 
 ## Deepest overlap of either bone or the foot with `obstacle`'s body.
 func _limb_body_overlap(owner: Creature, limb: Limb, obstacle: Creature) -> float:
-	var upper_radius: float = maxf(limb.total_length * 0.16, 2.5 * owner.size_scale) * 0.5
+	# On the ground plane, where the limb is and where the contact solver works,
+	# rather than on the screen where it is drawn.
+	var upper_radius: float = limb.girth(owner.size_scale) * 0.5
 	var radii: Array[float] = [upper_radius, upper_radius * 0.72]
 	var preferred: Vector2 = owner.bounds_center - obstacle.bounds_center
 	var worst: float = 0.0
 	for segment in 2:
 		worst = maxf(worst, obstacle.push_capsule_out_of_body(
-			limb.joints[segment], limb.joints[segment + 1], radii[segment], preferred).length())
-	var foot_radius: float = maxf(limb.total_length * 0.10, 3.0 * owner.size_scale)
+			limb.plan[segment], limb.plan[segment + 1], radii[segment], preferred).length())
 	worst = maxf(worst, obstacle.push_capsule_out_of_body(
-		limb.joints[2], limb.joints[2], foot_radius, preferred).length())
+		limb.plan[2], limb.plan[2], limb.foot_radius(owner.size_scale), preferred).length())
 	return worst
 
 

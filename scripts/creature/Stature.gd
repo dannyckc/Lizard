@@ -49,6 +49,12 @@ var torso: Vector2 = Vector2.ZERO
 var head: Vector2 = Vector2.ZERO
 var limbs: Vector2 = Vector2.ZERO
 var whole: Vector2 = Vector2.ZERO
+## Torso and head together: the part of the animal the spine actually draws, and
+## so the band the body-against-body contact walk is asking about. Kept apart
+## from `whole` because `whole` reaches down the legs to the floor, and a band
+## that always touches the ground is a band that always collides — which is a
+## body you can never walk underneath however high it is held.
+var trunk: Vector2 = Vector2.ZERO
 ## What these jaws can be brought to bear on.
 var bite: Vector2 = Vector2.ZERO
 ## Where the ground plane sits for this creature right now — zero, unless it is
@@ -67,8 +73,17 @@ var elevation: float = 0.0
 ## thickness and loses its clearance, and everything that could only reach a live
 ## elephant's knees can reach a dead one's skull. Nothing else about it changes,
 ## which is the point: it is the same body, differently supported.
+##
+## `held` is the height the four feet are *actually* holding the body at, which is
+## the posture's answer only while the animal is standing square. It is not a
+## correction or a wobble laid over the top: a leg is a fixed length, so a foot
+## further out is a body lower down, and reading the height off the feet rather
+## than off the stance is what stops a walking creature floating above legs that
+## cannot reach it. Left negative it falls back to what the posture asks for,
+## which is what a body with no gait solved yet has to use.
 func update(posture: Posture, body: BodyShape, p: CreatureParams, scale: float,
-		body_length: float, height: float, gape: float, standing: bool = true) -> void:
+		body_length: float, height: float, gape: float, standing: bool = true,
+		held: float = -1.0) -> void:
 	elevation = maxf(height, 0.0)
 	if posture == null or body == null or p == null or body.widths.is_empty():
 		torso = Vector2(elevation, elevation)
@@ -81,9 +96,13 @@ func update(posture: Posture, body: BodyShape, p: CreatureParams, scale: float,
 	# The legs hold the body up, so their projection out of the ground plane is
 	# the animal's clearance. The longer pair, because a body sits at the height
 	# of whatever is under its hips — a front pair that happens to be shorter tips
-	# the animal forward rather than lowering the whole of it.
-	clearance = posture.clearance(maxf(p.leg_length, p.arm_length) * scale) \
-		if standing else 0.0
+	# the animal forward rather than lowering the whole of it. Against the reach a
+	# leg actually stands at rather than a locked-out one, for the reason Gait
+	# gives at length: a standing animal's legs are bent.
+	clearance = posture.clearance(
+		maxf(p.leg_length, p.arm_length) * scale * p.stance_reach) if standing else 0.0
+	if standing and held >= 0.0:
+		clearance = held
 	# Depth is read off the widest part of the trunk rather than off an average:
 	# an animal is as tall through the chest as its chest is, and the taper fore
 	# and aft of that is the silhouette's business rather than the height's.
@@ -108,8 +127,8 @@ func update(posture: Posture, body: BodyShape, p: CreatureParams, scale: float,
 	# is the one structure that spans the whole gap underneath the animal. That
 	# is what makes a leg the only thing a low predator can reach on a tall one.
 	limbs = Vector2(0.0, clearance + depth * 0.45) + Vector2(elevation, elevation)
-	whole = Vector2(minf(minf(torso.x, head.x), limbs.x),
-		maxf(maxf(torso.y, head.y), limbs.y))
+	trunk = Vector2(minf(torso.x, head.x), maxf(torso.y, head.y))
+	whole = Vector2(minf(trunk.x, limbs.x), maxf(trunk.y, limbs.y))
 
 	# What the jaws reach. The neck sweeps them either side of where the head
 	# rests, and the gape carries them a little further again.

@@ -394,11 +394,22 @@ stall is. Nothing in this is a state machine.
 **What the layer buys, and what pays for it.** Every one of these is the overlap
 rule landing somewhere that already existed:
 
-- **Leaping over a charge.** Two bodies at different heights have no contact to
+- **Leaping over a charge.** Two things at different heights have no contact to
   resolve, so the pair is skipped in `_resolve_contacts` — the same exemption a
   grip already gets, one line above it. The leap has to clear the *back* of the
   other animal, so it is a contest rather than a dodge key. Measured: a sprinting
-  Cat shoves a Lizard 46 px through it on the ground and 0 px over it.
+  Cat shoves a Lizard 11 px through it on the ground and 0 px over it.
+
+  The question is asked of each pair of *parts* rather than of the two animals,
+  and that is what makes it a mechanic rather than a jump button. The pass
+  compares trunks with trunks, and the legs answer separately, because a leg
+  spans the whole gap underneath an animal and the trunk it hangs off does not.
+  So a Lizard fails the trunk test against an Elephant and walks under its belly,
+  passes the leg test against the foot that is on the floor, and passes under the
+  same foot once it is picked up high enough. None of that is a rule about
+  elephants: it is two bands per part, asked in the order the parts are met. It is
+  also why a Cat no longer bulldozes a Lizard — its belly clears a Lizard's back,
+  so it steps over one with its feet either side, and only the legs catch.
 - **Out of reach.** A bite carries the band its jaws cover, on the mark, next to
   the penetration it already carried. The world picks its victim through it, the
   anatomy query filters structures by it, and the lattice refuses cells outside
@@ -437,11 +448,21 @@ stance-width dial and no per-stance code path. A leg of length *L* held at angle
 `L·sin θ` off the floor. Those are the same leg viewed twice, and between them
 they are most of what a posture looks like:
 
-| | tilt | plan reach | clearance | feet down | spine |
-|---|---|---|---|---|---|
-| sprawled | 12° | 98% of the leg | 2% | 2 | undulates fully |
-| semi-upright | 50° | 64% | 77% | 2 | 30% |
-| columnar | 72° | 31% | 95% | 3 | 8% |
+| | tilt | plan reach | clearance | track | feet down | spine |
+|---|---|---|---|---|---|---|
+| sprawled | 12° | 98% of the leg | 20% | 96% | 2 | undulates fully |
+| semi-upright | 50° | 64% | 77% | 41% | 2 | 30% |
+| columnar | 72° | 31% | 95% | 10% | 3 | 8% |
+
+A third projection decides how the limb *travels*, and it is the same cosine
+taken out a second time. Coming up out of the ground plane and swinging round
+underneath the body are one movement in a shoulder: a sprawled limb rows in the
+frontal plane, so its foot is flung wide and the arc it sweeps is carried out
+there with it, while an erect one pendulums parasagittally, directly beneath its
+own shoulder. **Track** is what is left standing out to the side — 96% of the
+plan reach sprawled, a tenth of it columnar — and the rest is spent walking. So a
+Lizard's feet fall in two lines well outside its flanks, a Cat's just outside,
+and an Elephant's *inside* its own silhouette.
 
 - **Sprawled** — a Lizard. Belly near the floor, feet flung wide, the whole limb
   visible, and a spine that does part of the walking: a sprawled stride is
@@ -466,6 +487,19 @@ towed for as long as the animal walks. That cap is derived, not authored, becaus
 the two numbers that decide it live in different places: the stride is a species
 trait and the envelope is a consequence of the stance.
 
+How upright a build may stand and how far the view is tilted turn out to be one
+decision made twice. In a true plan view an animal standing on legs held
+underneath itself has no legs at all: every part of every limb lands inside the
+silhouette. `Posture.PERSPECTIVE` is the only thing that separates them, which is
+why bringing the legs in under the body is what forced it up from 0.13 to 0.22 —
+and why a sprawled animal is completely indifferent to it. It is bounded at the
+other end by what the whole picture is registered to: a body is drawn where the
+simulation puts it and its legs hang below that, so past a certain tilt a tall
+animal's feet are drawn clear of its own silhouette — all four below it rather
+than two either side — and there is nothing left to walk between. Lifting that
+ceiling means registering every body to the ground rather than to itself, which
+is a different picture and has not been done.
+
 Posture also feeds the section above it. Clearance *is* how tall the animal is, so
 the height bands, what its jaws can reach and what can reach its body are all
 downstream of the same one angle.
@@ -478,14 +512,69 @@ further than `stride_distance` from that ideal, then arcs to a spot slightly
 *ahead* and re-plants. Step frequency therefore falls out of speed for free, and
 an idle creature is genuinely still.
 
+#### A leg is solved from the foot up
+
+A limb runs from a socket the body holds in the air down to a foot standing on
+the floor, so its two bones span a real vertical gap. That gap is what is solved:
+FABRIK runs inside the limb's *own plane* — the one containing the socket, the
+foot and the body's fore-aft axis — with the bones at their true length. On a
+sprawled animal that plane is very nearly the ground, so the elbow folds backward
+across the floor; on a columnar one it is very nearly the sagittal plane, so the
+knee folds forward through the air beneath the body. Nothing chooses between
+them: the plane is spanned by where the foot is and which way the joint bends, so
+it tilts up as the limb does. It is also why nothing has to guard against a knee
+buckling through the torso any more — a joint folding fore-and-aft cannot.
+
+So a limb has three parallel readings and only the first is authored:
+
+* **`plan` and `heights`** — where each joint is on the ground plane and how far
+  above it. This is the limb, and bone lengths are exact here.
+* **`joints`** — where the picture puts it: `plan` displaced down the screen by
+  the height it has lost. Drawn bones are foreshortened and their screen lengths
+  change with every pose, which is what a projection does and what nothing may
+  assert otherwise. `SimTest` measures rigidity through the air, not on screen.
+
+#### The body stands on its feet
+
+A leg is a fixed length, so a foot set down further from its socket is a socket
+held lower. Nothing else decides how high a creature rides: `Gait` reads the
+height off the feet that are actually down, per pair, and `Stature` takes it as
+the body's clearance. Three things fall out of that one piece of arithmetic and
+none of them is animated.
+
+* **The bob.** A stance leg at constant length lifts the body as it comes
+  underneath and lowers it as it passes. `VAULT_ABSORBED` is how much of that the
+  animal takes up in its own joints — a stance limb is not a strut — and what is
+  left is a rise and fall at exactly step frequency, largest on a sprawled build
+  whose geometry is most sensitive to it and nearly absent on a columnar one.
+* **Attitude.** Shoulders and hips are held by different bones, so an animal with
+  shorter arms than legs stands nose-down without anything saying so.
+* **No floating.** A body is never held higher than the legs under it can reach.
+  Take away some of what they can extend to and it comes down.
+
+Foot clearance during a step is derived on the same terms: a real height in world
+pixels, sized as a share of how high the body is standing, with the authored
+`step_height` kept as a floor. That is what lets an elephant step over what a
+lizard walks around — and, because it is a height rather than a screen offset, it
+is the number something small has to be shorter than to pass underneath.
+
+#### Routing round obstacles
+
 Each upper bone, lower bone and foot is also tested as a capsule against every
-other creature's tissue-aware body. A penetration shifts the foot target and
+other creature's tissue-aware body, on the ground plane and carrying the band of
+heights it occupies. A penetration shifts the foot target and
 the two-bone chain is solved again, repeatedly over a small bounded pass. This
 makes the knee fold and a planted foot slide around the obstacle while FABRIK
 continues to guarantee exact bone lengths. The correction is written back to
 the gait's world-space foot state, so it persists rather than snapping into the
-obstacle again next tick. Limbs remain kinematic—they react to a body but do not
-push that body—and a destroyed limb or a hole in the obstacle stops colliding.
+obstacle again next tick. A destroyed limb or a hole in the obstacle stops
+colliding, and so does anything at a height this piece of leg does not occupy.
+
+Limbs remain kinematic against the body they route around — being walked into
+does not shove the leg aside. The reverse is not true and cannot be: a leg is the
+one structure that spans the whole gap underneath an animal, so it is the only
+part of a tall one a low one can reach, and a body is pushed out of any leg whose
+band it shares. That is the pass a lizard meets on its way past an elephant.
 
 Diagonal pairs (front-left + rear-right, front-right + rear-left) share a beat,
 and a foot may never lift while the opposite diagonal is airborne — that is what
@@ -1529,6 +1618,7 @@ godot --headless --path . --script tests/AnatomyTest.gd   # structure -> functio
 godot --headless --path . --script tests/FeedingTest.gd   # severed parts, carrying, eating
 godot --headless --path . --script tests/HeightTest.gd    # the vertical axis and what it gates
 godot --headless --path . --script tests/PostureTest.gd   # the three stances, from one angle
+godot --headless --path . --script tests/LocomotionTest.gd # legs solved from the foot up
 ```
 
 `HeightTest` is weighted toward the seams rather than the arithmetic — the places

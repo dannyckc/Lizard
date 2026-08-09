@@ -260,7 +260,15 @@ func _check_bite_position_hangs_the_piece(player: Creature, target: Creature) ->
 ## same read produces a gaping mouth around a thigh and a shut one around an ankle.
 func _check_a_mouthful_props_the_jaws_open(player: Creature, target: Creature) -> void:
 	_clear()
+	# A donor with legs long enough that one of them is unambiguously more than a
+	# mouthful. Said out loud rather than inherited from whatever the habitat's
+	# second body happens to be built like: what is under test is the division of
+	# a piece by a gape, and a piece that only just loses to the gape it is divided
+	# by tests the fixture instead.
+	var leg: float = target.params.leg_length
+	target.params.leg_length = leg * 1.8
 	var part: CarrionField.Part = _sever_limb(target, "RR")
+	target.params.leg_length = leg
 	if part == null:
 		return
 	_park(target)

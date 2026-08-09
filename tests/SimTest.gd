@@ -133,9 +133,11 @@ func _run_case(preset_name: String) -> void:
 		var airborne: int = 0
 		var groups_up := [false, false]
 		for limb in creature.gait.limbs:
-			for j in range(limb.lengths.size()):
-				var actual: float = limb.joints[j].distance_to(limb.joints[j + 1])
-				max_bone_error = maxf(max_bone_error, absf(actual - limb.lengths[j]) / limb.lengths[j])
+			# Bones are rigid where they are real — through the air, across the
+			# ground positions and the heights together. The drawn chain is a
+			# projection of that and its screen lengths change with every pose, so
+			# measuring it here would be measuring the perspective.
+			max_bone_error = maxf(max_bone_error, limb.bone_error())
 			if is_nan(limb.joints[2].x):
 				nan_seen = true
 			if limb.stepping:
@@ -148,15 +150,25 @@ func _run_case(preset_name: String) -> void:
 			# 4. limb grounding. Feet are placed in world space and the body
 			# then walks out from under them, so what goes wrong is geometric:
 			# a leg left far enough behind straightens out and ends up drawn
-			# across the torso. Measured against the socket's own outward axis,
-			# so it means the same thing at any body heading.
+			# across the torso.
+			#
+			# The line it may not cross is the animal's own midline, not its
+			# shoulder: standing underneath itself is exactly what an upright build
+			# does, and a foot inboard of its socket is that stance working rather
+			# than a leg drawn through a body. Measured off the spine station the
+			# socket hangs from, against that station's own outward axis, so it
+			# means the same thing at any heading and on either side.
 			var anchor: Spine.Frame = creature.body.anchors[limb.key]
-			var outward: Vector2 = anchor.perp * limb.side
+			var station: int = clampi(int(round(
+				(creature.params.front_limb_t if limb.pair == Limb.FRONT
+					else creature.params.rear_limb_t) * float(spine.size() - 1))),
+				0, spine.size() - 1)
+			var outward: Vector2 = spine.perps[station] * limb.side
 			for j2 in [1, 2]:
 				worst_inboard = minf(worst_inboard,
-					(limb.joints[j2] - anchor.pos).dot(outward) / limb.total_length)
+					(limb.plan[j2] - spine.points[station]).dot(outward) / limb.plan_limit)
 			max_limb_reach = maxf(max_limb_reach,
-				anchor.pos.distance_to(limb.joints[2]) / limb.total_length)
+				anchor.pos.distance_to(limb.plan[2]) / limb.plan_limit)
 			max_foot_drift = maxf(max_foot_drift, limb.error / maxf(limb.stride, 0.001))
 		max_airborne = maxi(max_airborne, airborne)
 		if groups_up[0] and groups_up[1]:
@@ -198,21 +210,22 @@ func _run_case(preset_name: String) -> void:
 	if max_bend_excess > 0.001:
 		failures.append("%s exceeded the bend limit by %.4f rad" % [label, max_bend_excess])
 	if max_bone_error > 0.02:
-		failures.append("%s IK bone length drifted %.1f%% (>2%%)" % [label, max_bone_error * 100.0])
+		failures.append("%s bone length drifted %.1f%% (>2%%)" % [label, max_bone_error * 100.0])
 	if steps_taken < 8:
 		failures.append("%s barely stepped (%d steps in 11s of walking)" % [label, steps_taken])
 	if both_groups_airborne:
 		failures.append("%s lifted both diagonals at once (creature would fall)" % label)
 	if idle_drift > 0.01:
 		failures.append("%s feet crept %.3f px while idle" % [label, idle_drift])
-	# A negative outward offset means a knee or a foot ended up on the far side
-	# of its own socket, i.e. the limb was drawn through the torso.
+	# A negative outward offset means a knee or a foot crossed the animal's own
+	# midline and the limb was drawn through the far side of the torso.
 	if worst_inboard < 0.0:
-		failures.append("%s drew a limb %.3f of its length inside the body" % [label, -worst_inboard])
+		failures.append("%s drew a limb %.3f of its reach past its own midline"
+			% [label, -worst_inboard])
 	# Past the reach limit the chain is pulled straight and stops reading as a
 	# leg; 1% of slack covers the solver's tolerance.
 	if max_limb_reach > params.limb_max_reach + 0.01:
-		failures.append("%s stretched a limb to %.3f of its length (limit %.2f)"
+		failures.append("%s stretched a limb to %.3f of its reach (limit %.2f)"
 			% [label, max_limb_reach, params.limb_max_reach])
 	# Feet may fall behind — the diagonal gate makes them queue — but a foot
 	# several strides adrift is being towed, not walked.
