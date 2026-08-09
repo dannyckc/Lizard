@@ -110,11 +110,12 @@ var lock: float = 0.94
 ## to jump.
 var fold: float = 0.30
 ## How extended this limb is standing *this tick*: `stand`, less however much of
-## its own fold the animal is spending on getting lower. The crouch, and nothing
-## else about it is written down anywhere — a leg held at less of itself is a
-## shorter leg, so the stance comes in, the body comes down with it, and every
-## band and silhouette follows because all of them are read off the height the
-## feet are holding.
+## its own fold the animal is spending on getting lower — or more than it, when
+## something is pushing the joint the other way. The crouch and the push-off, and
+## nothing else about either is written down anywhere: a leg held at a different
+## fraction of itself is a different length of leg, so the stance moves, the body
+## goes with it, and every band and silhouette follows because all of them are
+## read off the height the feet are holding.
 var working: float = 0.78
 ## Half-angle of the fan the socket swings the whole limb through.
 var swing: float = 1.08

@@ -35,7 +35,7 @@ godot --path . --editor   # open the editor
 | left click | bite (anatomical hit + cooldown). Never refused: aimed at something the body cannot get its mouth onto, the lunge is thrown and misses. The reticle is hollow and the `TARGET` readout says why before you press it |
 | hold left click | keep hold of what you bit — a creature, or a severed part; drag it, carry it off, or be dragged by it |
 | click again while holding | chew: shut the same jaws on the same flesh once more. On a piece of meat this works it in, and swallows it once what is left will fit |
-| `Space` | leave the ground — a leap from a standing start, and a climb for anything with wings. A creature with no leap in its legs stays put |
+| hold `Space`, then release | wind up a jump and take it. Holding is the animal *preparing* — it shifts its weight onto whichever girdle does the pushing, folds those joints, and stretches whatever elastic tissue it carries; releasing is the push-off, and the jump is worth however much got wound. A tap is a hop, a full hold is a leap, and holding past the top is a creature standing in a crouch: the store fills in a time its own legs set and nothing accumulates after that. A creature with no jump in its anatomy visibly gathers and stays on the floor. In the air the same key is a climb, for anything with wings |
 | `Ctrl` | come down. In the air that is a controlled descent with wings out and a dive with them folded; on the ground it is close control — the animal slows to 40% of its top speed and folds as low as its own joints go, which is a belly-down stalk on a lizard, a crouch on a cat, and on an elephant simply a slower elephant |
 | `Shift` | sprint |
 | `F1` | open/close **Creature Creation** — the species, every parameter and the live specimen on one page. `Esc` also closes it |
@@ -438,6 +438,112 @@ since the gait was written — it is that same lie told about the whole animal.
 `Posture.PERSPECTIVE` is the tilt, and it is the only constant in the game that is
 presentation rather than simulation.
 
+### Jumping
+
+A jump used to be one parameter. `leap_height` was a multiple of the animal's own
+standing height, consulted once when the key went down, and it could say anything
+at all: it said an Elephant could not leave the ground because somebody wrote a
+zero, and it would have said a creature with no legs could clear three of itself
+if somebody had written a three. Nothing about the body was consulted and nothing
+about the body could contradict it.
+
+It is now five measurements and a control that stores work.
+
+**The control is a hold.** `Space` held on a body standing on something is the
+animal preparing, and the phases are the order a real one does it in. Nothing
+here is a timeline: every transition is either a measurement coming true or one
+limb's own pendulum period elapsing, and the pendulum is the same
+`Locomotion.swing_time` the gait picks feet up with.
+
+| | |
+|---|---|
+| gathering | weight comes off the girdle that is not pushing and onto the one that is — opposite signs on the two joints, because that is what shifting weight is |
+| charging | the driving joints fold, and whatever elastic tissue crosses them winds. The only phase that accumulates, and it *saturates* rather than stopping: hold past the top and the animal simply stays in the crouch it reached |
+| pushing off | the joints throw open toward their locks. The body rises on its own legs here, before there is any elevation at all — a Cat rides 36 px standing, 19 px at the bottom of its crouch and 38 px at full extension, and only then leaves |
+| leaping | tucked at the top by however hard it left, letting that go as it falls |
+| reaching | the legs come out for the ground, short of locked. Entered when the *predicted* time to impact drops below what it takes to get them out, so it is a measurement of the arc rather than a cue |
+| absorbing | the joints fold by how much of what they could have caught the arrival actually used |
+| recovering | and back up. A key still held at the bottom is the next jump, already half gathered |
+
+**Every one of those is a joint angle, and there is no animation anywhere.** The
+whole channel is one signed number per girdle — positive folds toward the joint's
+own fold stop, negative extends toward its lock — handed to `Gait` in place of
+what used to be a one-way crouch. A leg held at a different fraction of itself is
+a different length of leg, so the stance moves, the body follows its feet, and the
+silhouette, the height bands, the drawn attitude and what can walk underneath all
+come with it, because every one of them was already read off how extended a leg
+is. That is also why the push-off is visible *as a push*: the animal genuinely
+stands up on its legs, and the ballistic arc only starts once it has.
+
+**What the hold is worth is anatomy.** `Leap` is the fifth derived descriptor,
+built on the terms of the other four, and five laws do the whole of it:
+
+- **A jump is work against weight.** The apex is the work put in over what the
+  body weighs, and work is force times distance. The force per unit weight is
+  `Locomotion.power` — the same square-cube ratio that makes a heavy animal slow
+  off the mark. The distance is how far the joints extend through, which is why
+  crouching first buys height: it moves the near end of the stroke down toward the
+  joint's fold.
+- **A body holds itself up first.** One body weight of the push is spent standing
+  there. What is left accelerates the animal, so a build whose legs cannot push
+  harder than it weighs does not jump badly — it does not jump, on an inequality
+  rather than a category.
+- **Muscle is weaker the faster it shortens.** A leg thrown open develops a
+  fraction of what it could hold, which is the entire reason a spring is worth
+  carrying.
+- **A store is only as good as the joint that spends it.** Elastic tissue gives
+  its work back by pushing something open, so a limb with nowhere to go returns
+  almost nothing however much it holds.
+- **A push is taken about a pivot.** To drive with a girdle the animal has to get
+  its weight over it, and how far it can shift is set by what there is on the far
+  side to balance — `Physique.balance`, measured off the same chain of discs the
+  mass is. That, and not a rule about quadrupeds, is why the hind limbs propel:
+  rearing back over the hips is something every four-legged animal can do, and
+  getting the trunk and tail up over the shoulders is something none of them can.
+  It is also why the two builds in the file with long heavy tails jump best.
+
+There is one flat ceiling, and it is the least arbitrary number in the file.
+Muscle does roughly fixed work per unit of its own mass and only so much of any
+animal is muscle, so the work per unit of *body* weight — which is exactly what an
+apex is — has a limit that does not care how large the animal is. It is why a flea
+and a horse jump to within a factor of two of the same absolute height. Applied as
+a saturation rather than a clamp, so ordering is never disturbed: a Cheetah, whose
+numbers ask for a great deal more than a Cat's, comes out better than a Cat rather
+than three times a Cat.
+
+**Springs are structure, not a multiplier.** `Spring` sits beside `Articulation`,
+one store per girdle, and holds three facts: how much of that girdle's drive is
+elastic (`fore_spring` / `hind_spring`), what length it is wound along (the distal
+bone and the foot, read off the joint), and whether it can be let go all at once
+(`spring_latch`). The vocabulary is deliberately mechanical — resilin in a pad, a
+bent cuticle, the long calcaneal tendon of a macropod are the same three numbers,
+and the simulation has no fourth question that would tell them apart. The latch is
+what makes "can an insect jump" have no general answer: a store paid out through a
+joint can only leave as fast as that joint opens, and a very short limb barely
+opens, so a body of those proportions throws itself nowhere without a catch and a
+long way with one.
+
+**And whether there is a jump at all is a comparison, not a threshold.** If the
+whole animal cannot throw itself higher than it picks one foot up to walk, what it
+has is not a jump — it is a step, and it already has one of those. Everything that
+would stop a creature leaving the ground shows up on the left of that inequality,
+so nothing has to know which of them went wrong:
+
+```
+              stands   foot lift   jump   heights   pushes with
+ Elephant     147 px     32 px      —       —       — cannot leave the ground
+ Lizard        22 px      9 px     17 px   0.8      36% fore / 64% hind
+ Camel        112 px     25 px     61 px   0.5      27% / 73%
+ T. rex       109 px     24 px     83 px   0.8       0% / 100%  (two legs)
+ Cat           60 px     13 px    123 px   2.1      25% / 75%
+ Cheetah       69 px     15 px    190 px   2.8      24% / 76%
+ Kangaroo      76 px     17 px    220 px   2.9       0% / 100%  (two legs)
+```
+
+Nothing in that table was typed in. Shorten the Cat's shin, straighten its knee,
+take the tendon out of it or make it heavier and the row moves, because all four
+are terms in the same arithmetic.
+
 ### Traversal
 
 The vertical layer knew whether two things were in each other's way. What it did
@@ -574,7 +680,9 @@ and an Elephant's *inside* its own silhouette.
 - **Columnar** — an Elephant. Legs as pillars, the body slung between them, and
   weight the whole point: it prefers three feet down, so what it gets is a
   four-beat amble rather than a trot. It carves rather than turns, and it cannot
-  leave the ground at all: nothing forbids it, its `leap_height` is zero.
+  leave the ground at all: nothing forbids it, and there is no parameter that
+  could have. Its knees do not open far enough to push through and its muscle
+  cannot beat its own weight, which are the two halves of *Jumping* below.
 
 Two things do *not* come from the projection, and both would be wrong if they did.
 Limb thickness is priced off the bone rather than off its plan view, or a columnar
@@ -841,9 +949,10 @@ is called afterwards. What sets the three numbers is:
   launch, and a launch needs three things a body may or may not have: legs that
   point along the animal rather than out beside it (`sin θ` of the posture's own
   tilt), a back that folds (`max_bend_deg × segments`, against a body that could
-  curl into a ring), and the ability to leave the ground at all (`leap_height`,
-  already zero on the Elephant). They multiply, so failing any one is failing all
-  three — which is why a sprawled animal trots flat out instead of bounding
+  curl into a ring), and the ability to leave the ground at all (`Leap.launch`,
+  which is the animal's own derived jump quoted against its own height, and comes
+  out at nothing on the Elephant). They multiply, so failing any one is failing
+  all three — which is why a sprawled animal trots flat out instead of bounding
   without any rule saying a sprawled creature may not.
 - **Whether the feet on one side would collide.** A hind foot swinging forward
   past a planted forefoot on the same side is a real problem for long legs on a
@@ -2077,11 +2186,13 @@ The parameters worth reaching for first:
 | Weight carried high, or a long light shin | `fore_upper_share` / `hind_upper_share` |
 | Propulsion without bending the leg | `toe_push` up — the foot rolls onto its toe at the end of each stance |
 | Taller, or reaching higher | `leg_length` up (the body rides on it), `neck_lift` up (the jaws do) |
-| Something that can jump | `leap_height` — a multiple of the animal's own standing height; 0 is a body that cannot leave the ground |
+| Something that can jump | nothing directly — it is derived. Loosen `hind_fold_range` so the joint has travel, raise `muscle_power` against `density` so the push beats the body's weight, stand it up (`posture`) so the push goes upward, and give it `hind_spring`. See *Jumping* |
+| Elastic tissue in a leg | `fore_spring` / `hind_spring` — how much of that girdle's drive passes through something that stores work rather than being made at the moment it is needed |
+| A catapult rather than a tendon | `spring_latch` up — the store is released independently of the joint, which is the only way a very short limb throws a body anywhere |
 | Something that can fly | `wing_lift` up from 0 — the only thing separating gliding and high flight from a leap |
 | Marching vs. loose legs | `beat_coupling` (1 = a pair that lands as one, 0 = four independent legs). *Which* limbs share a beat is derived — see *Gait* |
 | Walks on two legs | `arm_length` under ~0.46 of `leg_length` — an arm that cannot reach the floor is carried, and nothing else is needed |
-| Gallops, bounds or hops | `leap_height` up, `max_bend_deg` up, an upright `posture` — all three, because a launch needs legs that point along the body, a back that folds and somewhere to push to |
+| Gallops, bounds or hops | anything that buys the animal a jump (above), `max_bend_deg` up, an upright `posture` — all three, because a launch needs legs that point along the body, a back that folds and somewhere to push to |
 | Paces, and rolls doing it | long legs on a short trunk: `leg_length` up against `rear_limb_t - front_limb_t` |
 | Wider / tighter leg sweep | `fore_swing_deg` / `hind_swing_deg` |
 | Jaws that close harder | `bite_damage` up — force at the jaws, not depth in the flesh; the teeth decide what it becomes |
@@ -2235,10 +2346,10 @@ the other senses.
 
 ## Tests
 
-Nineteen headless checks cover controls, movement feel, simulation, rendering,
+Twenty headless checks cover controls, movement feel, simulation, rendering,
 UI, combat, sight, smell, hearing, anatomy, feeding, the bodies in the habitat,
-the vertical axis, the four stances, what a limb is and how it is joined on, how
-the feet come down and getting past things:
+the vertical axis, leaving the ground, the four stances, what a limb is and how
+it is joined on, how the feet come down and getting past things:
 
 ```sh
 godot --headless --path . --script tests/ControlsTest.gd # input/head-look isolation
@@ -2254,6 +2365,7 @@ godot --headless --path . --script tests/RagdollTest.gd   # the dead body
 godot --headless --path . --script tests/AnatomyTest.gd   # structure -> function -> gait
 godot --headless --path . --script tests/FeedingTest.gd   # severed parts, carrying, eating
 godot --headless --path . --script tests/HeightTest.gd    # the vertical axis and what it gates
+godot --headless --path . --script tests/JumpTest.gd      # the hold, the store, and the anatomy behind both
 godot --headless --path . --script tests/PostureTest.gd   # the four stances, from one angle
 godot --headless --path . --script tests/FootfallTest.gd  # what order the feet come down in
 godot --headless --path . --script tests/LocomotionTest.gd # legs solved from the foot up

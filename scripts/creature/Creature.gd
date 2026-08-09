@@ -68,9 +68,25 @@ var posture: Posture = Posture.new()
 ## beside the posture and for the same reason — it is skeleton rather than
 ## setting. See Articulation.
 var articulation: Articulation = Articulation.new()
+## What in this body stores work and gives it back — the elastic structures the
+## joints above cross. Rebuilt beside the articulation and never apart from it: a
+## spring is wound along a bone and released through a joint, so it cannot be
+## described until both of those are. See Spring.
+var spring: Spring = Spring.new()
 ## Where the body is in the one direction the plane does not have. Zero on
 ## anything standing on the ground, which is nearly everything nearly always.
 var elevation: Elevation = Elevation.new()
+## Whether this body can throw itself off the ground, and how far — read off the
+## mass, the muscle, the joint travel and the store, once per tick and ahead of
+## everything that uses it. Not a setting: there is no leap parameter any more,
+## and a creature that cannot jump is one whose arithmetic came out small. See
+## Leap.
+var leap: Leap = Leap.new()
+## And one jump in progress: how much of the store is wound, and what each
+## girdle's joints are being asked to do about it. See Jump, which owns the order
+## the phases come in and owns nothing else — every pose it produces is the same
+## joint angle the crouch and the stance are already read off.
+var jump: Jump = Jump.new()
 ## What heights this body occupies and what heights its jaws reach, read off the
 ## solved pose each tick beside the physique. Not settings — see Stature.
 var stature: Stature = Stature.new()
@@ -424,6 +440,11 @@ func rebuild() -> void:
 	posture = Posture.new(params.posture)
 	articulation = Articulation.new()
 	articulation.configure(posture, params)
+	# And what crosses those joints elastically. Structural in the same sense the
+	# joints are — it is tissue rather than a setting — so it is laid down here
+	# with the rest of the skeleton rather than refreshed per tick.
+	spring = Spring.new()
+	spring.configure(articulation, params, size_scale)
 	# Where the girdles are is where the limbs hang from, and the skeleton has to
 	# be told: a pectoral bar bolted across the third torso column is no use to a
 	# forelimb whose socket has been moved to the sixth. Cheap and idempotent —
@@ -457,6 +478,13 @@ func rebuild() -> void:
 	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
 	locomotion.update(posture, physique, params, size_scale, articulation)
 	gait.loco = locomotion
+	# ...and what all of that comes to about leaving the ground. After the
+	# locomotion because it is built on it, and before anything that reads it:
+	# the gait asks whether a girdle can throw the animal, the jump asks how far,
+	# and the creation menu asks both.
+	leap.update(posture, locomotion, physique, spring, params, size_scale,
+		stature.stand_height())
+	gait.leap = leap
 	_update_stature()
 	if alive:
 		ragdoll = null
@@ -523,6 +551,7 @@ func reset(at: Vector2 = Vector2.ZERO, facing: float = 0.0) -> void:
 	crouch = 0.0
 	_standing_on = {}
 	elevation.reset()
+	jump.reset()
 	anatomy.reset()
 	bite_cooldown_remaining = 0.0
 	bite_connected = false
@@ -581,6 +610,13 @@ func _physics_process(delta: float) -> void:
 	# solving the whole tick before knowing how fast it was allowed to move.
 	locomotion.update(posture, physique, params, size_scale, articulation)
 	gait.loco = locomotion
+	# ...and what all of that comes to about leaving the ground. After the
+	# locomotion because it is built on it, and before anything that reads it:
+	# the gait asks whether a girdle can throw the animal, the jump asks how far,
+	# and the creation menu asks both.
+	leap.update(posture, locomotion, physique, spring, params, size_scale,
+		stature.stand_height())
+	gait.leap = leap
 
 	bite_cooldown_remaining = maxf(bite_cooldown_remaining - delta, 0.0)
 	_chew_cooldown = maxf(_chew_cooldown - delta, 0.0)
@@ -671,7 +707,8 @@ func _physics_process(delta: float) -> void:
 	gait.update(delta, body, gait_dir, speed_norm, params, size_scale,
 		Callable(self, "_limb_contact_push"), anatomy.state,
 		stature.reference, elevation.is_airborne(),
-		Callable(self, "_surface_under_foot"), crouch)
+		Callable(self, "_surface_under_foot"), _limb_load(),
+		jump.drive if jump.active() else 0.0)
 	_carry_limp_limbs(delta)
 	for contact in gait.landed:
 		var footfall: float = (0.07 + minf(0.11, absf(speed) / 1600.0)) * size_scale
@@ -746,6 +783,10 @@ func collapse() -> void:
 	# and it falls the whole way this tick rather than over a graceful arc — the
 	# arc was the animal flying, and there is no animal now.
 	elevation.ground()
+	# ...and whatever it had wound is not going anywhere either. A store is held
+	# closed by muscle, and a body that has stopped driving itself has stopped
+	# holding anything.
+	jump.reset()
 	# A dead mouth drops what is in it. Nothing else would be true of a mouth.
 	_drop_mouthful()
 	bite_held = false
@@ -1030,29 +1071,101 @@ func _update_head_look(delta: float) -> void:
 
 ## One tick of the vertical axis.
 ##
-## Deliberately the shortest step in the tick, and deliberately upstream of the
-## horizontal one: everything else in this file solves the ground plane and then
-## asks this scalar whether the answer applies. A leap is *commanded* here and
-## nowhere else — `command.climb` above zero on a body that is standing on
-## something — because "throw yourself upward" is the one vertical action a
-## terrestrial animal has, and it has to be a push against the ground rather than
-## a mode the creature enters.
+## Deliberately upstream of the horizontal one: everything else in this file
+## solves the ground plane and then asks this scalar whether the answer applies.
+## A leap is *commanded* here and nowhere else — because "throw yourself upward"
+## is the one vertical action a terrestrial animal has, and it has to be a push
+## against the ground rather than a mode the creature enters.
 ##
-## What the legs can put into it is the same `locomotion` the gait already reads
-## and the same haul factor a grip already imposes, so a creature with a dead leg
-## clears less and one with an Elephant on its tail barely leaves the floor —
-## neither of which is written here.
+## What it is not any more is instantaneous. `command.climb` held on a body
+## standing on something is the animal *preparing*: it shifts its weight onto
+## whichever girdle is going to do the pushing, folds those joints, and winds
+## whatever elastic tissue it carries — see Jump for the order and Spring for what
+## there is to wind. The push happens when the command drops, and how far it goes
+## is how much got wound, which is why a tap is a hop and a held key is a leap.
+## Nothing accumulates past the top: the store fills in a time this animal's own
+## legs set, and after that holding on is a creature standing in a crouch.
+##
+## The one thing decided here rather than in Jump is what a push is worth on this
+## particular tick, and all three terms of it are things the rest of the body has
+## already measured: how many of the driving feet were actually on the ground,
+## what a grip is hanging off the animal, and how much of its nervous system still
+## reaches its legs. So a creature caught mid-stride jumps short, one with an
+## Elephant on its tail barely leaves the floor, and one with a dead leg clears
+## less — none of which is written anywhere as a rule about jumping.
 func _advance_elevation(delta: float) -> void:
 	var effort: float = _haul_factor()
 	if anatomy.state.impaired:
 		effort *= anatomy.state.locomotion
-	if command.climb > 0.0 and elevation.is_grounded() and params.leap_height > 0.0:
-		# Peak is quoted against how tall the animal stands, so the same trait
-		# means the same thing on a mouse and on a horse — and so what a leap can
-		# clear is legible: it is measured in the same unit as the back of the
-		# thing being cleared.
-		elevation.leap(params.leap_height * maxf(stature.stand_height(), 1.0), effort)
+	jump.advance(delta, command.climb > 0.0, leap, elevation, locomotion,
+		_footing(), command.throttle)
+	if jump.took_off:
+		# Where the push is aimed. A jump is a push against the floor and the floor
+		# is underneath, so most of it goes up whatever the animal intended; leaning
+		# into it trades height for ground, and trades it exactly — the speed is
+		# split between the two axes and the apex is what is left of it, so a
+		# creature cannot lean its way into a longer jump than it had the legs for.
+		var peak: float = jump.launch_peak * effort
+		var lean: float = clampf(Leap.DIRECTION_SHARE * jump.launch_lean, 0.0, 0.95)
+		elevation.leap(peak * (1.0 - lean * lean), 1.0)
+		speed += sqrt(2.0 * Elevation.GRAVITY * maxf(peak, 0.0)) * lean
 	elevation.advance(delta, command.climb, params.wing_lift, body_length(), effort)
+
+
+## How much of each girdle is actually standing on something, 0..1 per pair.
+##
+## A push needs a floor to push against, and which feet are on one is not a
+## decision — it is where the gait last put them. Measured rather than assumed, so
+## a creature that lets go of the key with a hind foot halfway through a swing
+## pushes with the one that is down and gets a correspondingly shorter jump, and
+## one standing squarely gets all of it.
+##
+## One tick stale, and deliberately: the vertical axis is solved ahead of the
+## horizontal one and the gait runs at the end of the tick, so this is where the
+## feet were when the animal last stood on them. Sixteen milliseconds, and the same
+## lag the physique and the stature are read with.
+##
+## Limbs that are not there and limbs that are being carried are not counted on
+## either side of the fraction: a three-legged animal is judged on the legs it
+## has, which is the same thing every other share in this file does with a severed
+## limb.
+func _footing() -> Vector2:
+	var down := Vector2.ZERO
+	var counted := Vector2.ZERO
+	for limb in gait.limbs:
+		if limb.severed or limb.carried or not limb.bearing:
+			continue
+		var pair: int = 0 if limb.pair == Limb.FRONT else 1
+		counted[pair] += 1.0
+		if not limb.stepping:
+			down[pair] += 1.0
+	return Vector2(
+		down.x / counted.x if counted.x > 0.0 else 0.0,
+		down.y / counted.y if counted.y > 0.0 else 0.0)
+
+
+## What each girdle's joints are being asked for this tick, taken together.
+##
+## Two demands land on the same joint and there is only one joint, so they are
+## resolved here rather than each being applied to a pose the other has already
+## moved. The crouch is a reach — an animal lowering itself toward something it is
+## pointed at, or creeping — and it only ever folds; the jump both folds and
+## extends, and while it is doing either it is the one driving the legs. So the
+## jump has the last word whenever it is asking for anything, and the reach is
+## what the body does with its legs the rest of the time.
+##
+## Which is not a priority table so much as an observation: an animal in the
+## middle of a push-off is not also crouching toward the floor, and one that is
+## crouching toward the floor has not started a jump. The only place the two meet
+## is the instant a stalking creature decides to leap, and there the crouch it is
+## already in is the gather it would have made anyway.
+func _limb_load() -> Vector2:
+	var reach := Vector2(crouch, crouch)
+	if not jump.active():
+		return reach
+	return Vector2(
+		jump.load.x if absf(jump.load.x) > reach.x else reach.x,
+		jump.load.y if absf(jump.load.y) > reach.y else reach.y)
 
 
 func _integrate_motion(delta: float) -> void:

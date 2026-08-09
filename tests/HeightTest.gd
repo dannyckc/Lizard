@@ -163,6 +163,11 @@ func _check_states() -> void:
 ## What the legs can do is what decides whether there is a leap at all, and it is
 ## an anatomical trait rather than a control: a columnar animal has no way to
 ## throw itself into the air and nothing anywhere says so.
+##
+## Held-and-released rather than pressed, because that is what the control is now
+## — see Jump. The creature gathers, crouches, winds whatever it has to wind, and
+## goes when the key comes up; a body that never releases never leaves the floor,
+## which is why every helper below lets go.
 func _check_leap(player: Creature) -> void:
 	_check(_peak_leap(player, "Cat") > 0.0, "a Cat could not leave the ground")
 	_check(_peak_leap(player, "Elephant") <= 0.0,
@@ -179,7 +184,10 @@ func _check_leap(player: Creature) -> void:
 	player.command = climb
 	var footfalls: int = 0
 	var aloft: int = 0
-	for _tick in 90:
+	for tick in 120:
+		# Long enough to be at full charge, and then let go. Everything after that
+		# is the arc.
+		player.command.climb = 1.0 if tick < 60 else 0.0
 		player._physics_process(TICK)
 		if player.elevation.is_airborne():
 			aloft += 1
@@ -189,13 +197,19 @@ func _check_leap(player: Creature) -> void:
 	_apply(player, "Lizard")
 
 
+## The apex of one fully charged standing jump.
+##
+## Sixty ticks of holding is comfortably past every preset's own charge time —
+## which is a limb's swing period and so is longest on the largest animal — and
+## the release is a real one: the command goes to zero and the body pushes off
+## whatever it managed to wind.
 func _peak_leap(creature: Creature, preset: String) -> float:
 	_apply(creature, preset)
 	var climb := MovementInput.Command.new()
-	climb.climb = 1.0
+	creature.command = climb
 	var peak: float = 0.0
-	for _tick in 200:
-		creature.command = climb
+	for tick in 260:
+		climb.climb = 1.0 if tick < 60 else 0.0
 		creature._physics_process(TICK)
 		peak = maxf(peak, creature.elevation.height)
 	creature.command = MovementInput.Command.new()
@@ -227,10 +241,11 @@ func _check_over_a_charge(player: Creature, target: Creature) -> void:
 
 	# The leap has to clear the *back* of the other animal, so the contest is a
 	# real one rather than a dodge key: check the geometry before the dynamics.
-	_check(player.params.leap_height * player.stature.stand_height() > target.stature.torso.y,
+	# Off what this body's legs actually come to rather than off a species number,
+	# which is the point of the whole derivation — see Leap.
+	_check(player.leap.peak(1.0) > target.stature.torso.y,
 		"a Cat's leap (%.0f px) does not clear a Lizard's back (%.0f px) — nothing below can pass"
-			% [player.params.leap_height * player.stature.stand_height(),
-				target.stature.torso.y])
+			% [player.leap.peak(1.0), target.stature.torso.y])
 
 	# Walked into, the charger is shouldered aside exactly as it always was.
 	var grounded_shove: float = _charge(player, target, false)
@@ -248,9 +263,12 @@ func _check_over_a_charge(player: Creature, target: Creature) -> void:
 
 ## Runs the player at the target and reports how far the target was pushed.
 ##
-## With `leap` set the climb is asked for once, as the gap closes — held down it
-## would simply bounce, and a creature landing on the far side of its victim is
-## not the thing being measured.
+## With `leap` set the charge is held as the gap closes and dropped when the
+## victim is close enough to clear — which is the control the player has, and is
+## why the window is measured in distance rather than in ticks. Held all the way
+## through, the creature would still be crouching when it arrived; held for no
+## time at all it would hop. What is wanted is one committed jump, so it winds for
+## as long as the approach allows and lets go.
 func _charge(player: Creature, target: Creature, leap: bool) -> float:
 	player.reset(Vector2.ZERO, 0.0)
 	target.reset(Vector2(300.0, 0.0), PI)
@@ -268,10 +286,13 @@ func _charge(player: Creature, target: Creature, leap: bool) -> float:
 	# past that would only measure where the leap came down.
 	for _tick in 260:
 		drive.climb = 0.0
-		if leap and not jumped and player.elevation.is_grounded() \
-				and player.head_pos.distance_to(target.head_pos) < 150.0:
-			drive.climb = 1.0
-			jumped = true
+		if leap and not jumped and player.elevation.is_grounded():
+			# Wind it up on the approach and let go inside the last stride. Both
+			# halves are the same key: held, the animal is gathering; released, it
+			# goes with whatever that came to.
+			var gap: float = player.head_pos.distance_to(target.head_pos)
+			drive.climb = 1.0 if gap >= 150.0 else 0.0
+			jumped = gap < 150.0
 		player.command = drive
 		target.command = MovementInput.Command.new()
 		player._physics_process(TICK)

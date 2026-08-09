@@ -167,9 +167,12 @@ var _phase: Dictionary = {"RL": 0.0, "RR": 0.5, "FL": 0.5, "FR": 0.0}
 ## way it is turning, measured off the two hind sockets rather than asked for:
 ## the outside one of a turn travels further, and a running animal leads with the
 ## inside limb.
+## `spring` is how completely this build can throw itself off the ground — see
+## Leap.launch, which works it out from the same joints, muscle and elastic tissue
+## a jump is taken with.
 func update(posture: Posture, loco: Locomotion, p: CreatureParams,
 		hip: float, speed: float, reach: Vector2, gap: float,
-		lead: float, bearing: bool) -> void:
+		lead: float, bearing: bool, spring: float = 0.0) -> void:
 	if posture == null or loco == null or p == null:
 		return
 	forelimbs_bear = bearing
@@ -204,12 +207,15 @@ func update(posture: Posture, loco: Locomotion, p: CreatureParams,
 	#     reach on a sprawled build and three quarters of it on an upright one.
 	#   * how far the back folds, which is what carries a hind foot up underneath
 	#     the shoulders and lets the pair land together.
-	#   * whether the animal can leave the ground at all. `leap_height` is already
-	#     exactly that statement and is already zero on a columnar build, so
-	#     nothing here had to say an Elephant does not gallop.
+	#   * whether the animal can leave the ground at all. That used to be
+	#     `leap_height`, a species parameter that said so; it is now `Leap`, which
+	#     works it out from the joint travel, the muscle and the store — so an
+	#     Elephant does not gallop for the same reason it does not jump, which is
+	#     that its knees do not open far enough to push against anything, and
+	#     nothing anywhere had to say either.
 	var drive_axis: float = clampf(sin(posture.tilt), 0.0, 1.0)
-	var spring: float = p.leap_height / (p.leap_height + 1.0)
-	launch = drive_axis * lerpf(0.35, 1.0, loco.spine_freedom) * spring
+	launch = drive_axis * lerpf(0.35, 1.0, loco.spine_freedom) \
+		* clampf(spring, 0.0, 1.0)
 
 	# ...and how much of that it is currently using. The two are not multiplied,
 	# and the distinction matters: *whether* an animal has an asymmetric gait is a

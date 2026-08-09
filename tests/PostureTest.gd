@@ -261,10 +261,12 @@ func _check_support(player: Creature) -> void:
 	_check(strolling <= 2,
 		"a strolling Cat had %d feet off the ground at once" % strolling)
 
-	# The Elephant is the control, and its `leap_height` of zero is the whole of
-	# why: an animal with no way to push itself off the floor has no asymmetric
+	# The Elephant is the control, and the whole of why is that it cannot leave the
+	# ground: an animal with no way to push itself off the floor has no asymmetric
 	# gait to reach, so speed buys it nothing but a quicker amble. Nothing forbids
-	# it — there is no rule about columnar builds anywhere in the solver.
+	# it — there is no rule about columnar builds anywhere in the solver, and no
+	# leap parameter to have written a zero into either. Its joints do not fold, so
+	# there is nowhere to push from; see Leap.
 	_check(_max_feet_up(player, "Elephant", 1.0) == 1,
 		"an Elephant lifted more than one foot at a time — it is trotting, not ambling")
 

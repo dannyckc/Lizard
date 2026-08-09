@@ -223,6 +223,12 @@ func _update_hud() -> void:
 	# stalking, whether or not there is anything in front of it.
 	if creature.is_stalking():
 		state = "stalking" if creature.speed_norm > 0.02 else "crouched"
+	# A body winding itself up outranks the walk it was doing, for the same reason
+	# close control does: it is what the player has asked the animal to be doing,
+	# and it is happening on the ground where the words above are about. The name
+	# comes off the jump's own phase rather than being decided a second time here.
+	if creature.jump.charging():
+		state = creature.jump.phase_name()
 	# Off the ground outranks anything it was doing on it: what the creature is
 	# doing is leaping, gliding or flying, and the name comes from the elevation
 	# itself rather than from a second reading of the same facts here.

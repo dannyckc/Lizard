@@ -15,6 +15,13 @@ class Command extends RefCounted:
 	## a fly button, because on a body standing on the ground it means leap and on
 	## one already off it it means climb — and those are the same instruction
 	## given to two different animals.
+	##
+	## It is a *held* instruction at the top end and not an event, which is the
+	## whole of the jump control: on the ground, held means the animal is winding
+	## itself up and released means it goes with whatever it wound — see Jump. So
+	## the edge is nowhere in this file and nothing device-specific decides it, and
+	## an AI or a replay that holds the axis for a third of a second and drops it
+	## takes exactly the jump a player holding the key that long would.
 	var climb: float = 0.0
 	var sprint: bool = false
 	## Close control: get low, go slow, place the body deliberately. The other

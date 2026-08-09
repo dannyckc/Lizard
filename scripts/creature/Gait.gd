@@ -98,6 +98,12 @@ var limbs: Array[Limb] = []
 ## creature and handed in each tick, for the same reason the anatomy is — it is a
 ## description of the whole animal, and three other systems read it too.
 var loco: Locomotion = Locomotion.new()
+## What this body can do about leaving the ground. Handed in beside the
+## locomotion and for the same reason: the footfall pattern needs to know whether
+## a girdle can throw the animal at all before it will let the two limbs of one
+## work as a single pair, and that is a question about muscle, joint travel and
+## elastic tissue rather than about anything this file measures.
+var leap: Leap = Leap.new()
 ## How this body holds its legs under it. Owned here rather than passed in for
 ## the same reason the limbs are: it is a fixed property of the animal being
 ## walked, not a per-tick input, and every line below that reads it would
@@ -178,6 +184,11 @@ var gather: float = 0.0
 # a stamp taken when something happens, so a creature standing still has a stale
 # one and nothing reads it.
 
+## How fast something outside is moving these joints this tick — see `update`.
+## Zero on every walking animal, which is the guarantee that nothing below
+## behaves differently for the existence of the jump.
+var _drive: float = 0.0
+
 var _beat_key: String = ""
 var _beat_age: float = 0.0
 ## Monotonic seconds this gait has been solved for. Only ever read as differences
@@ -230,15 +241,22 @@ func setup() -> void:
 ## and the highest that foot could be put down, it answers with the height of the
 ## surface there. Left out, the floor is at zero everywhere, which is the flat
 ## world this solver was written in and every line below still runs unchanged in
-## it. `crouch` is how much of its own fold the animal is spending on getting
-## lower — see `_stance_extension`.
+## it. `load` is what each girdle's joints are being asked for this tick — folded
+## toward a crouch in x for the forelimbs and y for the hind, or extended toward a
+## push where it is negative — and `drive` is how quickly whatever is asking is
+## moving them, in response per second. See `_stance_extension` for the first and
+## `_carry_body` for why the second has to come from outside: a body follows its
+## feet at the pace its feet are moving, and when the feet are being driven rather
+## than walked, only the thing driving them knows what that pace is.
 func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		p: CreatureParams, scale: float,
 		collision_query: Callable = Callable(),
 		state: BodyState = null,
 		reference: float = 0.0, airborne: bool = false,
-		surface_query: Callable = Callable(), crouch: float = 0.0) -> void:
+		surface_query: Callable = Callable(), load: Vector2 = Vector2.ZERO,
+		drive: float = 0.0) -> void:
 	landed.clear()
+	_drive = maxf(drive, 0.0)
 	if body.anchors.is_empty():
 		return
 
@@ -270,8 +288,8 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 	# height is a consequence of the bones being different lengths, not of anything
 	# levelling the body.
 	var wants := Vector2(
-		_rest_clearance(arm, _stance_extension(crouch, Limb.FRONT), p, Limb.FRONT),
-		_rest_clearance(leg, _stance_extension(crouch, Limb.REAR), p, Limb.REAR))
+		_rest_clearance(arm, _stance_extension(load.x, Limb.FRONT), p, Limb.FRONT),
+		_rest_clearance(leg, _stance_extension(load.y, Limb.REAR), p, Limb.REAR))
 	if not measured:
 		# Somewhere for the first limb solve to hang its sockets from. Replaced by
 		# a real reading of the feet at the end of this same tick.
@@ -292,7 +310,16 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 			# Nothing to stand on. The limb keeps every capability it had — this is
 			# not damage — it simply loses the ground those capabilities were being
 			# spent against, so its envelope draws in and it stops being placed.
-			limb.reach *= TUCK_REACH
+			#
+			# ...unless it is being put out for something, which is the one thing a
+			# leg with no floor under it still does. A limb asked to extend is a limb
+			# reaching, and it reaches out of the same tuck rather than round it: at
+			# full extension the envelope is the whole of the limb's again, so a body
+			# coming down out of an arc genuinely has its legs down before it arrives
+			# rather than snapping them out on contact. On a limb nobody is asking
+			# anything of, `load` is zero and this is the line it always was.
+			limb.reach *= lerpf(TUCK_REACH, 1.0,
+				clampf(-(load.x if limb.pair == Limb.FRONT else load.y), 0.0, 1.0))
 		if _skip(limb):
 			continue
 		var a: Spine.Frame = body.anchors[limb.key]
@@ -308,7 +335,8 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		# so the gait, the IK, the height solve and the overlay cannot disagree.
 		var joint: Articulation.Joint = loco.joint(limb.pair)
 		limb.read_joint(joint)
-		limb.working = _stance_extension(crouch, limb.pair)
+		limb.working = _stance_extension(
+			load.x if limb.pair == Limb.FRONT else load.y, limb.pair)
 		limb.set_lengths(bone, posture.drawn_reach(bone), joint.upper)
 		limb.foot_size = limb.foot_radius(scale)
 		limb.swing_base = loco.swing_time(bone)
@@ -768,7 +796,7 @@ func _solve_pattern(delta: float, body: BodyShape, p: CreatureParams) -> void:
 	var lead: float = (lead_left - lead_right) / maxf(speed, 1.0)
 
 	footfall.update(posture, loco, p, maxf(hip_height, 1.0), speed,
-		Vector2(fore, rear), gap, lead, loco.forelimbs_bear)
+		Vector2(fore, rear), gap, lead, loco.forelimbs_bear, leap.launch)
 	_measure_gather(body)
 
 
@@ -910,7 +938,17 @@ func _carry_body(delta: float, wants: Vector2) -> void:
 	# that is what it is a measurement of: the body follows its feet at the pace
 	# its feet are moving. A response tuned for a lizard taking four steps a second
 	# would smooth an elephant's whole walk into a glide.
-	var response: float = 1.0 - exp(-loco.settle(_body_cycle()) * delta) if measured else 1.0
+	#
+	# ...and the same sentence applies when the feet are not the ones moving. A
+	# limb whose joint is being driven open is changing length on the timescale of
+	# whatever is driving it rather than of the walk, and the body riding on it has
+	# to keep up or the push arrives as a lag — the animal would extend its legs
+	# fully and only then begin, slowly, to rise on them. So the floor under the
+	# response is whatever has hold of the legs, handed in with the demand itself.
+	# Nothing has hold of them on a walking animal, `_drive` is zero, and this is
+	# the line it always was.
+	var response: float = 1.0 - exp(-maxf(loco.settle(_body_cycle()), _drive) * delta) \
+		if measured else 1.0
 	measured = true
 	# Eased toward what the legs are offering, and then cut off hard at what they
 	# can physically reach. The two are different claims and only the second is a
@@ -1362,16 +1400,27 @@ func _rest_clearance(bone: float, extension: float, p: CreatureParams,
 	return sqrt(maxf(reach * reach - out * out, 0.0))
 
 
-## The floor is this girdle's own fold rather than a number shared by every
-## animal, and that is what makes a crouch anatomical: a build whose joints close
-## right up gets its mouth to the floor, and one standing on pillars that barely
-## bend lowers itself by a few pixels and has to reach the rest of the way with
-## its neck. Nothing forbids the second animal anything — it simply has no fold
-## to spend.
-func _stance_extension(crouch: float, pair: int) -> float:
+## Both stops are this girdle's own rather than numbers shared by every animal,
+## and that is what makes a crouch and a push-off anatomical alike: a build whose
+## joints close right up gets its mouth to the floor and can gather itself to
+## spring, and one standing on pillars that barely bend lowers itself by a few
+## pixels and has to reach the rest of the way with its neck. Nothing forbids the
+## second animal anything — it simply has no travel to spend.
+##
+## Signed, and the sign is the difference between the two things a limb does about
+## its own length. Positive folds toward the joint's fold stop, which is a crouch:
+## a shorter leg, a body that comes down with it, and every band, silhouette and
+## picture following because all of them are read off the height the feet hold.
+## Negative extends toward the lock, which is the same statement upside down — a
+## longer leg, and a body that goes up on it. That is a push-off, and it is why
+## the take-off of a jump is visible before there is any elevation at all: the
+## animal genuinely stands up on its legs first, exactly as it would have to.
+func _stance_extension(load: float, pair: int) -> float:
 	var joint: Articulation.Joint = loco.joint(pair)
-	return lerpf(joint.stand, maxf(joint.fold, Limb.REACH_MIN),
-		clampf(crouch, 0.0, 1.0))
+	if load >= 0.0:
+		return lerpf(joint.stand, maxf(joint.fold, Limb.REACH_MIN),
+			clampf(load, 0.0, 1.0))
+	return lerpf(joint.stand, joint.lock, clampf(-load, 0.0, 1.0))
 
 
 ## How high this limb picks its foot up at the top of a step. A real height in

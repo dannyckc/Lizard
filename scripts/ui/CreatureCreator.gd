@@ -685,11 +685,13 @@ func _read_body() -> void:
 	_tiles["GAIT"].text = subject.gait.footfall.describe().to_upper()
 	_tiles["ACCELERATION"].text = "%d PX/S²" % int(round(loco.accel))
 	_tiles["TURN RATE"].text = "%d°/S" % int(round(rad_to_deg(loco.turn_rate)))
-	# Against the animal's own height, which is the only unit a leap means anything
-	# in: three of its own heights is a cat and none of them is an elephant, and
-	# both of those are the same number of pixels on differently sized bodies.
-	var leap: float = params.leap_height * stature.stand_height()
-	_tiles["LEAP"].text = "NONE" if leap < 1.0 else "%d PX" % int(round(leap))
+	# What this body's legs, muscle and elastic tissue actually come to — see Leap.
+	# Nothing is being read back here that was typed in: move a knee's fold range
+	# or lengthen a shin and this tile moves, and the two builds that read NONE are
+	# ones whose arithmetic came out under their own foot lift rather than ones
+	# that were told they could not.
+	var jump: float = subject.leap.peak(1.0)
+	_tiles["LEAP"].text = "NONE" if not subject.leap.capable else "%d PX" % int(round(jump))
 
 
 func _on_cell_hovered(readout: String, alarm: bool) -> void:

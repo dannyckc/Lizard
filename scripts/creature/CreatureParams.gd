@@ -69,11 +69,6 @@ extends Resource
 ## a browser, and the whole of what makes one: a long neck raises what the jaws
 ## can reach without touching anything else about the creature.
 @export_range(0.0, 0.6, 0.01) var neck_lift: float = 0.0
-## Peak of a standing leap, as a multiple of the animal's own standing height.
-## Zero is a body that cannot leave the ground, which is a real answer — a heavy
-## columnar animal has no way to throw itself into the air, and nothing had to
-## forbid it.
-@export_range(0.0, 4.0, 0.05) var leap_height: float = 0.6
 ## Lift the wings generate, zero on anything without them. It is the only thing
 ## separating a creature that can glide and fly from one that can only leap:
 ## with none, the two airborne states are simply unreachable — see Elevation.
@@ -137,6 +132,39 @@ extends Resource
 ## is the foot rolling forward onto its toe. Zero is a flat-footed animal that
 ## simply swings its legs.
 @export_range(0.0, 1.0, 0.01) var toe_push: float = 0.15
+
+# ---------------------------------------------------------------- elastic ----
+# What in this animal stores work and gives it back — see Spring. There used to
+# be a `leap_height` in the Height group instead, a per-species multiple of the
+# animal's own height, and a parameter of that shape can only ever be a promise:
+# it said an Elephant could not jump because somebody wrote a zero, and it would
+# have said a creature with no legs could clear three of itself if somebody had
+# written a three. Nothing about the body was consulted and nothing about the
+# body could contradict it.
+#
+# What is here instead is tissue. How high anything jumps is worked out in Leap,
+# off the mass, the muscle, the joint travel and the store below — which is why
+# lengthening a leg or loosening a knee changes it, and why the two builds that
+# cannot leave the ground are no longer told that they cannot.
+@export_group("Elastic")
+## How much of this girdle's drive passes through something elastic on its way to
+## the ground, rather than being produced by the muscle at the moment it is
+## needed. Zero is an animal that jumps on muscle alone; high is a leg that is
+## mostly rope below the knee. Per girdle, because a hind limb built to store and
+## a foreleg built to prop are the ordinary arrangement rather than the exception.
+@export_range(0.0, 1.0, 0.01) var fore_spring: float = 0.15
+@export_range(0.0, 1.0, 0.01) var hind_spring: float = 0.20
+## How much of the store is held by a catch rather than by the muscle winding it.
+##
+## Zero — an ordinary tendon — means the spring can only be paid out as fast as
+## the joint it crosses opens, so a limb with little travel returns little of what
+## it holds however much that is. One is a catch that lets go independently, which
+## removes the limit entirely and is the only way a body with very short legs
+## throws itself any distance at all. It is what separates the insects that jump
+## from the insects that do not, and it is deliberately not called a tendon
+## anywhere: a resilin pad, a bent cuticle and a latched femur are all this
+## number.
+@export_range(0.0, 1.0, 0.01) var spring_latch: float = 0.0
 
 # ----------------------------------------------------------------- gait ----
 @export_group("Gait")
@@ -297,7 +325,6 @@ const SCHEMA: Array = [
 
 	{"group": "Height"},
 	{"prop": "neck_lift", "label": "Neck lift", "min": 0.0, "max": 0.6, "step": 0.01},
-	{"prop": "leap_height", "label": "Leap height", "min": 0.0, "max": 4.0, "step": 0.05},
 	{"prop": "wing_lift", "label": "Wing lift", "min": 0.0, "max": 2.0, "step": 0.05},
 
 	{"group": "Limbs"},
@@ -316,6 +343,11 @@ const SCHEMA: Array = [
 	{"prop": "fore_swing_deg", "label": "Fore swing (deg)", "min": 20.0, "max": 110.0, "step": 1.0},
 	{"prop": "hind_swing_deg", "label": "Hind swing (deg)", "min": 20.0, "max": 110.0, "step": 1.0},
 	{"prop": "toe_push", "label": "Toe push-off", "min": 0.0, "max": 1.0, "step": 0.01},
+
+	{"group": "Elastic"},
+	{"prop": "fore_spring", "label": "Fore spring", "min": 0.0, "max": 1.0, "step": 0.01},
+	{"prop": "hind_spring", "label": "Hind spring", "min": 0.0, "max": 1.0, "step": 0.01},
+	{"prop": "spring_latch", "label": "Spring latch", "min": 0.0, "max": 1.0, "step": 0.01},
 
 	{"group": "Gait"},
 	{"prop": "foot_lead", "label": "Foot lead", "min": 0.0, "max": 1.5, "step": 0.01},
@@ -422,6 +454,13 @@ const PRESETS: Dictionary = {
 		"fore_swing_deg": 56.0, "hind_swing_deg": 74.0,
 		# Digitigrade: it stands on its toes already, so there is a real push there.
 		"toe_push": 0.45,
+		# ...and a good deal of rope behind. The hind limb that folds tighter than
+		# its stance and swings through the wider fan is also the one carrying the
+		# store, which is not a coincidence: a spring is wound by folding a joint,
+		# so the girdle with the travel is the only girdle that can hold anything.
+		# The foreleg's share is the smaller half of the same tissue and is spent
+		# on landings rather than on take-offs.
+		"fore_spring": 0.35, "hind_spring": 0.55,
 		# No acceleration or turn rate of its own: this animal is light and it is
 		# strong for its size, and those two facts are already written below as
 		# `density` and `muscle_power`. Quoting a number here as well would be
@@ -432,11 +471,12 @@ const PRESETS: Dictionary = {
 		"density": 1.0, "muscle_power": 1.6, "jaw_power": 1.1, "fat_reserve": 0.8,
 		"bite_damage": 2.4, "bite_reach": 30.0, "bite_radius": 14.0,
 		"bite_cooldown": 0.32, "chew_interval": 0.40,
-		# Head carried clear of the shoulder, and legs that can throw the whole
-		# animal several times its own standing height. The leap is the semi-
-		# upright stance's signature and the reason it exists in the ecosystem:
-		# it is the only terrestrial build that can get over a charge.
-		"neck_lift": 0.10, "leap_height": 2.6,
+		# Head carried clear of the shoulder. The legs that throw this animal
+		# several times its own standing height are the four rows above rather than
+		# anything here — a knee folded past its stance, a long light shin, a store
+		# wound along it and enough muscle for its weight to beat gravity twice
+		# over — which is the whole point of there no longer being a leap number.
+		"neck_lift": 0.10,
 		# Few teeth, long and keen. A killing mouth rather than a holding one:
 		# almost no contact area, so what force there is goes straight in.
 		"tooth_count": 7, "tooth_size": 0.30, "tooth_sharpness": 0.92,
@@ -450,8 +490,10 @@ const PRESETS: Dictionary = {
 	#
 	# Its jaws are the heaviest in the file without `jaw_power` being extreme,
 	# because bite force goes as the square of the skull and this one is nearly
-	# twice the reference width. And it cannot leave the ground at all: nothing
-	# forbids it, its `leap_height` is simply zero.
+	# twice the reference width. And it cannot leave the ground at all — a fact
+	# nothing in this entry states, and nothing in it could: its knees do not
+	# close, so there is nowhere to push from, and its muscle cannot beat its own
+	# weight, so there would be nothing to push with if there were. See Leap.
 	"Elephant": {
 		"posture": Posture.COLUMNAR,
 		"segment_count": 16, "segment_length": 19.0, "max_bend_deg": 10.0,
@@ -499,6 +541,13 @@ const PRESETS: Dictionary = {
 		# It walks on its toes over a fibrous pad, and with the joints doing so
 		# little this is most of what actually pushes the animal along.
 		"toe_push": 0.60,
+		# The elastic tissue in these legs is real and entirely useless for
+		# jumping, which is the interesting half of what this build demonstrates. A
+		# store gives its work back by pushing a joint open — see Spring.payout —
+		# and a knee that opens by a seventh of the limb returns a seventh of what
+		# it holds. So nothing here says an Elephant cannot jump, and nothing here
+		# says its tendons are poor: it cannot spend them.
+		"fore_spring": 0.30, "hind_spring": 0.30,
 		# ...and no acceleration or turn rate here either, for the opposite reason:
 		# nothing needed to say this animal is slow off the mark. It is twenty-three
 		# times the Lizard's weight and its muscle only grew with the square of
@@ -511,7 +560,7 @@ const PRESETS: Dictionary = {
 		"density": 2.9, "muscle_power": 1.3, "jaw_power": 5.5, "fat_reserve": 1.6,
 		"bite_damage": 2.8, "bite_reach": 34.0, "bite_radius": 22.0,
 		"bite_cooldown": 0.70, "chew_interval": 0.60,
-		"neck_lift": 0.14, "leap_height": 0.0,
+		"neck_lift": 0.14,
 		# Broad flat molars. The bluntest mouth here: it spreads a very large bite
 		# over a very large area, so it crushes and grinds where the Cat opens.
 		"tooth_count": 6, "tooth_size": 0.16, "tooth_sharpness": 0.15,
@@ -556,11 +605,26 @@ const PRESETS: Dictionary = {
 		"stance_width": 0.80,
 		# Long straight legs, near-identical front and back — which is exactly why
 		# the pair on one side arrives at the same place and it paces.
+		#
+		#
+		# The fold ranges are load-bearing in a way that is worth saying out loud,
+		# because they are what this build's whole gait rests on: a joint that folds
+		# is a body that sinks over its own stride, and sinking is what buys an
+		# upright leg the plan-view reach to step with — see Locomotion.sink. Take
+		# them down and the legs stop interfering, and an animal whose legs do not
+		# interfere has no reason to pace. So this is not a spare knob to price the
+		# leap with; the leap is what this articulation happens to come to, which is
+		# a modest one on a heavy body with a stiff back.
 		"fore_flex_deg": -12.0, "hind_flex_deg": -4.0,
 		"fore_fold_range": 0.70, "hind_fold_range": 0.75,
 		"fore_upper_share": 0.52, "hind_upper_share": 0.48,
 		"fore_swing_deg": 58.0, "hind_swing_deg": 64.0,
 		"toe_push": 0.40,
+		# Long springy tendons carrying a great deal of weight — a browser's legs
+		# are cheap to walk on for exactly this reason. What they are not is a
+		# jump: the store is there and the joints are straight, so most of it goes
+		# into the walk and very little of it comes back out all at once.
+		"fore_spring": 0.20, "hind_spring": 0.18,
 		# A pair that lands as one. `beat_coupling` is the only thing in the file that
 		# says *how tightly* limbs sharing a beat keep to it — which foot shares a
 		# beat with which is Footfall's answer, off the interference above — and an
@@ -579,7 +643,7 @@ const PRESETS: Dictionary = {
 		"density": 1.2, "muscle_power": 1.1, "jaw_power": 1.4, "fat_reserve": 2.2,
 		"bite_damage": 1.8, "bite_reach": 30.0, "bite_radius": 10.0,
 		"bite_cooldown": 0.60, "chew_interval": 0.55,
-		"neck_lift": 0.30, "leap_height": 0.25,
+		"neck_lift": 0.30,
 		"tooth_count": 8, "tooth_size": 0.14, "tooth_sharpness": 0.20,
 		"jaw_gape_deg": 50.0, "tooth_variation": 0.16,
 	},
@@ -610,13 +674,14 @@ const PRESETS: Dictionary = {
 		"fore_upper_share": 0.50, "hind_upper_share": 0.44,
 		"fore_swing_deg": 62.0, "hind_swing_deg": 84.0,
 		"toe_push": 0.70,
+		"fore_spring": 0.40, "hind_spring": 0.65,
 		"move_speed": 420.0,
 		"turn_speed_falloff": 0.50, "turn_responsiveness": 13.0, "turn_pivot": 44.0,
 		"sprint_multiplier": 2.00, "reverse_speed_factor": 0.45,
 		"density": 0.85, "muscle_power": 2.0, "jaw_power": 1.0, "fat_reserve": 0.4,
 		"bite_damage": 2.2, "bite_reach": 34.0, "bite_radius": 12.0,
 		"bite_cooldown": 0.30, "chew_interval": 0.38,
-		"neck_lift": 0.08, "leap_height": 3.0,
+		"neck_lift": 0.08,
 		"tooth_count": 8, "tooth_size": 0.28, "tooth_sharpness": 0.90,
 		"jaw_gape_deg": 54.0, "tooth_variation": 0.18,
 	},
@@ -652,24 +717,28 @@ const PRESETS: Dictionary = {
 		# The forelimb's articulation is real and entirely academic: nothing is
 		# standing on it, so it is held folded against the chest whatever it says.
 		"fore_flex_deg": 50.0, "hind_flex_deg": 12.0,
-		"fore_fold_range": 1.0, "hind_fold_range": 1.10,
+		"fore_fold_range": 1.0, "hind_fold_range": 0.80,
 		"fore_upper_share": 0.52, "hind_upper_share": 0.48,
 		"fore_swing_deg": 50.0, "hind_swing_deg": 70.0,
 		"toe_push": 0.60,
+		# A bird's leg, and the store goes with the crouch: real but modest, on a
+		# body far too heavy for it to be worth much. What comes out is a creature
+		# that can get itself off the ground and has no business doing it often.
+		"fore_spring": 0.18, "hind_spring": 0.22,
 		"move_speed": 210.0,
 		"turn_speed_falloff": 0.60, "turn_responsiveness": 7.0, "turn_pivot": 90.0,
 		"sprint_multiplier": 1.35, "reverse_speed_factor": 0.45,
 		"density": 1.5, "muscle_power": 1.5, "jaw_power": 7.0, "fat_reserve": 0.9,
 		"bite_damage": 4.0, "bite_reach": 40.0, "bite_radius": 20.0,
 		"bite_cooldown": 0.60, "chew_interval": 0.55,
-		"neck_lift": 0.16, "leap_height": 0.30,
+		"neck_lift": 0.16,
 		"tooth_count": 11, "tooth_size": 0.30, "tooth_sharpness": 0.70,
 		"jaw_gape_deg": 62.0, "tooth_variation": 0.22,
 	},
 
 	# The same two-legged arithmetic with the spring turned all the way up. Arms a
 	# third of the legs, so it is bipedal for exactly the reason the T. rex is —
-	# and a `leap_height` of three and a half body-heights, so the moment it is
+	# and a hind limb that is a folded Z of elastic tissue, so the moment it is
 	# going fast enough for its size the two hind limbs stop alternating and land
 	# together. That is a hop, and it is the same collapse of `hind_split` that
 	# turns a Cheetah's gallop into a bound; there is one mechanism, and a body
@@ -694,13 +763,18 @@ const PRESETS: Dictionary = {
 		"fore_upper_share": 0.52, "hind_upper_share": 0.42,
 		"fore_swing_deg": 50.0, "hind_swing_deg": 78.0,
 		"toe_push": 0.85,
+		# Nearly all rope. The whole hind limb below the knee is a spring wound
+		# along the longest foot in the file, which is the other half of what makes
+		# this a hop rather than a stride — and the reason the same animal is a
+		# poor walker: a store is cheap to bounce on and expensive to carry.
+		"fore_spring": 0.25, "hind_spring": 0.95,
 		"move_speed": 300.0,
 		"turn_speed_falloff": 0.55, "turn_responsiveness": 9.0, "turn_pivot": 60.0,
 		"sprint_multiplier": 1.60, "reverse_speed_factor": 0.40,
 		"density": 0.9, "muscle_power": 2.2, "jaw_power": 0.8, "fat_reserve": 0.8,
 		"bite_damage": 1.6, "bite_reach": 26.0, "bite_radius": 9.0,
 		"bite_cooldown": 0.50, "chew_interval": 0.45,
-		"neck_lift": 0.12, "leap_height": 3.50,
+		"neck_lift": 0.12,
 		"tooth_count": 8, "tooth_size": 0.12, "tooth_sharpness": 0.15,
 		"jaw_gape_deg": 44.0, "tooth_variation": 0.14,
 	},

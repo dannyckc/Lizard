@@ -113,10 +113,11 @@ func _check_the_pattern_comes_from_the_body(player: Creature) -> void:
 	_check(float(lizard["sway"]) > 6.0,
 		"a trotting Lizard's back barely moved (%.1f px of sway)" % lizard["sway"])
 
-	# A columnar one cannot leave the ground at all — its `leap_height` is zero and
-	# nothing else had to say so — and it is going so slowly for its size that it
-	# never leaves the walking regime either. What is left is the four-beat lateral
-	# sequence: one foot at a time, hind then fore down each side in turn.
+	# A columnar one cannot leave the ground at all — its knees do not open far
+	# enough to push against anything, and nothing had to say so — and it is going
+	# so slowly for its size that it never leaves the walking regime either. What is
+	# left is the four-beat lateral sequence: one foot at a time, hind then fore
+	# down each side in turn.
 	var elephant: Dictionary = _measure(player, "Elephant", 1.0)
 	_check(float(elephant["diagonality"]) < 0.3,
 		"an Elephant at its top speed stopped walking in a lateral sequence (diagonality %.2f)"
@@ -167,11 +168,28 @@ func _check_a_girdle_lands_together_only_when_it_can(player: Creature) -> void:
 			% ((1.0 - float(cheetah["hind_together"])) * 100.0))
 
 	# The control, and the point of the whole derivation: the same speed, the same
-	# erect stance, the same four legs — and a `leap_height` that makes a launch
-	# unavailable. It never gathers, however hard it is driven.
+	# erect stance, the same four legs — and joints that do not fold away, so there
+	# is nothing to gather with. It stays in a symmetrical gait however hard it is
+	# driven.
+	#
+	# Stated as the three things a symmetrical gait *is* rather than as `aerial`
+	# being exactly zero, and the difference is worth the words. The old check held
+	# because a hand-authored `leap_height` of 0.25 happened to land under
+	# `LAUNCH_MIN`, which is a coincidence about a number rather than a claim about
+	# an animal; the leap is now derived, and a large browser that can canter comes
+	# out with a sliver of a launch available to it at a flat sprint, which is
+	# honest — camels do canter. What it must never do is *use* it: the pair on one
+	# side stays coupled, the two hind feet keep alternating, and no more than two
+	# feet leave the ground. Every one of those would break the instant it started
+	# bounding, and none of them is a threshold anybody chose.
 	var camel: Dictionary = _measure(player, "Camel", 1.0)
-	_check(float(camel["aerial"]) <= 0.0,
-		"a Camel was given an asymmetric gait (aerial %.2f)" % camel["aerial"])
+	_check(str(camel["gait"]) == "pace",
+		"a Camel at a flat sprint was %s rather than pacing" % camel["gait"])
+	_check(float(camel["hind_together"]) < 0.5,
+		"a Camel's hind feet landed together %.0f%% of the time — it is bounding"
+			% (float(camel["hind_together"]) * 100.0))
+	_check(float(camel["aerial"]) < Footfall.SUSPENSION_AT,
+		"a Camel committed to an asymmetric gait (aerial %.2f)" % camel["aerial"])
 	_check(int(camel["aloft"]) <= 2,
 		"a Camel had %d feet off the ground at once" % camel["aloft"])
 	notes.append("Cheetah gathers %.2f, Camel %.2f" % [cheetah["aerial"], camel["aerial"]])

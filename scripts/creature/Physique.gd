@@ -55,6 +55,22 @@ var condition: float = 1.0
 ## Padding carried, against an ordinary animal of the same build. Part of what
 ## this creature weighs.
 var padding: float = 1.0
+## How much of the body lies beyond each girdle: ahead of the shoulder in x,
+## behind the hip in y, as shares of the whole drawn animal.
+##
+## The one reading here that is about where the weight is rather than how much of
+## it there is, and it exists because a push is taken about a pivot. To drive with
+## a girdle an animal has to get its weight over that girdle, and how far it can
+## shift is set by what there is on the far side to balance against: a hind pair
+## has the whole trunk in front of it and a tail behind, and rearing back over the
+## hips is a thing every quadruped can do — while getting the trunk, the hips and
+## the tail up over the shoulders is a thing none of them can, because there is
+## only a head on the other side of that joint.
+##
+## That asymmetry, and not a rule about quadrupeds, is why propulsion comes from
+## the hind limbs — and why the two builds in the file with long heavy tails are
+## the two that jump best. See Leap, which is the only consumer.
+var balance: Vector2 = Vector2(0.15, 0.30)
 
 
 ## Re-derives all three from the pose and lattice solved this tick.
@@ -87,6 +103,14 @@ func update(body: BodyShape, spine: Spine, tissue: TissueGrid, p: CreatureParams
 	var jaw_solid: float = tissue.head_solid() if tissue != null else 1.0
 	bite_force = maxf(p.jaw_power * head_scale * head_scale * jaw_solid, 0.0)
 
+	# Where that weight is, either side of the two girdles. Off the same chain of
+	# discs the volume is — it is the same body measured with the sum split in two
+	# places instead of taken whole — so a tail switched off genuinely takes the
+	# counterweight away with it rather than only shortening the silhouette.
+	balance = Vector2(
+		beyond(body, spine, p.front_limb_t, true),
+		beyond(body, spine, p.rear_limb_t, false))
+
 
 ## Plan-view volume of the drawn body: a chain of discs, one per cross-section,
 ## clipped exactly where the silhouette is clipped, with a round cap at each end.
@@ -104,3 +128,40 @@ static func body_volume(body: BodyShape, spine: Spine) -> float:
 	var tip: float = body.widths[last]
 	total += (snout * snout * snout + tip * tip * tip) * (2.0 / 3.0)
 	return total
+
+
+## Share of that same volume lying on one side of a station along the body.
+##
+## `t` is the station as a fraction from the snout, which is exactly the unit the
+## girdles are placed in; `ahead` picks which side. The same chain of discs as
+## above with the sum split rather than taken whole, so what it reports is a real
+## measurement of the drawn animal — a broad chest counts, a switched-off tail
+## does not, and a creature chewed open behind the hips loses its counterweight
+## along with the flesh.
+static func beyond(body: BodyShape, spine: Spine, t: float, ahead: bool) -> float:
+	var last: int = mini(body.last_index, spine.size() - 1)
+	if last < 1:
+		return 0.0
+	var station: float = clampf(t, 0.0, 1.0) * float(last)
+	var total: float = 0.0
+	var side: float = 0.0
+	for i in range(last):
+		var w: float = (body.widths[i] + body.widths[i + 1]) * 0.5
+		var slab: float = w * w * spine.points[i].distance_to(spine.points[i + 1])
+		total += slab
+		# The station falls inside one of the slabs, so that slab is divided where
+		# it actually falls rather than being handed wholesale to whichever side won
+		# a rounding. Without it a girdle placed a hundredth of a body further back
+		# could move the answer by a whole segment, which on a short spine is a
+		# tenth of the animal.
+		var share: float = clampf(station - float(i), 0.0, 1.0)
+		side += slab * (share if ahead else 1.0 - share)
+	# The two caps, whole: a snout is always ahead of any girdle and a tail tip
+	# always behind one.
+	var snout: float = body.widths[0]
+	var tip: float = body.widths[last]
+	var snout_cap: float = snout * snout * snout * (2.0 / 3.0)
+	var tip_cap: float = tip * tip * tip * (2.0 / 3.0)
+	total += snout_cap + tip_cap
+	side += snout_cap if ahead else tip_cap
+	return clampf(side / maxf(total, 0.0001), 0.0, 1.0)
