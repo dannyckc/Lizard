@@ -34,14 +34,16 @@ func _process(_delta: float) -> bool:
 	hud.set_panel_open(true)
 	_check(hud.panel.visible, "tuning button did not reopen the drawer")
 
-	hud.select_species("Gecko")
-	_check(main.creature.params.segment_count == 11, "Gecko tab did not apply its preset")
-	_check(main.creature.spine.size() == 11, "species change did not rebuild the creature")
+	hud.select_species("Cat")
+	_check(main.creature.params.segment_count == 12, "Cat tab did not apply its preset")
+	_check(main.creature.posture.kind == Posture.SEMI_UPRIGHT,
+		"the Cat tab did not rebuild the creature into its own posture")
+	_check(main.creature.spine.size() == 12, "species change did not rebuild the creature")
 
 	main.creature.params.segment_count = 18
 	hud.panel.refresh()
 	hud.panel._on_reset_pressed()
-	_check(main.creature.params.segment_count == 11, "panel reset did not restore the active species")
+	_check(main.creature.params.segment_count == 12, "panel reset did not restore the active species")
 
 	var f1 := InputEventKey.new()
 	f1.keycode = KEY_F1

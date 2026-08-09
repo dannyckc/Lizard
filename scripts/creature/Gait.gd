@@ -63,7 +63,27 @@ const CONTROL_MIN: float = 0.12
 ## is that: the foot is put down near where it was aimed rather than on it.
 const PLACEMENT_SCATTER: float = 0.55
 
+## How much of the arc a foot can sweep is available to drift backward into
+## before it must step. Rather under half, because the rest position is in the
+## middle of that arc and the foot has to still be legal when the trigger fires.
+const STRIDE_ENVELOPE_SHARE: float = 0.55
+
+## Working envelope a limb keeps once there is no longer any ground under it.
+## Nothing is holding a foot out in mid-air, so it comes in under the body — but
+## the leg is still a leg and still attached, so this is a tuck rather than a
+## fold. Feet do not plant, do not land and make no sound while it applies,
+## because there is nothing there for them to do any of that against.
+const TUCK_REACH: float = 0.62
+## How fast a tucked limb draws in. Slower than a step, because the leg is being
+## carried rather than placed.
+const TUCK_RESPONSE: float = 7.0
+
 var limbs: Array[Limb] = []
+## How this body holds its legs under it. Owned here rather than passed in for
+## the same reason the limbs are: it is a fixed property of the animal being
+## walked, not a per-tick input, and every line below that reads it would
+## otherwise have to be handed it.
+var posture: Posture = Posture.new()
 ## World-space contacts completed during the most recent update. This is motion
 ## state, not audio: Creature announces the landing and the world decides what
 ## sensory event, if any, it produces.
@@ -87,10 +107,15 @@ func setup() -> void:
 ## or given a body with nothing wrong with it — every line below runs on the
 ## values it always did, so a healthy creature is unaffected by the existence of
 ## the whole system.
+## `ground_drop` is how far down the screen the ground sits from the plane the
+## torso is drawn on, and `airborne` says there is no ground under the feet at
+## all. Both are consequences of the 2.5D layer above this one; left at their
+## defaults every line below runs exactly as it did before it existed.
 func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		p: CreatureParams, scale: float,
 		collision_query: Callable = Callable(),
-		state: BodyState = null) -> void:
+		state: BodyState = null,
+		ground_drop: float = 0.0, airborne: bool = false) -> void:
 	landed.clear()
 	if body.anchors.is_empty():
 		return
@@ -102,10 +127,17 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 	# --- 1. retarget: recompute each foot's ideal position ------------------
 	for limb in limbs:
 		_read_function(limb, state, impaired)
+		if airborne:
+			# Nothing to stand on. The limb keeps every capability it had — this is
+			# not damage — it simply loses the ground those capabilities were being
+			# spent against, so its envelope draws in and it stops being placed.
+			limb.reach *= TUCK_REACH
 		if _skip(limb):
 			continue
 		var a: Spine.Frame = body.anchors[limb.key]
-		limb.set_lengths((p.arm_length if limb.pair == Limb.FRONT else p.leg_length) * scale)
+		limb.ground_drop = ground_drop
+		var bone: float = (p.arm_length if limb.pair == Limb.FRONT else p.leg_length) * scale
+		limb.set_lengths(bone, posture.plan_reach(bone))
 
 		# How fast is *this* socket travelling? Every timing below is sized off
 		# that rather than off the body's linear speed, so a limb on the outside
@@ -117,16 +149,34 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 
 		# Stride shortens at low pace so a slow limb shuffles rather than
 		# lunging, and lengthens toward a full stride at top pace — and then again
-		# by whatever force the limb can still put into pushing the body along.
-		limb.stride = p.stride_distance * scale * (0.45 + 0.55 * limb.pace) \
-			* lerpf(STRIDE_FLOOR, 1.0, limb.drive)
+		# by whatever force the limb can still put into pushing the body along,
+		# and finally by the stance, which is the one term that is about the build
+		# rather than about this tick.
+		limb.stride = p.stride_distance * scale * posture.stride_gain \
+			* (0.45 + 0.55 * limb.pace) * lerpf(STRIDE_FLOOR, 1.0, limb.drive)
 
 		# Rest stance in the socket's own frame — the centre of the swing fan.
 		limb.set_rest_dir(a, p)
 
+		var stance: float = limb.total_length * p.stance_reach * limb.reach
+		# ...and then capped at what this limb could actually deliver. A stride
+		# longer than the foot's own working envelope is not a long stride, it is
+		# no stride at all: the clamp skids the planted foot along the boundary,
+		# the distance trigger is never reached, and the leg is towed for as long
+		# as the creature keeps walking. What is reachable is the chord the swing
+		# fan sweeps at the stance radius, and only the half of it behind the rest
+		# position is available to drift into — which is what the share is.
+		#
+		# It has to be derived rather than authored because the two numbers that
+		# decide it are not in the same place: `stride_distance` is a species
+		# trait and the envelope is a consequence of posture foreshortening the
+		# limb. A columnar animal has a perfectly reasonable stride for its legs
+		# and a quarter of the plan-view reach to spend it in.
+		var sweep: float = 2.0 * stance * sin(minf(_swing_fan(limb, swing), PI * 0.5))
+		limb.stride = minf(limb.stride, maxf(sweep * STRIDE_ENVELOPE_SHARE, 1.0))
+
 		limb.joints[0] = a.pos
-		limb.ideal = a.pos \
-			+ limb.rest_dir * (limb.total_length * p.stance_reach * limb.reach) \
+		limb.ideal = a.pos + limb.rest_dir * stance \
 			+ limb.travel * (p.foot_lead * limb.stride * limb.pace)
 
 		if not limb.initialised:
@@ -138,6 +188,14 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 			limb.joints[1] = a.pos.lerp(limb.ideal, 0.5) + a.fwd * (limb.bend_sign * limb.total_length * 0.25)
 			limb.joints[2] = limb.ideal
 			limb.initialised = true
+
+		# With nothing underneath it a foot has nowhere to be nailed to, so it is
+		# carried with the socket instead of being left behind by it. This is the
+		# whole of the tuck: the error never grows, so nothing further down asks
+		# this limb to step, and a leg that is not stepping is a leg being held.
+		if airborne:
+			limb.stepping = false
+			limb.planted = limb.planted.lerp(limb.ideal, 1.0 - exp(-TUCK_RESPONSE * delta))
 
 		# A foot the body has outrun skids to the edge of what the limb can
 		# reach rather than staying nailed down and dislocating the leg. The
@@ -159,7 +217,7 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		if not limb.stepping:
 			limb.ground = limb.planted
 			limb.lift = 0.0
-			limb.visual = limb.planted
+			limb.visual = limb.planted + limb.rise()
 			continue
 
 		# Keep re-aiming the landing spot at the (moving) ideal while airborne,
@@ -188,17 +246,30 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		# working the knee rather than off the limb as a whole. A leg that can
 		# still be swung from the shoulder but cannot flex below it scuffs.
 		limb.lift = sin(limb.step_t * PI) * p.step_height * scale \
+			* posture.step_height_gain \
 			* (0.45 + 0.55 * limb.pace) * lerpf(LIFT_FLOOR, 1.0, limb.flex)
-		limb.visual = limb.ground - Vector2(0.0, limb.lift)
+		limb.visual = limb.ground + limb.rise()
 
 	# --- 3. decide which feet pick up ---------------------------------------
+	# A body with nothing under it never picks a foot up, because a step is a
+	# push against the ground and there is none. Skipping the contest outright
+	# rather than failing every limb's test is the same distinction `_skip` draws:
+	# these legs are not stepping badly, they are not stepping.
+	if airborne:
+		for limb in limbs:
+			if not _skip(limb):
+				_solve_limb(limb, body, p, swing, scale, collision_query)
+		return
+
 	var busy: Array[bool] = [false, false]
+	var aloft: int = 0
 	var candidates: Array[Limb] = []
 	for limb in limbs:
 		if _skip(limb):
 			continue
 		if limb.stepping:
 			busy[limb.group] = true
+			aloft += 1
 			continue
 		# Recompute against this tick's plant: step 2 may have just landed this
 		# foot, and deciding on the pre-landing error would re-fire it instantly.
@@ -218,9 +289,19 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 	# just re-planted, which is exactly the alternation we want.
 	candidates.sort_custom(func(a: Limb, b: Limb) -> bool: return a.error > b.error)
 
+	# How many feet this build will lift at once. Two for a body that can throw
+	# itself between diagonals; one for a columnar animal, which has to keep
+	# three legs under a great deal of weight and therefore ambles rather than
+	# trots. It is the posture's one hard rule, and it is the reason a heavy
+	# stance reads as deliberate without anything having slowed it down.
+	var limit: int = posture.airborne_limit()
+	var coupling: float = clampf(p.diagonal_coupling * posture.coupling_gain, 0.0, 1.0)
+
 	for limb in candidates:
 		if limb.stepping:
 			continue
+		if aloft >= limit:
+			break
 		# Never lift a foot while the opposite diagonal is airborne: that is
 		# what keeps at least two feet down and the creature standing.
 		if busy[1 - limb.group]:
@@ -228,6 +309,7 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 
 		_start_step(limb, body, p, swing)
 		busy[limb.group] = true
+		aloft += 1
 
 		# Pull the diagonal partner onto the same beat if it is anywhere near
 		# due. This is the difference between a readable trot and four legs
@@ -235,6 +317,8 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		for other in limbs:
 			if other == limb or other.group != limb.group or other.stepping:
 				continue
+			if aloft >= limit:
+				break
 			# The same gate as the contest above, and it has to be here too: a beat
 			# is an invitation, not an order. Without this a dead limb is pulled
 			# into its partner's step and picks itself up, which is the one thing a
@@ -242,8 +326,9 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 			# the alternate ticks, so the leg would appear to work intermittently.
 			if not _can_step(other):
 				continue
-			if other.error > other.stride * (1.0 - p.diagonal_coupling):
+			if other.error > other.stride * (1.0 - coupling):
 				_start_step(other, body, p, swing)
+				aloft += 1
 
 	# --- 4. solve the limbs -------------------------------------------------
 	for limb in limbs:
@@ -400,9 +485,9 @@ func _solve_limb(limb: Limb, body: BodyShape, p: CreatureParams, swing: float,
 	_solve_limb_to(limb, a, target, p)
 
 	if collision_query.is_valid():
-		var upper_radius: float = maxf(limb.total_length * 0.16, 2.5 * scale) * 0.5
+		var upper_radius: float = limb.girth(scale) * 0.5
 		var lower_radius: float = upper_radius * 0.72
-		var foot_radius: float = maxf(limb.total_length * 0.10, 3.0 * scale)
+		var foot_radius: float = limb.foot_radius(scale)
 		var contact_applied: bool = false
 		for _iteration in LIMB_CONTACT_ITERATIONS:
 			var upper_push: Vector2 = collision_query.call(
@@ -449,10 +534,10 @@ func _solve_limb(limb: Limb, body: BodyShape, p: CreatureParams, swing: float,
 		# its lift and is re-routed again as its procedural arc advances.
 		if contact_applied:
 			limb.visual = limb.joints[2]
-			limb.ground = limb.visual + Vector2(0.0, limb.lift)
+			limb.ground = limb.visual - limb.rise()
 			if not limb.stepping:
 				limb.planted = limb.ground
-				limb.visual = limb.planted
+				limb.visual = limb.planted + limb.rise()
 
 
 ## Seeds the anatomical bend and runs the existing fixed-length IK solve for a

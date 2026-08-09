@@ -75,13 +75,13 @@ func _process(_delta: float) -> bool:
 	_check(sight.profile == species_profile and sight.profile.clear_reach == 444.0,
 		"a species-specific sight profile cannot replace the default")
 
-	main.hud.select_species("Gecko")
-	_check(senses.active_species == "Gecko", "species change did not reset SENSES")
+	main.hud.select_species("Cat")
+	_check(senses.active_species == "Cat", "species change did not reset SENSES")
 	var reset := InputEventKey.new()
 	reset.keycode = KEY_R
 	reset.pressed = true
 	main._unhandled_input(reset)
-	_check(senses.active_species == "Gecko", "full reset lost the active sight species")
+	_check(senses.active_species == "Cat", "full reset lost the active sight species")
 	_check(sight.origin().is_equal_approx(main.creature.body.head.pos),
 		"sight did not follow the head after reset")
 

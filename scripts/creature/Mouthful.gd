@@ -21,8 +21,8 @@
 ##   * Once the piece reaches no further than the mouth is deep, the next closing
 ##     **swallows** it, because there is nothing left to stop it going down.
 ##
-## So a Gecko gnaws at a Crocodile's thigh for a long time and a Crocodile takes a
-## Gecko's whole leg in one, and neither of those is written anywhere. Both are
+## So a Cat gnaws at an Elephant's thigh for a long time and an Elephant takes a
+## Cat's whole leg in one, and neither of those is written anywhere. Both are
 ## `reach` against `gape`.
 class_name Mouthful
 extends RefCounted

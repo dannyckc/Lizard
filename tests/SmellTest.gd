@@ -294,8 +294,8 @@ func _layering(senses: CreatureSenses, field: ScentField) -> void:
 	senses.set_smell_profile(SmellProfile.new())
 
 	senses.smell.advance(senses.smell.profile.beat_interval * 1.01)
-	main.hud.select_species("Gecko")
-	_check(senses.active_species == "Gecko", "species change did not reset SENSES")
+	main.hud.select_species("Cat")
+	_check(senses.active_species == "Cat", "species change did not reset SENSES")
 	_check(senses.smell.marks.is_empty(), "a species change kept the old creature's read")
 
 	field.deposit(main.creature.head_pos + Vector2(50.0, 0.0), ScentField.Kind.BLOOD)
@@ -306,7 +306,7 @@ func _layering(senses: CreatureSenses, field: ScentField) -> void:
 	main._unhandled_input(reset)
 	_check(field.traces.is_empty(), "a full reset left the old habitat's scent behind")
 	_check(senses.smell.marks.is_empty(), "a full reset left the old read behind")
-	_check(senses.active_species == "Gecko", "full reset lost the active species")
+	_check(senses.active_species == "Cat", "full reset lost the active species")
 	_check(senses.smell.origin().is_equal_approx(main.creature.body.head.pos),
 		"smell did not follow the head after reset")
 

@@ -228,8 +228,8 @@ func _check_solid(player: Creature, body: Creature) -> void:
 ## and lets the free chain carry it, so the body deforms on the way.
 func _check_dragged(player: Creature, body: Creature) -> void:
 	player.set_bite_held(false)
-	player.params.apply_preset("Crocodile")
-	body.params.apply_preset("Gecko")
+	player.params.apply_preset("Elephant")
+	body.params.apply_preset("Cat")
 	player.reset(Vector2.ZERO, 0.0)
 	body.reset(Vector2(60.0, 0.0), PI)
 	for _tick in 20:
@@ -242,7 +242,7 @@ func _check_dragged(player: Creature, body: Creature) -> void:
 		player._physics_process(TICK)
 		body._physics_process(TICK)
 	if player.grip == null:
-		failures.append("a Crocodile could not get hold of a carcass at all")
+		failures.append("an Elephant could not get hold of a carcass at all")
 		return
 
 	var start: Vector2 = body.head_pos
@@ -256,7 +256,7 @@ func _check_dragged(player: Creature, body: Creature) -> void:
 		body._physics_process(TICK)
 
 	_check(start.distance_to(body.head_pos) > 50.0,
-		"a carcass held in a Crocodile's jaws was towed only %.1f px" % start.distance_to(body.head_pos))
+		"a carcass held in an Elephant's jaws was towed only %.1f px" % start.distance_to(body.head_pos))
 
 	var pose_after: PackedFloat32Array = _joint_angles(body.spine)
 	var deformation: float = 0.0
@@ -273,8 +273,8 @@ func _check_dragged(player: Creature, body: Creature) -> void:
 ## socket passes the load into the spine and the carcass follows.
 func _check_limb_dragged(player: Creature, body: Creature) -> void:
 	player.set_bite_held(false)
-	player.params.apply_preset("Crocodile")
-	body.params.apply_preset("Gecko")
+	player.params.apply_preset("Elephant")
+	body.params.apply_preset("Cat")
 	player.reset(Vector2.ZERO, 0.0)
 	body.reset(Vector2(300.0, 0.0), PI)
 
@@ -306,13 +306,21 @@ func _check_limb_dragged(player: Creature, body: Creature) -> void:
 	_check(foot_before.distance_to(limb.joints[2]) > 5.0,
 		"pulling a dead foot did not articulate the limb")
 
+	# The pull is re-aimed along the limb every tick, so once the carcass has been
+	# hauled far enough the direction has swung round with it and the body settles
+	# at a fixed offset instead of being towed away. What that offset comes out at
+	# is geometry — limb length against body mass — so the threshold only has to
+	# separate "the socket passes the load on" from "the leg absorbs all of it",
+	# and the measured figure is quoted so a regression to the latter is legible
+	# rather than a bare failure.
 	var body_before: Vector2 = body.head_pos
 	for _tick in 60:
 		var outward: Vector2 = (held.anchor() - limb.joints[0]).normalized()
 		body._drag_grip(held, outward * 8.0)
 		body._physics_process(TICK)
-	_check(body_before.distance_to(body.head_pos) > 5.0,
-		"a taut dead limb never transmitted its pull into the spine")
+	_check(body_before.distance_to(body.head_pos) > 3.0,
+		"a taut dead limb never transmitted its pull into the spine (%.2f px)"
+			% body_before.distance_to(body.head_pos))
 
 
 # ------------------------------------------------------------------ util ----

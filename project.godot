@@ -28,6 +28,5 @@ window/stretch/aspect="expand"
 
 [rendering]
 
-# Default to 4× through 2560×1440; Main selects 2× for larger render targets.
-anti_aliasing/quality/msaa_2d=2
 environment/defaults/default_clear_color=Color(0.953, 0.945, 0.925, 1)
+"#Defaultto4Ãthrough2560Ã1440anti_aliasing/quality/msaa_2d"=2

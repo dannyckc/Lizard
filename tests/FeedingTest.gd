@@ -13,7 +13,7 @@
 ##     dragging it is decided by its weight and by nothing else;
 ##   * biting, chewing and swallowing are three readings of two numbers — where
 ##     the jaws have hold, and how far the piece reaches from there — so the same
-##     code has to produce a Crocodile bolting a foot and a Gecko gnawing at a
+##     code has to produce an Elephant bolting a foot and a Cat gnawing at a
 ##     thigh without being told which it is doing.
 extends SceneTree
 
@@ -341,15 +341,15 @@ func _check_what_fits_goes_down(player: Creature, target: Creature) -> void:
 	_park(target)
 	# A big mouth on a small piece: it goes down whole, first closing, because it
 	# fits. Nothing anywhere decides that a foot is a mouthful and a leg is not.
-	player.params.apply_preset("Crocodile")
+	player.params.apply_preset("Elephant")
 	_stand_over(player, part.pos)
 	_strike(player, true)
 	if player.mouthful == null:
-		_check(false, "a Crocodile could not take hold of a Lizard's foot")
+		_check(false, "an Elephant could not take hold of a Lizard's foot")
 		player.params.apply_preset("Lizard")
 		return
 	_check(player.mouthful.fits(player.gape_radius()),
-		"a Lizard's foot (%.1f px) did not fit a Crocodile's mouth (%.1f px)"
+		"a Lizard's foot (%.1f px) did not fit an Elephant's mouth (%.1f px)"
 			% [player.mouthful.reach(), player.gape_radius()])
 
 	var fed: int = player.food_eaten
@@ -379,7 +379,7 @@ func _check_a_swallow_passes_through_the_body(player: Creature, target: Creature
 	if part == null:
 		return
 	_park(target)
-	player.params.apply_preset("Crocodile")
+	player.params.apply_preset("Elephant")
 	_stand_over(player, part.pos)
 	_strike(player, true)
 	if player.mouthful == null:

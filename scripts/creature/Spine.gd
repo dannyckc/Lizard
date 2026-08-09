@@ -126,8 +126,14 @@ func size() -> int:
 ## being stiffened toward it, so the body folds *there*. Left empty — which is the
 ## case for any creature nobody has bitten — every line below reads exactly the
 ## parameters it always did.
+## `wave_gain` is how much of the authored undulation this animal's stance
+## actually uses. A sprawled body lengthens its stride by throwing the spine side
+## to side and keeps all of it; an upright one has taken that job back into the
+## legs and keeps almost none. Left at one, the wave is exactly what `body_wave`
+## says it is, which is what it has always been.
 func step(delta: float, head_pos: Vector2, p: CreatureParams, speed_norm: float,
-		seg_len: float, tone: PackedFloat32Array = PackedFloat32Array()) -> void:
+		seg_len: float, tone: PackedFloat32Array = PackedFloat32Array(),
+		wave_gain: float = 1.0) -> void:
 	var n: int = points.size()
 	if n < 3:
 		return
@@ -165,7 +171,7 @@ func step(delta: float, head_pos: Vector2, p: CreatureParams, speed_norm: float,
 		var t: float = float(i) / float(n - 1)
 		var envelope: float = sin(t * PI)  # no sway at the neck or the very tip
 		var phase: float = sin(wave_clock * TAU - t * p.wave_frequency * TAU)
-		var target: Vector2 = perps[i] * (phase * p.body_wave * speed_norm * envelope)
+		var target: Vector2 = perps[i] * (phase * p.body_wave * wave_gain * speed_norm * envelope)
 		var shift: Vector2 = target - wave_offsets[i]
 		points[i] += shift
 		prev[i] += shift

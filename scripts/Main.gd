@@ -135,7 +135,8 @@ func _physics_process(_delta: float) -> void:
 	food_field.refresh(creature.head_pos)
 	# The mouse can articulate the visible head around the neck without moving
 	# the locomotion anchor, so mouth interactions use the solved head itself.
-	var eaten: int = food_field.consume(creature.body.head.pos, creature.mouth_radius())
+	var eaten: int = food_field.consume(creature.body.head.pos, creature.mouth_radius(),
+		creature.stature.bite)
 	if eaten > 0:
 		creature.feed(eaten)
 		sound_field.emit_sound(creature.body.head.pos, 0.42 * creature.size_scale,
@@ -178,6 +179,11 @@ func _update_hud() -> void:
 		state = "turning"
 	if creature.command.sprint and creature.speed_norm > 0.7:
 		state = "running"
+	# Off the ground outranks anything it was doing on it: what the creature is
+	# doing is leaping, gliding or flying, and the name comes from the elevation
+	# itself rather than from a second reading of the same facts here.
+	if creature.elevation.is_airborne():
+		state = creature.elevation.state_name()
 	if creature.is_lunging():
 		state = "biting"
 	# A hold outranks the lunge that started it: once the jaws are on something,
@@ -194,7 +200,8 @@ func _update_hud() -> void:
 		creature.food_eaten,
 		creature.anatomy.tissue.integrity(),
 		creature.spine.size(),
-		creature.physique.mass
+		creature.physique.mass,
+		creature.elevation.height
 	)
 
 
@@ -293,7 +300,7 @@ func _on_creature_bite_started(mark: BiteMark, biter: Creature) -> void:
 		var candidate := node as Creature
 		if candidate == null or candidate == biter:
 			continue
-		var hit: AnatomyState.Hit = candidate.query_bite(mark.center, mark.radius)
+		var hit: AnatomyState.Hit = candidate.query_bite(mark.center, mark.radius, mark.reach)
 		if hit != null and (best_hit == null or hit.score < best_hit.score):
 			best_target = candidate
 			best_hit = hit
@@ -302,7 +309,7 @@ func _on_creature_bite_started(mark: BiteMark, biter: Creature) -> void:
 	# it: a leg lying across a body is what the jaws reached furthest into, so a
 	# leg is what they close on. Scored in the same currency by the same rule,
 	# which is the only reason the comparison means anything.
-	var meat: CarrionField.Part = carrion.reach_of(mark.center, mark.radius)
+	var meat: CarrionField.Part = carrion.reach_of(mark.center, mark.radius, mark.reach)
 	if meat != null and best_hit != null \
 			and carrion.depth_into(meat, mark.center) >= best_hit.score:
 		meat = null

@@ -5,11 +5,11 @@
 ## already being solved every tick — the silhouette's widths, the length they are
 ## strung along, the head cap, and how much tissue is still standing in the
 ## lattice — and scaled by three per-species power parameters. That is deliberate
-## twice over. A Komodo comes out five times a Lizard because it is *drawn* five
-## times the Lizard, not because someone remembered to move a second slider; and
-## a creature eaten half open gets lighter, weaker and slacker-jawed for free,
-## because the same lattice that says where the holes are is what these are
-## measured through.
+## twice over. An Elephant comes out twenty times a Lizard because it is *drawn*
+## twenty times the Lizard, not because someone remembered to move a second
+## slider; and a creature eaten half open gets lighter, weaker and slacker-jawed
+## for free, because the same lattice that says where the holes are is what these
+## are measured through.
 ##
 ## Refreshed once per tick, after the body and the lattice. Everything that reads
 ## it — contact shares, hauling, grip strain — is strictly a consumer, so this

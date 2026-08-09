@@ -54,6 +54,15 @@ var radius: float = 0.0
 ## Conservative world bounds, for rejecting a patch without a cell walk.
 var lo: Vector2 = Vector2.ZERO
 var hi: Vector2 = Vector2.ZERO
+## The height band these jaws could bring to bear — see Stature. It is carried on
+## the mark rather than looked up by whatever resolves it for exactly the reason
+## the penetration is: how far a mouth reaches is a property of the animal that
+## made the bite, and by the time the damage lands nobody downstream should have
+## to go and ask it anything.
+##
+## Unbounded by default, so a caller that knows nothing about height bites what
+## it always bit.
+var reach: Vector2 = Stature.UNBOUNDED
 
 
 ## The mark a mouthful parting from a body leaves, rather than one teeth closing
@@ -73,6 +82,12 @@ static func mouthful(at: Vector2, forward: Vector2, radius: float, depth: float)
 	mark.add(imp)
 	mark.close(at)
 	return mark
+
+
+## Whether these jaws reach something occupying `band`. The vertical half of
+## every hit test in the game, and the only thing the 2.5D layer adds to a bite.
+func reaches(band: Vector2) -> bool:
+	return Stature.overlaps(reach, band)
 
 
 func add(impression: Impression) -> void:

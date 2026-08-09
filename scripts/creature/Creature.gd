@@ -60,6 +60,15 @@ signal foot_landed(at: Vector2, intensity: float)
 var spine: Spine
 var body: BodyShape
 var gait: Gait
+## How this animal holds its legs under it. An anatomical trait, rebuilt with the
+## rest of the structure when the parameter changes — see Posture.
+var posture: Posture = Posture.new()
+## Where the body is in the one direction the plane does not have. Zero on
+## anything standing on the ground, which is nearly everything nearly always.
+var elevation: Elevation = Elevation.new()
+## What heights this body occupies and what heights its jaws reach, read off the
+## solved pose each tick beside the physique. Not settings — see Stature.
+var stature: Stature = Stature.new()
 ## Owns the limbs while `alive` is false, exactly where Gait owns them while it is
 ## true. Null on a living creature.
 var ragdoll: Ragdoll = null
@@ -93,6 +102,13 @@ const PIVOT_FADE_END: float = 0.45
 ## is what the head leads the turn by, and at 1.0 the body would rotate rigidly
 ## with it and nothing would bend.
 const STANDING_TURN_ASSIST: float = 0.6
+## How much of its steering and acceleration a body keeps with nothing under its
+## feet. Small but not zero — a leaping animal can still twist — and it is the
+## whole reason a leap is a commitment rather than a hop with full control.
+const AIR_CONTROL: float = 0.14
+## How much of it a wing gives back, per unit of lift. A flier steers with its
+## wings, so at any real span it is manoeuvring rather than falling.
+const WING_CONTROL: float = 0.55
 
 ## The cursor articulates only the head around the solved neck. This angle is
 ## deliberately separate from `heading`, which remains the WASD-owned body
@@ -203,7 +219,7 @@ const REGRIP_LATERALS: Array[float] = [0.0, 0.5, -0.5, 0.9, -0.9]
 # which of them happens is never chosen anywhere: it is whichever gives out
 # first. Jaws weaker than the flesh they are on are pulled off a body that stayed
 # in one piece; jaws stronger than it take a piece of it with them. That is the
-# whole of why a Crocodile strips meat off prey a Gecko can only be shaken from,
+# whole of why an Elephant strips meat off prey a Cat can only be shaken from,
 # and no rule was written for either case.
 
 ## Fraction of its strength at which flesh starts to give rather than merely take
@@ -327,6 +343,7 @@ func rebuild() -> void:
 	# the sprawl of its limbs are different draws describing one body rather than
 	# the same few numbers used twice.
 	var rng: RandomNumberGenerator = null if alive else _rest_rng()
+	posture = Posture.new(params.posture)
 	spine = Spine.new()
 	var seg_len: float = params.segment_length * size_scale
 	if alive:
@@ -337,13 +354,19 @@ func rebuild() -> void:
 	body = BodyShape.new()
 	gait = Gait.new()
 	gait.setup()
-	body.build(spine, params, size_scale)
+	gait.posture = posture
+	body.build(spine, params, size_scale, posture)
 	# How much fat this species carries is part of what it is built out of, so it
 	# is laid down here with the rest of the structure rather than per tick.
 	anatomy.set_fat_reserve(params.fat_reserve)
+	# Before the limbs, because how far the ground sits below the torso is what
+	# the gait draws the legs down to — and on the very first tick there is no
+	# previous stature to read it from.
+	_update_stature()
 	if alive:
 		ragdoll = null
-		gait.update(0.0, body, move_dir, 0.0, params, size_scale)
+		gait.update(0.0, body, move_dir, 0.0, params, size_scale, Callable(), null,
+			_ground_drop(), elevation.is_airborne())
 	else:
 		ragdoll = Ragdoll.new()
 		ragdoll.settle(body, gait.limbs, params, size_scale, rng)
@@ -351,7 +374,23 @@ func rebuild() -> void:
 	# rebuild cannot wash it off — but its world geometry is now stale.
 	anatomy.update(self)
 	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
+	_update_stature()
 	_update_bounds()
+
+
+## Re-reads what heights this body occupies. Runs beside `physique` and for the
+## same reason: both are descriptions of the pose that has just been solved, and
+## both would be a tick stale anywhere else.
+func _update_stature() -> void:
+	stature.update(posture, body, params, size_scale, body_length(),
+		elevation.height, gape_radius(), alive)
+
+
+## How far down the screen the ground sits from the plane the torso is drawn on —
+## what makes a tall animal's legs visibly run down to it. Presentation only:
+## nothing that decides an outcome reads it.
+func _ground_drop() -> float:
+	return stature.reference * Posture.PERSPECTIVE
 
 
 ## The generator a carcass's resting shape is drawn from.
@@ -382,6 +421,7 @@ func reset(at: Vector2 = Vector2.ZERO, facing: float = 0.0) -> void:
 	head_look_dir = move_dir
 	food_eaten = 0
 	command = MovementInput.Command.new()
+	elevation.reset()
 	anatomy.reset()
 	bite_cooldown_remaining = 0.0
 	bite_connected = false
@@ -452,6 +492,7 @@ func _physics_process(delta: float) -> void:
 		bite_cooldown_remaining = params.bite_cooldown
 	_advance_lunge(delta)
 
+	_advance_elevation(delta)
 	_integrate_motion(delta)
 	# Between "where input put the head" and "where the body follows it to", so
 	# the silhouette, the limbs and the tissue lattice are all built from the
@@ -467,7 +508,12 @@ func _physics_process(delta: float) -> void:
 	# position: the strike must not accumulate into the motion integrator or a
 	# bite would teleport the creature forward by its own reach.
 	var seg_len: float = params.segment_length * size_scale
-	spine.step(delta, head_pos, params, speed_norm, seg_len, _axial_tone())
+	# Undulation is a way of walking — a sprawled body lengthening its stride by
+	# throwing itself side to side — so it is scaled by how much of the walking
+	# this stance does with its spine, and switched off entirely when there is no
+	# ground being pushed against at all.
+	var wave_gain: float = 0.0 if elevation.is_airborne() else posture.wave_gain
+	spine.step(delta, head_pos, params, speed_norm, seg_len, _axial_tone(), wave_gain)
 	_update_head_look(delta)
 	# Mouse look and the lunge are posed after the body solve, in the one layer
 	# that can move point 0 without touching point 1 or anything downstream of it.
@@ -487,21 +533,30 @@ func _physics_process(delta: float) -> void:
 	# the body it is going down: it is a term in the width profile and not a lump
 	# drawn over the top of one.
 	_read_swallow()
-	body.build(spine, params, size_scale)
+	body.build(spine, params, size_scale, posture)
 	# `move_dir` is the body's facing and intentionally never flips in reverse.
 	# The gait only needs a signed fallback for the instant a socket is moving
 	# too slowly to measure its own travel direction.
 	var gait_dir: Vector2 = -move_dir if speed < -0.01 \
 		or (absf(speed) <= 0.01 and command.throttle < 0.0) else move_dir
 	gait.update(delta, body, gait_dir, speed_norm, params, size_scale,
-		Callable(self, "_limb_contact_push"), anatomy.state)
+		Callable(self, "_limb_contact_push"), anatomy.state,
+		_ground_drop(), elevation.is_airborne())
 	_carry_limp_limbs(delta)
 	for contact in gait.landed:
 		var footfall: float = (0.07 + minf(0.11, absf(speed) / 1600.0)) * size_scale
 		foot_landed.emit(contact, footfall)
+	# A whole body coming back down is a footfall too, and a much louder one — so
+	# it is announced through the same channel the feet use rather than through a
+	# second one. Sized off the speed it arrived at, because that is what makes
+	# the noise.
+	if elevation.landed:
+		foot_landed.emit(spine.points[0],
+			clampf(elevation.impact / 900.0, 0.06, 0.34) * size_scale)
 	anatomy.update(self, delta)
 	_release_severed()
 	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
+	_update_stature()
 	_update_bounds()
 	# Last of the derived state, because it is a consequence of all of it: a body
 	# whose brain has gone out or whose circulation has stopped is no longer
@@ -551,6 +606,10 @@ func collapse() -> void:
 		return
 	alive = false
 	_release_grip()
+	# Whatever was holding it up has stopped. A body that dies in the air falls,
+	# and it falls the whole way this tick rather than over a graceful arc — the
+	# arc was the animal flying, and there is no animal now.
+	elevation.ground()
 	# A dead mouth drops what is in it. Nothing else would be true of a mouth.
 	_drop_mouthful()
 	bite_held = false
@@ -691,12 +750,15 @@ func _dead_process(delta: float) -> void:
 	head_look_angle = head_look_dir.angle()
 	move_dir = head_look_dir
 
-	body.build(spine, params, size_scale)
+	body.build(spine, params, size_scale, posture)
 	ragdoll.step(delta, body, gait.limbs, params, size_scale,
 		Callable(self, "_limb_contact_push"))
+	for limb in gait.limbs:
+		limb.ground_drop = _ground_drop()
 	anatomy.update(self, delta)
 	_release_severed()
 	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
+	_update_stature()
 	_update_bounds()
 
 
@@ -819,6 +881,33 @@ func _update_head_look(delta: float) -> void:
 	head_look_dir = Vector2.RIGHT.rotated(head_look_angle)
 
 
+## One tick of the vertical axis.
+##
+## Deliberately the shortest step in the tick, and deliberately upstream of the
+## horizontal one: everything else in this file solves the ground plane and then
+## asks this scalar whether the answer applies. A leap is *commanded* here and
+## nowhere else — `command.climb` above zero on a body that is standing on
+## something — because "throw yourself upward" is the one vertical action a
+## terrestrial animal has, and it has to be a push against the ground rather than
+## a mode the creature enters.
+##
+## What the legs can put into it is the same `locomotion` the gait already reads
+## and the same haul factor a grip already imposes, so a creature with a dead leg
+## clears less and one with an Elephant on its tail barely leaves the floor —
+## neither of which is written here.
+func _advance_elevation(delta: float) -> void:
+	var effort: float = _haul_factor()
+	if anatomy.state.impaired:
+		effort *= anatomy.state.locomotion
+	if command.climb > 0.0 and elevation.is_grounded() and params.leap_height > 0.0:
+		# Peak is quoted against how tall the animal stands, so the same trait
+		# means the same thing on a mouse and on a horse — and so what a leap can
+		# clear is legible: it is measured in the same unit as the back of the
+		# thing being cleared.
+		elevation.leap(params.leap_height * maxf(stature.stand_height(), 1.0), effort)
+	elevation.advance(delta, command.climb, params.wing_lift, body_length(), effort)
+
+
 func _integrate_motion(delta: float) -> void:
 	var p: CreatureParams = params
 	# A grip is a load on whichever end of it this creature is, and the only thing
@@ -835,12 +924,22 @@ func _integrate_motion(delta: float) -> void:
 	var state: BodyState = anatomy.state
 	var drive: float = state.locomotion if state.impaired else 1.0
 	var steering: float = state.coordination if state.impaired else 1.0
+	# What the legs have to push against. On the ground, all of it. Off it,
+	# whatever the animal can do with its own body instead — a good deal with
+	# wings out and almost nothing without them, which is why a leap is a
+	# committed arc and a glide is still flying. One number for both axes,
+	# because it is one fact: nothing is bearing on the ground.
+	var purchase: float = 1.0
+	if elevation.is_airborne():
+		purchase = clampf(AIR_CONTROL + p.wing_lift * WING_CONTROL, AIR_CONTROL, 1.0)
 
 	# Turn rate falls off with speed so the arc stays wider than the body. At a
 	# standstill the full rate is available, which is what lets the creature
-	# pivot on the spot (together with the swing block below).
-	var turn_rate: float = deg_to_rad(p.turn_speed_deg) \
-		* (1.0 - p.turn_speed_falloff * speed_norm) * steering
+	# pivot on the spot (together with the swing block below). The stance's own
+	# agility is in here too: a semi-upright animal turns flat and a columnar one
+	# carves — same parameter, different build under it.
+	var turn_rate: float = deg_to_rad(p.turn_speed_deg) * posture.agility \
+		* (1.0 - p.turn_speed_falloff * speed_norm) * steering * purchase
 	# Steering backwards is compromised by exactly what makes backing up slow:
 	# legs built to push a body forward are pushing it the other way, and they
 	# are steering it from the wrong end while they do. So a reversing creature
@@ -894,7 +993,7 @@ func _integrate_motion(delta: float) -> void:
 	if command.throttle < 0.0:
 		top_speed *= p.reverse_speed_factor
 	var desired_speed: float = command.throttle * top_speed
-	var rate: float = p.acceleration * size_scale * haul * drive
+	var rate: float = p.acceleration * size_scale * posture.drive * haul * drive * purchase
 	var reversing: bool = not is_zero_approx(speed) and not is_zero_approx(desired_speed) \
 		and signf(speed) != signf(desired_speed)
 	if reversing:
@@ -1005,6 +1104,15 @@ func _resolve_contacts() -> void:
 		# collides with the other while the other does not. Everything else in the
 		# world still collides with both, and the limbs still route around both.
 		if _is_joined_to(other):
+			continue
+		# Two bodies that are not at the same height are not in each other's way,
+		# and this one line is the whole of "jump over the charge". It sits beside
+		# the grip exemption above rather than inside the narrow phase because it
+		# is the same kind of statement: a reason this pair has no contact to
+		# resolve at all, decided before either body is measured against the
+		# other. Both parties reach it from the same two bands, so neither ever
+		# collides with something that is not colliding with it.
+		if not Stature.overlaps(stature.whole, other.stature.whole):
 			continue
 		# The body's bound is from its last solved pose, while the authoritative
 		# head has already integrated this tick. Inflate by that small sweep so a
@@ -1220,6 +1328,21 @@ func _limb_contact_push(limb_key: String, limb_segment: int,
 	for node in get_tree().get_nodes_in_group("creatures"):
 		var other := node as Creature
 		if other == null or other == self or other.body == null or other.spine == null:
+			continue
+		# The one limb somebody has their teeth in is exempt from being pushed out
+		# of them, and it is the same rule the body pass already applies to a
+		# joined pair: jaws hold flesh by being *inside* it, so a correction whose
+		# whole job is getting a body out of another one is pointing the opposite
+		# way to the tether and the two fight every tick. Only this limb and only
+		# against this creature — every other leg still routes around both bodies,
+		# because nothing is holding those.
+		#
+		# It matters most exactly where the vertical layer sends a small predator:
+		# a leg is the only thing on a tall animal a low one can reach, so without
+		# this a hold down there is shaken off by the victim's own gait solver
+		# within a couple of ticks and legs are effectively unbiteable.
+		if _held_by != null and _held_by.is_alive() and _held_by.biter == other \
+				and _held_by.holds_limb() and _held_by.limb_key == limb_key:
 			continue
 		if midpoint.distance_to(other.bounds_center) \
 				> capsule_bound + other.bounds_radius:
@@ -1638,8 +1761,28 @@ func _resolve_grip() -> void:
 			# halves of a correction added up out of order.
 			grip.tension = grip.slack().length()
 			_take_up_slack(grip, grip.victim, 1.0)
+			_take_up_height(grip.victim)
 	if _held_by != null and _held_by.is_alive():
 		_take_up_slack(_held_by, _held_by.biter, -1.0)
+		_take_up_height(_held_by.biter)
+
+
+## The vertical half of the same tether.
+##
+## A set of jaws is the only thing in this world that physically joins two bodies,
+## so it is the only thing that can hold one at a height it did not choose. That
+## makes it the answer to the obvious hole in a leap: a creature already in
+## something's mouth cannot jump away from it, and a flier that gets hold of
+## something on the ground has to carry it rather than leave it behind.
+##
+## Split by mass through exactly the same share the horizontal correction uses,
+## so the light party does nearly all of the moving and neither writes into the
+## other. Two bodies at the same height are joined by a slack tether and nothing
+## happens at all.
+func _take_up_height(other: Creature) -> void:
+	if other == null:
+		return
+	elevation.tether(other.elevation.height, _contact_share(other))
 
 
 ## Whether a set of jaws — either creature's — currently joins this pair.
@@ -1872,8 +2015,8 @@ func _place_mouthful(delta: float) -> void:
 ## One closing of the jaws on what they are already holding.
 ##
 ## Either the piece goes down or it is worked on, and the test is the only thing
-## separating a Crocodile taking a Gecko's leg whole from a Gecko gnawing at a
-## Crocodile's for a minute: how far the meat reaches from the hold, against how
+## separating an Elephant taking a Cat's leg whole from a Cat gnawing at an
+## Elephant's for a minute: how far the meat reaches from the hold, against how
 ## much mouth there is. Food size, food shape, mouth size and bite position all
 ## arrive in that one comparison, and none of them is named in it.
 ##
@@ -1976,8 +2119,14 @@ func bite_mark(at: Vector2, depth: float) -> BiteMark:
 		else head_look_dir
 	var perp := Vector2(-fwd.y, fwd.x)
 	var axes: Vector2 = jaw_axes()
-	return dentition.stamp(
+	var mark: BiteMark = dentition.stamp(
 		at - fwd * (dentition.centroid * axes.x), fwd, perp, axes.x, axes.y, depth)
+	# How high these jaws are being brought to bear, carried with the footprint
+	# they leave. Everything downstream — which creature the world picks, which of
+	# its structures the query can even see, which cells the lattice lets go —
+	# reads it off the mark rather than coming back to ask the animal.
+	mark.reach = stature.bite
+	return mark
 
 
 ## Re-seats jaws whose mouthful has come away, on the surviving flesh inside
@@ -2114,7 +2263,7 @@ func _find_grip_on_self() -> Grip:
 ## pull with `strength`, and a grip adds the whole of another body to what that
 ## strength has to move. Because strength goes as mass^(2/3) while the load goes
 ## as mass, this is the square-cube law arriving exactly where it matters — a
-## Komodo tows a Gecko without noticing, a Gecko latched onto a Komodo can barely
+## Elephant tows a Cat without noticing, a Cat latched onto an Elephant can barely
 ## walk, and neither case needed a rule written for it.
 ##
 ## `speed_norm` is deliberately still measured against the *unhauled* top speed,
@@ -2127,7 +2276,7 @@ func _haul_factor() -> float:
 	if _held_by != null and _held_by.is_alive():
 		towed += _held_by.biter.physique.mass
 	# Meat weighs what it weighs. A severed thigh off something large is a real
-	# load, and the same rule that makes towing a Komodo hard makes dragging one's
+	# load, and the same rule that makes towing an Elephant hard makes dragging one's
 	# leg away hard — because it is the same rule and the same currency.
 	if mouthful != null and mouthful.part != null:
 		towed += mouthful.part.mass()
@@ -2139,15 +2288,16 @@ func _haul_factor() -> float:
 
 ## Pure query used by the world combat resolver so only the closest creature is
 ## damaged when several procedural bodies overlap the same bite volume.
-func query_bite(center: Vector2, radius: float) -> AnatomyState.Hit:
-	return anatomy.hit_test(self, center, radius)
+func query_bite(center: Vector2, radius: float,
+		reach: Vector2 = Stature.UNBOUNDED) -> AnatomyState.Hit:
+	return anatomy.hit_test(self, center, radius, reach)
 
 
 ## Erodes this creature's tissue lattice wherever the bite mark covers it, and
 ## hands whatever came loose to the world.
 func apply_bite(mark: BiteMark) -> float:
 	var shed: Array = []
-	var removed: float = anatomy.apply_bite(mark, shed)
+	var removed: float = anatomy.apply_bite(mark, shed, stature)
 	if removed <= 0.0:
 		return 0.0
 	tissue_damaged.emit(anatomy.tissue.integrity())

@@ -46,6 +46,33 @@ extends Resource
 @export_range(0.02, 0.5, 0.01) var front_limb_t: float = 0.16
 @export_range(0.2, 0.9, 0.01) var rear_limb_t: float = 0.46
 
+# -------------------------------------------------------------- posture ----
+@export_group("Posture")
+## How this animal holds its legs under it: 0 sprawled, 1 semi-upright, 2
+## columnar. See Posture — one trait, and the stance width, the body clearance,
+## how much of the upper limb the torso stands over, how much the spine
+## undulates, how many feet stay down and how readily the animal turns all come
+## out of it. It is an anatomical category, not a tuning group: two creatures
+## with the same numbers and different postures are different animals.
+@export_range(0, 2, 1) var posture: int = Posture.SPRAWLED
+
+# --------------------------------------------------------------- height ----
+@export_group("Height")
+## How far above the shoulder the head is carried, as a fraction of the animal's
+## own length. Zero is a head held in the plane of the body — a lizard. Large is
+## a browser, and the whole of what makes one: a long neck raises what the jaws
+## can reach without touching anything else about the creature.
+@export_range(0.0, 0.6, 0.01) var neck_lift: float = 0.0
+## Peak of a standing leap, as a multiple of the animal's own standing height.
+## Zero is a body that cannot leave the ground, which is a real answer — a heavy
+## columnar animal has no way to throw itself into the air, and nothing had to
+## forbid it.
+@export_range(0.0, 4.0, 0.05) var leap_height: float = 0.6
+## Lift the wings generate, zero on anything without them. It is the only thing
+## separating a creature that can glide and fly from one that can only leap:
+## with none, the two airborne states are simply unreachable — see Elevation.
+@export_range(0.0, 2.0, 0.05) var wing_lift: float = 0.0
+
 # ---------------------------------------------------------------- limbs ----
 @export_group("Limbs")
 ## Total reach of a two-bone chain (split 52% upper / 48% lower).
@@ -215,6 +242,14 @@ const SCHEMA: Array = [
 	{"prop": "front_limb_t", "label": "Shoulder pos", "min": 0.02, "max": 0.5, "step": 0.01},
 	{"prop": "rear_limb_t", "label": "Hip pos", "min": 0.2, "max": 0.9, "step": 0.01},
 
+	{"group": "Posture"},
+	{"prop": "posture", "label": "Stance (0/1/2)", "min": 0.0, "max": 2.0, "step": 1.0},
+
+	{"group": "Height"},
+	{"prop": "neck_lift", "label": "Neck lift", "min": 0.0, "max": 0.6, "step": 0.01},
+	{"prop": "leap_height", "label": "Leap height", "min": 0.0, "max": 4.0, "step": 0.05},
+	{"prop": "wing_lift", "label": "Wing lift", "min": 0.0, "max": 2.0, "step": 0.05},
+
 	{"group": "Limbs"},
 	{"prop": "arm_length", "label": "Arm length", "min": 8.0, "max": 120.0, "step": 1.0},
 	{"prop": "leg_length", "label": "Leg length", "min": 8.0, "max": 120.0, "step": 1.0},
@@ -267,90 +302,94 @@ const SCHEMA: Array = [
 
 ## Named starting points for tuning. Anything omitted keeps the default.
 ##
+## One per posture, because posture is the axis these three are laid out along.
+## Everything that separates them as animals to play — how they turn, how much of
+## their legs you can see, how high they stand, what they can reach and what can
+## reach them — is downstream of that one trait plus the ordinary silhouette and
+## power numbers every species already had.
+##
 ## The physique rows are worth reading as a set. Mass is not listed anywhere
 ## because it is not a setting — the silhouette above each `density` already
 ## decides most of it, and these three numbers only say what kind of animal that
 ## silhouette is made of: how solid, how strong for its size, and how hard its
-## jaws shut. That is why the Gecko can be quicker than the Lizard while being
-## unable to hold anything, and why the Crocodile's jaws are in a different
-## league from its legs.
+## jaws shut. That is why the Cat can be quicker than the Lizard while weighing a
+## fraction of the Elephant, and why the Elephant's jaws are in a different
+## league without its `jaw_power` being extreme: it is wearing a skull twice the
+## reference width, and bite force goes as the square of that.
 const PRESETS: Dictionary = {
+	# The sprawled reference, and the body every other number in this file is
+	# quoted against. Belly near the floor, legs out to the sides, and a spine
+	# that does part of the walking — which is why it is the one preset that keeps
+	# its undulation at full strength.
 	"Lizard": {},
-	"Gecko": {
-		"segment_count": 11, "segment_length": 13.0, "max_bend_deg": 28.0,
-		"spine_damping": 0.62, "body_wave": 4.0,
-		"head_width": 12.0, "chest_width": 13.0, "waist_width": 9.5, "hip_width": 11.0,
-		"arm_length": 30.0, "leg_length": 33.0, "stance_width": 1.25, "stance_reach": 0.72,
-		"stride_distance": 20.0, "step_duration": 0.18, "step_height": 7.0,
-		"move_speed": 230.0, "turn_speed_deg": 260.0,
-		"density": 0.85, "muscle_power": 1.25, "jaw_power": 0.55, "fat_reserve": 0.5,
-		"bite_damage": 1.8, "bite_reach": 26.0, "bite_radius": 12.0,
-		"bite_cooldown": 0.3, "chew_interval": 0.4,
-		# A crowded comb of small pegs. Nothing in it concentrates, so it grazes
-		# broadly and cannot open anything — which is the mouth that goes with
-		# jaws too weak to hold what they bite.
-		"tooth_count": 14, "tooth_size": 0.13, "tooth_sharpness": 0.5,
-		"jaw_gape_deg": 62.0, "tooth_variation": 0.12,
+
+	# Semi-upright. Legs drawn in under the body, so the plan-view reach is barely
+	# two thirds of the leg and the shoulder disappears beneath the torso; the
+	# spine stops undulating because the legs have taken the stride back off it.
+	# What it buys is the whole point of the stance: the drive and the turn rate
+	# come off the posture table, not from these numbers, and the difference is
+	# larger than anything written below.
+	"Cat": {
+		"posture": Posture.SEMI_UPRIGHT,
+		"segment_count": 12, "segment_length": 14.0, "max_bend_deg": 26.0,
+		"spine_stiffness": 0.88, "spine_damping": 0.64, "body_wave": 5.0,
+		"wave_frequency": 0.9, "wave_speed": 2.0,
+		"head_width": 11.0, "chest_width": 15.0, "waist_width": 12.0,
+		"hip_width": 14.0, "tail_tip_width": 1.2,
+		"front_limb_t": 0.17, "rear_limb_t": 0.50,
+		"arm_length": 40.0, "leg_length": 46.0, "stance_width": 0.85, "stance_reach": 0.80,
+		"stride_distance": 30.0, "step_duration": 0.20, "step_height": 10.0,
+		"move_speed": 260.0, "acceleration": 1300.0,
+		"turn_speed_deg": 250.0, "turn_responsiveness": 14.0, "turn_pivot": 40.0,
+		"sprint_multiplier": 1.80,
+		"density": 1.0, "muscle_power": 1.6, "jaw_power": 1.1, "fat_reserve": 0.8,
+		"bite_damage": 2.4, "bite_reach": 30.0, "bite_radius": 14.0,
+		"bite_cooldown": 0.32, "chew_interval": 0.40,
+		# Head carried clear of the shoulder, and legs that can throw the whole
+		# animal several times its own standing height. The leap is the semi-
+		# upright stance's signature and the reason it exists in the ecosystem:
+		# it is the only terrestrial build that can get over a charge.
+		"neck_lift": 0.10, "leap_height": 2.6,
+		# Few teeth, long and keen. A killing mouth rather than a holding one:
+		# almost no contact area, so what force there is goes straight in.
+		"tooth_count": 7, "tooth_size": 0.30, "tooth_sharpness": 0.92,
+		"jaw_gape_deg": 58.0, "tooth_variation": 0.20,
 	},
-	"Salamander": {
-		"segment_count": 22, "segment_length": 14.0, "max_bend_deg": 34.0,
-		"spine_stiffness": 0.6, "spine_damping": 0.82,
-		"body_wave": 13.0, "wave_frequency": 1.35, "wave_speed": 2.4,
-		"head_width": 11.0, "chest_width": 12.0, "waist_width": 11.0, "hip_width": 11.5,
-		"tail_tip_width": 1.0, "front_limb_t": 0.14, "rear_limb_t": 0.40,
-		"arm_length": 26.0, "leg_length": 29.0, "stance_width": 1.35,
-		"stride_distance": 22.0, "step_duration": 0.30, "step_height": 6.0,
-		"move_speed": 150.0, "turn_speed_deg": 150.0, "turn_pivot": 70.0,
-		"density": 0.8, "muscle_power": 0.8, "jaw_power": 0.5, "fat_reserve": 0.7,
-		"bite_damage": 1.6, "bite_radius": 14.0,
-		# Rows of fine hooks over a wide mouth: it holds soft prey and strips
-		# nothing off anything solid.
-		"tooth_count": 16, "tooth_size": 0.11, "tooth_sharpness": 0.62,
-		"jaw_gape_deg": 58.0, "tooth_variation": 0.10,
-	},
-	"Komodo": {
-		"segment_count": 18, "segment_length": 22.0, "max_bend_deg": 16.0,
-		"spine_stiffness": 0.92, "spine_damping": 0.6, "body_wave": 4.5,
-		"head_width": 18.0, "chest_width": 24.0, "waist_width": 18.0, "hip_width": 21.0,
-		"tail_tip_width": 2.0,
-		"arm_length": 52.0, "leg_length": 60.0, "stance_width": 0.9, "stance_reach": 0.8,
-		"stride_distance": 42.0, "step_duration": 0.42, "step_height": 14.0,
-		"move_speed": 130.0, "acceleration": 400.0,
-		"turn_speed_deg": 110.0, "turn_responsiveness": 7.0, "turn_pivot": 80.0,
-		"density": 1.15, "muscle_power": 1.1, "jaw_power": 2.4, "fat_reserve": 1.3,
-		"bite_damage": 3.2, "bite_reach": 36.0, "bite_radius": 20.0,
-		"chew_interval": 0.5,
-		# The other extreme from the Crocodile's, at nearly the same jaw size.
-		# Few, and every one of them a blade set edge-on: almost no contact area,
-		# so the whole bite goes into slitting rather than crushing. It opens
-		# flesh a Crocodile would only bruise, and it does it by having *less*
-		# tooth rather than more.
-		"tooth_count": 10, "tooth_size": 0.25, "tooth_sharpness": 0.95,
-		"jaw_gape_deg": 66.0, "tooth_variation": 0.16,
-	},
-	# The case the whole grip system is shaped around: heavy, unhurried, and
-	# carrying a head out of all proportion to its legs. Its `jaw_power` is an
-	# order of magnitude over the Gecko's and its skull is nearly twice the
-	# reference radius, which squares into the bite force — so nothing this
-	# prototype can spawn generates enough load to pull its jaws off, and a
-	# creature it has hold of goes where it goes.
-	"Crocodile": {
-		"segment_count": 20, "segment_length": 24.0, "max_bend_deg": 14.0,
-		"spine_stiffness": 0.94, "spine_damping": 0.55, "body_wave": 3.5,
-		"head_width": 22.0, "chest_width": 26.0, "waist_width": 21.0, "hip_width": 24.0,
-		"tail_tip_width": 2.0, "front_limb_t": 0.18, "rear_limb_t": 0.48,
-		"arm_length": 44.0, "leg_length": 50.0, "stance_width": 1.1, "stance_reach": 0.74,
-		"stride_distance": 40.0, "step_duration": 0.44, "step_height": 9.0,
-		"move_speed": 120.0, "acceleration": 340.0,
-		"turn_speed_deg": 95.0, "turn_responsiveness": 6.5, "turn_pivot": 90.0,
-		"density": 1.45, "muscle_power": 1.15, "jaw_power": 7.5, "fat_reserve": 1.8,
-		"bite_damage": 3.6, "bite_reach": 41.0, "bite_radius": 21.0,
-		"bite_cooldown": 0.6, "chew_interval": 0.45,
-		# Big irregular cones on a mouth that opens wide. Conical means stout —
-		# these puncture and hold rather than shear, which is the dentition that
-		# belongs on jaws whose whole purpose is not letting go.
-		"tooth_count": 8, "tooth_size": 0.33, "tooth_sharpness": 0.72,
-		"jaw_gape_deg": 76.0, "tooth_variation": 0.30,
+
+	# Columnar. Feet stacked directly under the body, which is held nearly a whole
+	# leg off the ground — so this animal's torso is out of reach of anything the
+	# other two can bring to bear, and only its legs can be got at from below.
+	# That is not a rule written for it; it is where its bands land.
+	#
+	# Its jaws are the heaviest in the file without `jaw_power` being extreme,
+	# because bite force goes as the square of the skull and this one is nearly
+	# twice the reference width. And it cannot leave the ground at all: nothing
+	# forbids it, its `leap_height` is simply zero.
+	"Elephant": {
+		"posture": Posture.COLUMNAR,
+		"segment_count": 16, "segment_length": 20.0, "max_bend_deg": 10.0,
+		"spine_stiffness": 0.95, "spine_damping": 0.50, "body_wave": 3.0,
+		"head_width": 26.0, "chest_width": 38.0, "waist_width": 34.0,
+		"hip_width": 36.0, "tail_tip_width": 2.0,
+		"front_limb_t": 0.20, "rear_limb_t": 0.52,
+		# Legs longer than the animal is wide, and held nearly vertical: the
+		# clearance is most of the leg and the plan-view reach is under a third of
+		# it, which is what makes the feet land close underneath the body.
+		"arm_length": 126.0, "leg_length": 132.0,
+		"stance_width": 0.75, "stance_reach": 0.95,
+		"stride_distance": 52.0, "step_duration": 0.55, "step_height": 10.0,
+		"move_speed": 135.0, "acceleration": 300.0,
+		"turn_speed_deg": 70.0, "turn_speed_falloff": 0.70,
+		"turn_responsiveness": 5.0, "turn_pivot": 110.0,
+		"sprint_multiplier": 1.30, "reverse_speed_factor": 0.40,
+		"density": 1.9, "muscle_power": 1.3, "jaw_power": 5.0, "fat_reserve": 1.6,
+		"bite_damage": 2.8, "bite_reach": 34.0, "bite_radius": 24.0,
+		"bite_cooldown": 0.70, "chew_interval": 0.60,
+		"neck_lift": 0.14, "leap_height": 0.0,
+		# Broad flat molars. The bluntest mouth here: it spreads a very large bite
+		# over a very large area, so it crushes and grinds where the Cat opens.
+		"tooth_count": 6, "tooth_size": 0.16, "tooth_sharpness": 0.15,
+		"jaw_gape_deg": 46.0, "tooth_variation": 0.14,
 	},
 }
 

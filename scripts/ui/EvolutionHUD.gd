@@ -87,17 +87,22 @@ func update_metrics(
 	food: int,
 	integrity: float,
 	segments: int,
-	mass: float = 1.0
+	mass: float = 1.0,
+	height: float = 0.0
 ) -> void:
 	if _stats.is_empty():
 		return
 	_stats["STATE"].text = state_name.to_upper()
 	_stats["SPEED"].text = "%03d PX/S" % speed
+	# How far off the ground plane the whole animal is. Reads zero for anything
+	# standing on it, which is most of what is ever on screen — it is here for the
+	# moments it is not.
+	_stats["HEIGHT"].text = "%03d PX" % int(round(height))
 	# Mass is derived, not set, so it belongs on the readout beside speed rather
 	# than on a slider in the drawer — it is the number the silhouette, the
 	# density and every bite taken out of the creature add up to.
 	_stats["MASS"].text = "%.2f" % mass
-	_stats["AIRBORNE"].text = "%d/4" % airborne
+	_stats["FEET"].text = "%d/4 UP" % airborne
 	_stats["SEGMENTS"].text = str(segments)
 	_biomass_value.text = "%03d%%" % int(round(clampf(integrity, 0.0, 1.0) * 100.0))
 	_food_value.text = "FOOD %03d" % food
@@ -289,7 +294,7 @@ func _build_identity_and_stats() -> void:
 	_stats_grid.add_theme_constant_override("v_separation", 4)
 	_stats_grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	block.add_child(_stats_grid)
-	for key in ["STATE", "SPEED", "MASS", "AIRBORNE", "SEGMENTS"]:
+	for key in ["STATE", "SPEED", "MASS", "HEIGHT", "FEET", "SEGMENTS"]:
 		var key_label := _label(key, 10, _mono_tracked, Color(INK, 0.40))
 		key_label.custom_minimum_size.x = 74.0
 		_stats_grid.add_child(key_label)

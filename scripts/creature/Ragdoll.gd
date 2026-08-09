@@ -256,9 +256,9 @@ func _hold_bones(limb: Limb) -> void:
 ## It is simply pushed, and the length constraints put the bones back together
 ## around wherever that leaves it.
 func _push_clear(limb: Limb, query: Callable, scale: float) -> void:
-	var upper_radius: float = maxf(limb.total_length * 0.16, 2.5 * scale) * 0.5
+	var upper_radius: float = limb.girth(scale) * 0.5
 	var lower_radius: float = upper_radius * 0.72
-	var foot_radius: float = maxf(limb.total_length * 0.10, 3.0 * scale)
+	var foot_radius: float = limb.foot_radius(scale)
 	var cap: float = maxf(limb.total_length * 0.22, 4.0 * scale)
 	for _iteration in CONTACT_ITERATIONS:
 		var upper: Vector2 = query.call(limb.key, 0, limb.joints[0], limb.joints[1], upper_radius)

@@ -47,7 +47,11 @@ var last_index: int = 0
 var tail_tip: Vector2 = Vector2.ZERO
 
 
-func build(spine: Spine, p: CreatureParams, scale: float) -> void:
+## `posture` decides one thing here and nothing else: how far inboard of the
+## flank the limb sockets sit. Left null the sockets stay on the flank, which is
+## where a sprawled animal's are — so a body built without a posture is a
+## sprawled body rather than a special case.
+func build(spine: Spine, p: CreatureParams, scale: float, posture: Posture = null) -> void:
 	var pts: PackedVector2Array = spine.points
 	var n: int = pts.size()
 	if n < 3:
@@ -115,11 +119,16 @@ func build(spine: Spine, p: CreatureParams, scale: float) -> void:
 
 	# --- limb anchors ------------------------------------------------------
 	# Sockets sit on the flank at the shoulder/hip station, so they inherit the
-	# spine's bend for free and the legs swing with the body.
-	_set_anchor(spine, p, "FL", p.front_limb_t, 1.0)
-	_set_anchor(spine, p, "FR", p.front_limb_t, -1.0)
-	_set_anchor(spine, p, "RL", p.rear_limb_t, 1.0)
-	_set_anchor(spine, p, "RR", p.rear_limb_t, -1.0)
+	# spine's bend for free and the legs swing with the body. An upright animal's
+	# are drawn in toward the midline instead, which is a real anatomical
+	# difference and also, for free, what hides the top of its legs: the limbs are
+	# drawn beneath the torso, so a socket inside the silhouette is a shoulder the
+	# body is standing over.
+	var inset: float = 1.0 - (posture.socket_inset if posture != null else 0.0)
+	_set_anchor(spine, p, "FL", p.front_limb_t, 1.0, inset)
+	_set_anchor(spine, p, "FR", p.front_limb_t, -1.0, inset)
+	_set_anchor(spine, p, "RL", p.rear_limb_t, 1.0, inset)
+	_set_anchor(spine, p, "RR", p.rear_limb_t, -1.0, inset)
 
 
 ## How much a mouthful going down adds to the width at one station. A smooth hump
@@ -135,11 +144,12 @@ func _swallow_at(t: float) -> float:
 	return swallow_size * falloff * falloff
 
 
-func _set_anchor(spine: Spine, p: CreatureParams, key: String, t: float, side: float) -> void:
+func _set_anchor(spine: Spine, p: CreatureParams, key: String, t: float, side: float,
+		inset: float = 1.0) -> void:
 	var f: Spine.Frame = spine.sample(t)
 	var n: int = spine.points.size()
 	var idx: int = clampi(int(round(t * float(n - 1))), 0, n - 1)
-	f.pos = f.pos + f.perp * (side * widths[idx] * 0.85)
+	f.pos = f.pos + f.perp * (side * widths[idx] * 0.85 * inset)
 	anchors[key] = f
 
 

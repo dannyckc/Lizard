@@ -30,6 +30,8 @@ godot --path . --editor   # open the editor
 | left click | bite (anatomical hit + cooldown) |
 | hold left click | keep hold of what you bit — a creature, or a severed part; drag it, carry it off, or be dragged by it |
 | click again while holding | chew: shut the same jaws on the same flesh once more. On a piece of meat this works it in, and swallows it once what is left will fit |
+| `Space` | leave the ground — a leap from a standing start, and a climb for anything with wings. A creature with no leap in its legs stays put |
+| `Ctrl` | come down: a controlled descent with wings out, a dive with them folded |
 | `Shift` | sprint |
 | `F1` | show/hide the tuning panel |
 | `F2` | toggle debug draw |
@@ -55,6 +57,14 @@ the world as meat and can be eaten; a part that comes *off* — a leg, a tail, a
 — stays a part, and has to be bitten, carried off and chewed down before it will go
 down. Bodies are solid, so the two creatures can be walked into rather than
 through.
+
+The world is still read from above, but it is no longer flat. Every body occupies
+a range of *heights* as well as a place on the ground, and an attack connects only
+where the two ranges overlap — so a leap clears a charge, a low animal on a tall
+one can reach its legs and nothing above them, and forage over your head is not
+food. How high an animal stands is not a setting either: it is its legs, times the
+angle its **posture** carries them at. Three stances ship — sprawled, semi-upright
+and columnar — and that one angle is the whole difference between them.
 
 ## How it works
 
@@ -183,8 +193,8 @@ away and leave.
 #### ...and weight decides who yields
 
 The share is not half any more. It is the *other* body's fraction of the pair's
-mass, so a Gecko walking into a Crocodile does nearly all of the moving and the
-Crocodile barely notices, while the Crocodile walking into the Gecko pushes it
+mass, so a Cat walking into an Elephant does nearly all of the moving and the
+Elephant barely notices, while the Elephant walking into the Cat pushes it
 across the world ahead of itself. The same number scales the speed a contact
 sheds, which is what stops a heavy creature being brought to a halt by something
 it should be able to shoulder aside.
@@ -326,6 +336,139 @@ reconstructed from that limb's live joints and pulls those particles first. Once
 the limb reaches its anatomical extension, the socket passes the remaining pull
 into the free spine, so the leg flops and straightens before the body trails after
 it.
+
+### Height
+
+The world is solved on one plane and always has been: x and y are the whole of
+where a creature *is*, and the spine, the gait and the contact walk have no idea
+this section exists. What 2.5D adds is one scalar per body — how far off that
+plane it currently is — and one rule:
+
+> Two things interact when the heights they occupy overlap.
+
+That is the entire layer. It is not a third axis of movement; it is a second
+question asked after the horizontal one that was already being asked, and every
+consumer of it is a single `Stature.overlaps` call sat beside the test it already
+had. Horizontal hit testing is untouched.
+
+**Bands, not positions.** Nothing carries "a height". A body occupies a *range*,
+`Vector2(low, high)` in world pixels — the same unit as x and y, so a leap is
+drawn to the same scale as the animal taking it — and so does an attack. `Stature`
+reads those off the pose that has just been solved, exactly the way `Physique`
+reads mass off it, and for the same reason: a creature rebuilt with longer legs is
+taller without anybody having said so, and a carcass is not standing on its legs
+so it is not.
+
+```
+                          Elephant                    Lizard
+ head    ████ 182–234                                 ████  4–30
+ torso   ████ 126–206                                 ████  8–26
+ legs    ████   0–162                                 ████  0–16
+ jaws    ▓▓▓▓   0–293                                 ▓▓▓▓  0–52
+```
+
+Read the two columns against each other and most of the interesting behaviour is
+already there without a rule having been written for any of it. A Lizard's jaws
+top out at 52 px; an Elephant's belly starts at 126. The two bands that *do*
+overlap are the jaws and the legs — because a leg is the one structure on an
+animal that runs from the ground to the body — so a low predator on a tall animal
+can take a leg and nothing else. It is not a rule about legs. It is where the
+bands land.
+
+**Four states, read rather than written.** `Elevation` owns the scalar. The state
+is a function of it and of what the wings are doing, so nothing anywhere sets a
+mode and nothing can disagree with the height it is supposed to describe:
+
+| | |
+|---|---|
+| grounded | the scalar is zero |
+| leaping | off the ground with nothing holding it up — falling, whether or not it is still going up |
+| gliding | off the ground with wings carrying it, below the height they can sustain |
+| high flight | the same, at or above it |
+
+A creature with no wings can only ever be grounded or leaping, and nothing had to
+forbid the other two: `wing_lift` is zero, so both branches are unreachable. A
+flier that folds up mid-air is *leaping* again on the next tick, which is what a
+stall is. Nothing in this is a state machine.
+
+**What the layer buys, and what pays for it.** Every one of these is the overlap
+rule landing somewhere that already existed:
+
+- **Leaping over a charge.** Two bodies at different heights have no contact to
+  resolve, so the pair is skipped in `_resolve_contacts` — the same exemption a
+  grip already gets, one line above it. The leap has to clear the *back* of the
+  other animal, so it is a contest rather than a dodge key. Measured: a sprinting
+  Cat shoves a Lizard 46 px through it on the ground and 0 px over it.
+- **Out of reach.** A bite carries the band its jaws cover, on the mark, next to
+  the penetration it already carried. The world picks its victim through it, the
+  anatomy query filters structures by it, and the lattice refuses cells outside
+  it — so a flier is unreachable, and so is a grounded animal underneath one. A
+  flier has to come down to something before it can bite it.
+- **Attacking the legs**, above.
+- **Browsing.** Forage grows at a height. There is no browse action and no second
+  kind of food: some of it is simply over some animals' heads, and `neck_lift` is
+  the one parameter that changes which.
+- **Being carried.** A set of jaws is the only thing that physically joins two
+  bodies, so it is the only thing that can hold one at a height it did not
+  choose. The grip tethers the two elevations through the same mass share the
+  horizontal correction uses — you cannot jump out of something's mouth.
+
+**What is drawn, and what is true.** The simulation stays on the plane; only the
+picture moves. A body is drawn lifted up the screen by its height, its shadow
+stays on the ground, and the growing gap between them is how altitude reads. That
+is not new — feet have been drawn at a fake `lift` above their gameplay position
+since the gait was written — it is that same lie told about the whole animal.
+`Posture.PERSPECTIVE` is the tilt, and it is the only constant in the game that is
+presentation rather than simulation.
+
+Not built, for want of a world rather than for want of the layer: pouncing from
+trees needs trees, and burrowing needs terrain. Both are a height and a band away.
+
+### Posture
+
+Every creature used to be sprawled — flat on the floor with its legs out to the
+sides. There are three stances now, and they are one trait:
+
+> **the angle the limbs are carried out of the ground plane.**
+
+Everything else follows from it as a projection, which is the reason there is no
+stance-width dial and no per-stance code path. A leg of length *L* held at angle
+*θ* puts its foot `L·cos θ` from the socket *seen from above* and holds the body
+`L·sin θ` off the floor. Those are the same leg viewed twice, and between them
+they are most of what a posture looks like:
+
+| | tilt | plan reach | clearance | feet down | spine |
+|---|---|---|---|---|---|
+| sprawled | 12° | 98% of the leg | 2% | 2 | undulates fully |
+| semi-upright | 50° | 64% | 77% | 2 | 30% |
+| columnar | 72° | 31% | 95% | 3 | 8% |
+
+- **Sprawled** — a Lizard. Belly near the floor, feet flung wide, the whole limb
+  visible, and a spine that does part of the walking: a sprawled stride is
+  lengthened by the lateral wave, which is why it is the one stance that keeps its
+  undulation at full strength.
+- **Semi-upright** — a Cat. Feet drawn in under the body and the socket drawn in
+  with them, so the upper bone disappears beneath the torso. That occlusion is not
+  a decision to stop drawing part of a leg; limbs are drawn *under* the body, so a
+  shoulder inboard of the silhouette is a shoulder the animal is standing over.
+  Strong acceleration and flat, quick turns.
+- **Columnar** — an Elephant. Legs as pillars, the body held nearly a whole leg
+  clear of the ground, three feet down at all times and the diagonal beat mostly
+  gone — a heavy animal ambles, it does not trot. It carves rather than turns, and
+  it cannot leave the ground at all: nothing forbids it, its `leap_height` is zero.
+
+Two things do *not* come from the projection, and both would be wrong if they did.
+Limb thickness is priced off the bone rather than off its plan view, or a columnar
+animal would be drawn on four spindles. And the stride is capped at what the
+projected envelope can actually sweep — a stride authored against the bone is one
+a foreshortened foot can never reach, so the trigger never fires and the leg is
+towed for as long as the animal walks. That cap is derived, not authored, because
+the two numbers that decide it live in different places: the stride is a species
+trait and the envelope is a consequence of the stance.
+
+Posture also feeds the section above it. Clearance *is* how tall the animal is, so
+the height bands, what its jaws can reach and what can reach its body are all
+downstream of the same one angle.
 
 ### Gait
 
@@ -740,7 +883,7 @@ the same Lizard units every other mass in the simulation is quoted in. A piece i
 can lift is back at its mouth within a tick and rides wherever the head goes; a
 piece it cannot is always behind where it was asked to be, and being always behind
 *is* being dragged. There is no threshold and no second path. The same weight goes
-into `_haul_factor`, so towing a Komodo's thigh costs what towing a Komodo costs,
+into `_haul_factor`, so towing an Elephant's thigh costs what towing an Elephant costs,
 for the same reason and through the same line.
 
 The pull is split between shifting the piece and turning it exactly as a rigid
@@ -794,8 +937,8 @@ piece reaches from there**:
 * Once what is left reaches no further than the mouth is deep, the next closing
   **swallows** it, because there is nothing left to stop it going down.
 
-So a Crocodile bolts a Lizard's foot in one closing and a Gecko gnaws at a
-Crocodile's thigh for a long time, and neither of those is written anywhere. Food
+So an Elephant bolts a Lizard's foot in one closing and a Cat gnaws at an
+Elephant's thigh for a long time, and neither of those is written anywhere. Food
 size, food shape, mouth size and bite position all arrive in that one comparison,
 and none of them is named in it.
 
@@ -844,8 +987,8 @@ func to_panel(world: Vector2) -> Vector2:
 That is the entire relationship between the drawer and the animal, and it is what
 makes the picture true rather than merely similar. The silhouette is that
 creature's silhouette because it is tessellated out of that creature's cells; the
-bend is the bend its spine is holding right now; a Gecko is small and quick and a
-Crocodile is broad and slab-sided without either being drawn; a flank chewed open
+bend is the bend its spine is holding right now; a Cat is small and quick and an
+Elephant is broad and slab-sided without either being drawn; a flank chewed open
 is chewed open here; a leg that has come off is missing from both views because
 it is missing from the lattice they share. The rotation presents it snout-up by
 turning the mean direction of its own spine onto the page — re-orienting the
@@ -938,7 +1081,7 @@ Both halves of what jaws do are in the mark. The teeth punch; the jaw then bears
 on everything the arch encloses, shallow and broad, because a bite is a closing
 rather than an impulse. Which half a species does its damage through is the same
 keenness number again — a blunt mouth is nearly all bearing, a keen one nearly
-all puncture. So a Komodo's ten blades slit open flesh a Crocodile's eight cones
+all puncture. So a Cat's seven blades slit open flesh an Elephant's six molars
 would only bruise, and it does it by having *less* tooth rather than more.
 
 One consequence worth stating: a tooth's contact patch is finer than a lattice
@@ -1019,11 +1162,9 @@ a second slider to remember. Off the shipped presets that lands at:
 
 | | mass | strength | bite force |
 |---|---|---|---|
-| Gecko | 0.46 | 0.74 | 0.47 |
-| Salamander | 0.94 | 0.77 | 0.36 |
+| Cat | 0.81 | 1.39 | 0.79 |
 | Lizard | 1.00 | 1.00 | 1.00 |
-| Komodo | 5.62 | 3.48 | 4.60 |
-| Crocodile | 11.19 | 5.75 | 21.48 |
+| Elephant | 23.44 | 10.65 | 20.00 |
 
 Two consequences fall out of that shape and neither needed a rule of its own.
 
@@ -1036,8 +1177,8 @@ predator's skull open and its bite goes with it.
 **Both derived quantities are areas, and mass is a volume.** Strength is
 literally `mass^(2/3)`; bite force is the head's cross-section, which grows the
 same way. So a big creature is stronger and bites harder outright while being
-weaker *per kilo* — the square-cube law, and the whole reason a Gecko latched
-onto a Crocodile can barely walk while the Crocodile tows the Gecko without
+weaker *per kilo* — the square-cube law, and the whole reason a Cat latched
+onto an Elephant can barely walk while the Elephant tows the Cat without
 slowing down. One exponent, rather than a table of who-beats-whom.
 
 Bite force is sized off the head rather than off the body because the head is the
@@ -1120,8 +1261,8 @@ Four details carry the rest of it:
   cross-section by the same `mass^(2/3)` the rest of the physique uses.
 
   Which failure happens is therefore never chosen anywhere. It is whichever gives
-  out first, and that single comparison is the whole of why a Crocodile strips
-  meat off prey a Gecko can only be shaken from. Past the yield point the pull
+  out first, and that single comparison is the whole of why an Elephant strips
+  meat off prey a Cat can only be shaken from. Past the yield point the pull
   first *draws the flesh out* — the tether visibly lengthens by up to 7 px as it
   stretches — and only parts it once enough force has been sustained for long
   enough. Stop struggling and the stretch recovers; the wound stops growing.
@@ -1167,30 +1308,42 @@ Victim displacement over five seconds, or when the jaws came off:
 
 | | biter drags it away | victim runs | victim thrashes on the spot |
 |---|---|---|---|
-| Crocodile on Gecko | tows it 524 px | holds; it makes 17 px | holds; strips 62% of it |
-| Komodo on Lizard | tows it 457 px | holds; it makes 44 px | holds; strips 24% of it |
-| Lizard on Lizard | tows it 282 px | towed 352 px along with it | **torn off at 2.9 s** |
-| Lizard on Komodo | moves it 17 px | dragged 478 px behind it | **torn off at 0.7 s** |
-| Gecko on Crocodile | moves it 1 px | **torn off at 1.1 s** | **torn off at 0.6 s** |
+| Elephant on Cat | tows it 554 px | holds; it makes 27 px | holds |
+| Elephant on Lizard | tows it 542 px | holds; it makes 29 px | holds |
+| Cat on Lizard | tows it 486 px | holds; it makes 339 px | holds |
+| Lizard on Lizard | tows it 333 px | towed 273 px along with it | holds |
+| Cat on Elephant | *leg*; moves it 5 px | *leg*; dragged 336 px behind it | *leg*; holds |
+| Lizard on Elephant | *leg*; moves it 3 px | *leg*; **torn off at 1.1 s** | *leg*; holds |
 
-Read the diagonal: the same tether, the same three numbers, and a Crocodile is
-unshakeable while a Gecko cannot keep hold of anything it did not already
-outweigh.
+Read the diagonal: the same tether, the same three numbers, and an Elephant is
+unshakeable while nothing lighter can move one at all.
 
-Read the last column on its own and you have the tearing rule in one line. Every
-one of those five victims is doing exactly the same thing — spinning on the spot,
-loading the jaws as hard as it can. Three of them shake the jaws off. Two of them
-cannot, and being unable to is precisely what gets them eaten: the load has to go
-somewhere, and if the jaws will not give then the flesh does. Nothing in that
-column is a rule about crocodiles. Note also that **dragging tears nothing** —
-towed prey travels *with* the jaws, so the two never come apart and the load
-stays near zero. Tearing is bought with struggle, by either party.
+Two rows are marked *leg*, and that is the vertical layer arriving in the middle
+of the combat table. An Elephant's body stands 126 px off the ground and a Cat's
+jaws reach 101 px, so head-on there is nothing there to bite: the only hold on
+offer is a foreleg, because a leg is the one structure that runs all the way down
+to the floor both animals are standing on. Nobody wrote a rule about legs — see
+**Height** — and the row where the Elephant simply walks away is the reading
+that follows: a hold at ankle height on something twenty-three times your weight
+comes off when it decides to leave.
+
+Note also that **dragging tears nothing** — towed prey travels *with* the jaws, so
+the two never come apart and the load stays near zero. Tearing is bought with
+struggle, by either party.
+
+The last column is currently the flat one, and it is the open balance call in this
+system rather than a claim: none of the three shipped bodies loads a set of jaws
+hard enough by thrashing to part its own flesh. The mechanism is intact and
+`CombatTest` measures it — the failure prints the peak pull against the yield
+point it would have to beat — but the margin between the two is a number nobody
+has settled yet. It is the one red check in the suite.
 
 ## Tuning
 
 Press `F1` for live sliders (generated from `CreatureParams.SCHEMA` — add a
-property plus one schema row and it appears automatically). Five presets ship in
-the panel: **Lizard**, **Gecko**, **Salamander**, **Komodo**, **Crocodile**.
+property plus one schema row and it appears automatically). Three presets ship in
+the panel, one per posture: **Lizard** (sprawled), **Cat** (semi-upright) and
+**Elephant** (columnar).
 Mass is not among the sliders — it is on the HUD readout instead, because it is
 something the creature *has* rather than something you set.
 
@@ -1205,7 +1358,11 @@ The parameters worth reaching for first:
 | Silhouette | `head/chest/waist/hip/tail_tip_width`, `body_width` |
 | Longer stride, fewer steps | `stride_distance` up |
 | Snappier footfalls | `step_duration` down, `step_height` up |
-| Sprawling vs. tucked legs | `stance_width`, `stance_reach`, `arm/leg_length` |
+| Sprawled, semi-upright or columnar | `posture` — one trait; stance width, clearance, occlusion, undulation, support and turn character all follow |
+| Sprawling vs. tucked legs *within* a stance | `stance_width`, `stance_reach`, `arm/leg_length` |
+| Taller, or reaching higher | `leg_length` up (the body rides on it), `neck_lift` up (the jaws do) |
+| Something that can jump | `leap_height` — a multiple of the animal's own standing height; 0 is a body that cannot leave the ground |
+| Something that can fly | `wing_lift` up from 0 — the only thing separating gliding and high flight from a leap |
 | Marching vs. loose legs | `diagonal_coupling` (1 = strict trot, 0 = independent) |
 | Wider / tighter leg sweep | `limb_swing_deg`, `limb_max_reach` |
 | Jaws that close harder | `bite_damage` up — force at the jaws, not depth in the flesh; the teeth decide what it becomes |
@@ -1353,8 +1510,9 @@ the other senses.
 
 ## Tests
 
-Twelve headless checks cover controls, movement feel, simulation, rendering, UI,
-combat, sight, smell, hearing, anatomy, feeding and the bodies in the habitat:
+Fourteen headless checks cover controls, movement feel, simulation, rendering,
+UI, combat, sight, smell, hearing, anatomy, feeding, the bodies in the habitat,
+the vertical axis and the three stances:
 
 ```sh
 godot --headless --path . --script tests/ControlsTest.gd # input/head-look isolation
@@ -1369,7 +1527,43 @@ godot --headless --path . --script tests/CombatTest.gd    # bite/anatomy slice
 godot --headless --path . --script tests/RagdollTest.gd   # the dead body
 godot --headless --path . --script tests/AnatomyTest.gd   # structure -> function -> gait
 godot --headless --path . --script tests/FeedingTest.gd   # severed parts, carrying, eating
+godot --headless --path . --script tests/HeightTest.gd    # the vertical axis and what it gates
+godot --headless --path . --script tests/PostureTest.gd   # the three stances, from one angle
 ```
+
+`HeightTest` is weighted toward the seams rather than the arithmetic — the places
+a second question is now asked after the horizontal one, and where getting it
+wrong would either break the flat game or quietly do nothing at all. The four
+states first, driven straight through `Elevation`, because they are read rather
+than stored and a state machine reintroduced by accident would show up there: a
+wingless body can only ever be grounded or leaping however hard the climb is
+held, a winged one passes through low flight into high flight and cannot climb
+past its own ceiling, and folding the wings mid-air puts it back to leaping. Then
+the mechanics: a sprinting Cat that shoves a Lizard 46 px through it on the ground
+shoves it 0 px over it; the identical bite that connects at point-blank range
+finds nothing when its victim is 400 px up — while the purely horizontal query
+still finds it, which is what proves the vertical gate rather than a drift between
+the two; a Lizard's reach clears an Elephant's legs and stops below its belly, and
+thirty bites at that height open no holes in the body while one bite at the right
+height goes straight through it; and a short neck eats the forage at its feet and
+not the forage over its head, until `neck_lift` is turned up. Last, the guarantee
+the layer rests on: with everything on the ground and an unbounded reach, the same
+bite removes the same tissue it always did.
+
+`PostureTest` starts with the projection, since the rest is downstream of it: each
+stance draws its feet in further and stands higher than the one before, and reach
+and clearance are exact complements of one leg. Then that the trait alone is what
+does it — the same animal with the same numbers and a different `posture` stands
+three times higher on the same legs. Then the things a player would see: feet that
+land outside the silhouette in every stance (a leg you cannot see is a leg the
+animal does not appear to have) over a shoulder that is inside it wherever the
+stance insets one; a columnar belly above a sprawled animal's entire body; sway
+through the spine falling away as the legs take the stride back off it; two feet
+up for the low stances and one for the columnar; and a columnar turning circle
+more than twice a semi-upright one but still finite. Finally the two things it
+would be easy to get wrong by taking the projection too literally: the same leg
+held upright is exactly as thick and exactly as long a bone as it was, and every
+shipped stance can still walk.
 
 `FeedingTest` is weighted toward the seams rather than the parts. That a severed
 limb enters the world with the tissue it was standing with to the hit point and
@@ -1478,27 +1672,29 @@ loudly if the contact pass is removed.
 
 The physique checks are all *relational*, because the numbers themselves are
 derived and will move whenever the presets are retuned. Mass follows build across
-the five of them and a Komodo is at least three times a Lizard; the heavier
+the three of them and an Elephant is at least three times a Lizard; the heavier
 creature is stronger outright but weaker per unit of mass, which is the only
-thing that says the square-cube exponent is still in there; a Crocodile's jaws are
-in a different league from a Komodo's. Doubling a torso's width alone has to move
+thing that says the square-cube exponent is still in there; an Elephant's jaws are
+in a different league from a Lizard's. Doubling a torso's width alone has to move
 mass — otherwise mass is really a slider spelled differently — and chewing a
 creature open has to take mass and strength back off it.
 
 Then the grip, one assertion per outcome the three numbers are supposed to
-produce. A Crocodile holding a Gecko that does nothing for three seconds leaves it
+produce. An Elephant holding a Cat that does nothing for three seconds leaves it
 untouched, and then tows it without hurting it — those two are what say a hold is
-a hold. The same jaws are not shaken off by a thrashing Gecko, and the struggle
-tears meat out of it: integrity falls, scraps enter the world, and the lattice is
-left with *holes*, since a tear is a discrete failure of the tissue and not a
-uniform thinning. Stop the thrashing and the wound stops growing. Reversed, a
-Gecko moves a Crocodile almost nowhere and keeps little of its own top speed while
-trying; and a Gecko is torn off a thrashing Crocodile, is left holding nothing
-while still holding the button — and leaves that Crocodile with no hole in it at
-all, which is the assertion that says which of the two failures fired. Last, a
-bite under load goes in shallower than the same bite when free. Weight gets its
-own pair: two identical creatures still split a contact exactly down the middle,
-and a Crocodile shoves a Gecko several times further than the reverse.
+a hold. The same jaws are not shaken off by a thrashing Cat, and the struggle is
+supposed to tear meat out of it: integrity falls, scraps enter the world, and the
+lattice is left with *holes*, since a tear is a discrete failure of the tissue and
+not a uniform thinning. Those last two are the suite's one red pair — see the
+tearing table above. Stop the thrashing and the wound stops growing.
+
+Reversed, the vertical layer changes the question before any of that: a Cat cannot
+reach an Elephant's body at all, so it takes the leg, and what it gets for that is
+a hold it keeps and an animal it cannot move — it keeps a twentieth of its own top
+speed trying, and never opens a hole anywhere but the leg it is on. Last, a bite
+under load goes in shallower than the same bite when free. Weight gets its own
+pair: two identical creatures still split a contact exactly down the middle, and
+an Elephant shoves a Cat several times further than the reverse.
 
 `AnatomyTest` is weighted toward the seam the whole system exists to create:
 that *what happened* and *what it does* are two different questions. It checks
@@ -1566,9 +1762,23 @@ the only thing that sees that cause.
 
 Deliberate, in the interest of a stable and readable prototype:
 
-- Creatures collide with each other, but nothing else does: no terrain, no
-  physical ground contact — "lift" is faked as a screen-space offset plus a
-  shadow gap, since top-down has no vertical axis.
+- Creatures collide with each other, but nothing else does: no terrain and no
+  ground to stand on other than the notional plane at height zero. Everything
+  vertical is a scalar and a band — see **Height** — and it is drawn as a
+  screen-space offset plus a widening shadow gap rather than rendered in three
+  dimensions.
+- Because of that, a body drawn at height is drawn away from where it is. The
+  simulation stays on the plane, so a leaping creature's silhouette sits above its
+  own hit position by `height × PERSPECTIVE`; aiming at a tall or airborne animal
+  means aiming at its shadow. This is the same compromise the gait has always made
+  with a foot's `lift`, applied to the whole animal, and it is the price of not
+  having a third axis in the solver.
+- The vertical layer has no world to act on yet. Pouncing from trees and burrowing
+  beneath danger both fall out of the same scalar and the same overlap rule, but
+  there are no trees and no terrain to do either with.
+- Nothing flies. Gliding and high flight are implemented, tested and reachable
+  from the tuning panel — `wing_lift` above zero is the whole of it — but no
+  shipped species has wings, and no body plan draws a pair.
 - Contacts have weight behind them but no momentum. Mass decides who yields and
   how much speed a contact sheds, so a heavy creature can shoulder a light one
   aside — but nothing is transferred: a creature that stops pushing stops moving

@@ -199,8 +199,8 @@ func _events_and_reset(senses: CreatureSenses, field: SoundField) -> void:
 		"eating food is not connected to hearing")
 
 	senses.hearing.heard_sounds.append(HearingSense.HeardSound.new())
-	main.hud.select_species("Gecko")
-	_check(senses.active_species == "Gecko", "species change did not reset SENSES")
+	main.hud.select_species("Cat")
+	_check(senses.active_species == "Cat", "species change did not reset SENSES")
 	_check(senses.hearing.heard_sounds.is_empty(),
 		"a species change kept the old creature's heard events")
 	field.emit_sound(main.creature.head_pos, 0.5, SoundField.Kind.IMPACT)
@@ -210,7 +210,7 @@ func _events_and_reset(senses: CreatureSenses, field: SoundField) -> void:
 	main._unhandled_input(reset)
 	_check(field.waves.is_empty(), "a full reset left old sounds in flight")
 	_check(senses.hearing.heard_sounds.is_empty(), "a full reset left the old hearing read")
-	_check(senses.active_species == "Gecko", "full reset lost the active species")
+	_check(senses.active_species == "Cat", "full reset lost the active species")
 	_check(senses.hearing.origin().is_equal_approx(main.creature.body.head.pos),
 		"hearing did not follow the head after reset")
 

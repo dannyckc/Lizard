@@ -588,9 +588,9 @@ func _update_body(body: BodyShape, spine: Spine) -> void:
 func _update_limb(p: Patch, limb: Limb, scale: float) -> void:
 	# Mirrors the widths CreatureView strokes the bones with, so the lattice
 	# covers exactly what is drawn.
-	var upper_half: float = maxf(limb.total_length * 0.16, 2.5 * scale) * 0.5
+	var upper_half: float = limb.girth(scale) * 0.5
 	var lower_half: float = upper_half * 0.72
-	var foot_r: float = maxf(limb.total_length * 0.10, 3.0 * scale)
+	var foot_r: float = limb.foot_radius(scale)
 
 	var d0: Vector2 = limb.joints[1] - limb.joints[0]
 	var d1: Vector2 = limb.joints[2] - limb.joints[1]
@@ -648,7 +648,14 @@ func _update_limb(p: Patch, limb: Limb, scale: float) -> void:
 ## routed through a single hit region could not express.
 ##
 ## `shed` collects the chunks that broke off, for the world to scatter.
-func bite(mark: BiteMark, shed: Array) -> float:
+##
+## `stature` is the body's own heights. Given one, a cell is only reached if the
+## jaws' band overlaps the band that cell's structure stands in — so a bite aimed
+## at a tall animal's legs takes leg and nothing else, even where the mark's
+## footprint lies squarely across the flank above it. Left null, every cell under
+## the mark is fair game, which is what this did before there was a vertical axis
+## and what it still does for anything that is not a creature with a height.
+func bite(mark: BiteMark, shed: Array, stature: Stature = null) -> float:
 	if mark == null or mark.is_empty():
 		return 0.0
 	var removed: float = 0.0
@@ -663,7 +670,28 @@ func bite(mark: BiteMark, shed: Array) -> float:
 		if mark.hi.x < p.lo.x or mark.lo.x > p.hi.x \
 				or mark.hi.y < p.lo.y or mark.lo.y > p.hi.y:
 			continue
+		# One test per patch where the whole patch stands at one height, and one
+		# per column only on the body — which is the single strip that carries the
+		# head cap and the trunk together and can therefore span two of them.
+		var split_at: int = 0
+		if stature != null:
+			if key == BODY_KEY:
+				var head_reached: bool = mark.reaches(stature.head)
+				var trunk_reached: bool = mark.reaches(stature.torso)
+				if not head_reached and not trunk_reached:
+					continue
+				if head_reached != trunk_reached:
+					split_at = HEAD_COLS if head_reached else -HEAD_COLS
+			elif not mark.reaches(stature.limbs):
+				continue
 		for cell in p.cells:
+			if split_at != 0:
+				var col: int = cell / p.rows
+				# Positive: only the head cap is in reach. Negative: only the trunk.
+				if split_at > 0 and col >= split_at:
+					continue
+				if split_at < 0 and col < -split_at:
+					continue
 			var at: Vector2 = p.centre_of(cell)
 			# Expanded by the cell's own size, because a tooth finer than the
 			# flesh's grain still marks the cell it landed in — see

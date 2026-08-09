@@ -10,6 +10,12 @@ extends RefCounted
 class Command extends RefCounted:
 	var throttle: float = 0.0   ## -1 (reverse) .. +1 (full forward)
 	var turn: float = 0.0       ## -1 (left) .. +1 (right)
+	## -1 (dive / come down) .. +1 (leave the ground, and keep climbing if the
+	## animal has anything to climb with). One axis rather than a jump button and
+	## a fly button, because on a body standing on the ground it means leap and on
+	## one already off it it means climb — and those are the same instruction
+	## given to two different animals.
+	var climb: float = 0.0
 	var sprint: bool = false
 	var aim_world: Vector2 = Vector2.ZERO
 	var aim_active: bool = false
@@ -35,8 +41,15 @@ func read(_head_pos: Vector2, _heading: float, mouse_world: Vector2) -> Command:
 	if Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT):
 		turn += 1.0
 
+	var climb: float = 0.0
+	if Input.is_physical_key_pressed(KEY_SPACE):
+		climb += 1.0
+	if Input.is_physical_key_pressed(KEY_CTRL):
+		climb -= 1.0
+
 	command.throttle = clampf(throttle, -1.0, 1.0)
 	command.turn = clampf(turn, -1.0, 1.0)
+	command.climb = clampf(climb, -1.0, 1.0)
 	command.sprint = Input.is_physical_key_pressed(KEY_SHIFT)
 	command.aim_world = mouse_world
 	command.aim_active = mouse_look

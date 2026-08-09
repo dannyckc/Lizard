@@ -137,28 +137,42 @@ func _draw() -> void:
 		return
 
 	var lift := Vector2(0.0, 5.0 * creature.size_scale)
+	# How far the whole animal is off the ground, as a screen offset. Zero on
+	# anything standing on it, which is nearly everything nearly always — and the
+	# only reason this is applied to the drawing rather than to the simulation is
+	# that the simulation is the ground plane. See Stature.
+	var stature: Stature = creature.stature
+	var aloft: Vector2 = stature.drop(stature.reference + stature.elevation)
+	# Where the ground is, relative to the plane the torso is drawn on. A body
+	# lying on the floor casts its shadow under itself; one held a leg's length
+	# clear of it casts it well below, and the growing gap is the whole of how
+	# height reads in a picture taken from above.
+	var ground: Vector2 = stature.drop(0.0)
 
-	# Limb bones, under the torso.
+	# Limb bones, under the torso. Their shadow keeps the plain ambient offset it
+	# always had: a leg is already drawn running down to the ground, so its own
+	# geometry carries the height and the shadow has none of its own to add.
 	for limb in creature.gait.limbs:
 		var limb_patch: TissueGrid.Patch = tissue.patch(limb.key)
 		if _build(limb_patch, 0, TissueGrid.LIMB_BONE_COLS) > 0:
 			_flush_flat(lift, COL_SHADOW_LIMB)
-			_flush()
-			_draw_tissue_grain(limb_patch, 0, TissueGrid.LIMB_BONE_COLS)
+			_flush_at(aloft)
+			_draw_tissue_grain(limb_patch, 0, TissueGrid.LIMB_BONE_COLS, aloft)
 
 	# Torso. Three restrained offset copies approximate the diffused editorial
 	# shadow from the reference without a sprite or a blur texture; they are the
 	# body's own mesh, so a hole in the creature is a hole in its shadow too.
 	if _build(torso, 0, TissueGrid.BODY_COLS) > 0:
-		_flush_flat(Vector2(0.0, 12.0 * creature.size_scale), COL_SHADOW_FAR)
-		_flush_flat(Vector2(0.0, 8.0 * creature.size_scale), COL_SHADOW_MID)
-		_flush_flat(lift, COL_SHADOW_NEAR)
-		_flush()
-	_draw_tissue_grain(torso, 0, TissueGrid.BODY_COLS)
+		_flush_flat(ground + Vector2(0.0, 12.0 * creature.size_scale), COL_SHADOW_FAR)
+		_flush_flat(ground + Vector2(0.0, 8.0 * creature.size_scale), COL_SHADOW_MID)
+		_flush_flat(ground + lift, COL_SHADOW_NEAR)
+		_flush_at(aloft)
+	_draw_tissue_grain(torso, 0, TissueGrid.BODY_COLS, aloft)
 	# Under the eyes, so a lizard looking at you over its own open mouth still
-	# has eyes to look with.
-	_draw_jaws(body)
-	_draw_eyes(body, torso)
+	# has eyes to look with. Both ride with the head, so both take the same lift
+	# off the ground the torso did.
+	_draw_jaws(body, aloft)
+	_draw_eyes(body, torso, aloft)
 
 	# Feet, over the torso — same reason the limb bones went under it.
 	# A shadow is the one thing a stripped patch cannot suppress by being empty:
@@ -172,8 +186,8 @@ func _draw() -> void:
 		var foot_patch: TissueGrid.Patch = tissue.patch(limb.key)
 		if _build(foot_patch, TissueGrid.LIMB_BONE_COLS, TissueGrid.LIMB_COLS) > 0:
 			_flush_flat(lift, COL_SHADOW_LIMB)
-			_flush()
-			_draw_tissue_grain(foot_patch, TissueGrid.LIMB_BONE_COLS, TissueGrid.LIMB_COLS)
+			_flush_at(aloft)
+			_draw_tissue_grain(foot_patch, TissueGrid.LIMB_BONE_COLS, TissueGrid.LIMB_COLS, aloft)
 
 	if debug:
 		_draw_debug()
@@ -208,11 +222,11 @@ func _draw_body_fill(body: BodyShape, col_head: Color, col_tail: Color, offset: 
 ## Two paper pinpricks give the otherwise abstract ink silhouette its life —
 ## but only while there is still a head under them to belong to. An eye over an
 ## eaten-out skull would be the one thing left painting paper onto nothing.
-func _draw_eyes(body: BodyShape, torso: TissueGrid.Patch) -> void:
+func _draw_eyes(body: BodyShape, torso: TissueGrid.Patch, offset: Vector2 = Vector2.ZERO) -> void:
 	if _cell_survives(torso, body.eye_left, 0, TissueGrid.HEAD_COLS):
-		draw_circle(body.eye_left, body.eye_radius * 0.82, COL_EYE)
+		draw_circle(body.eye_left + offset, body.eye_radius * 0.82, COL_EYE)
 	if _cell_survives(torso, body.eye_right, 0, TissueGrid.HEAD_COLS):
-		draw_circle(body.eye_right, body.eye_radius * 0.82, COL_EYE)
+		draw_circle(body.eye_right + offset, body.eye_radius * 0.82, COL_EYE)
 
 
 ## Whether the cell nearest `at`, within a column range, still has tissue in it.
@@ -243,7 +257,7 @@ func _cell_survives(patch: TissueGrid.Patch, at: Vector2, from_col: int, to_col:
 ## What goes down here is the generated teeth themselves, at the seats the arc
 ## puts them on. Counting them on screen counts what is about to bite, and a
 ## blunt mouth of stubby cusps looks like one because that is what it is.
-func _draw_jaws(body: BodyShape) -> void:
+func _draw_jaws(body: BodyShape, offset: Vector2 = Vector2.ZERO) -> void:
 	var gape: float = creature.mouth_gape()
 	var dentition: Dentition = creature.dentition
 	if gape <= 0.02 or dentition == null or dentition.teeth.is_empty():
@@ -252,7 +266,7 @@ func _draw_jaws(body: BodyShape) -> void:
 	var reach: float = axes.x
 	var width: float = axes.y
 	var scale: float = Dentition.arc_scale(reach, width)
-	var origin: Vector2 = body.head.pos
+	var origin: Vector2 = body.head.pos + offset
 	var fwd: Vector2 = body.head.fwd
 	var perp: Vector2 = body.head.perp
 	var span: float = dentition.span
@@ -323,9 +337,12 @@ func _draw_jaws(body: BodyShape) -> void:
 ## itself is lattice like everything else, and is drawn with the rest of it.
 func _draw_foot_shadow(limb: Limb) -> void:
 	var s: float = creature.size_scale
-	var r: float = maxf(limb.total_length * 0.10, 3.0 * s)
+	var r: float = limb.foot_radius(s)
 	var shadow_r: float = r * (1.0 - 0.35 * clampf(limb.lift / maxf(r * 3.0, 1.0), 0.0, 1.0))
-	draw_set_transform(limb.ground + Vector2(0.0, 5.0 * s), 0.0, Vector2(1.05, 0.70))
+	# Under the foot as it is *drawn*, which on a tall animal is well below where
+	# the gait put it — the same displacement the leg itself was solved through.
+	draw_set_transform(limb.ground + Vector2(0.0, limb.ground_drop + 5.0 * s),
+		0.0, Vector2(1.05, 0.70))
 	draw_circle(Vector2.ZERO, shadow_r, Color(INK, maxf(0.035, 0.13 - limb.lift * 0.004)))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
@@ -396,6 +413,17 @@ func _gone_in(patch: TissueGrid.Patch, from_col: int, to_col: int) -> int:
 func _flush() -> void:
 	RenderingServer.canvas_item_add_triangle_array(
 		get_canvas_item(), _mesh_indices, _mesh_points, _mesh_colors)
+
+
+## The same, lifted off the ground. Zero on anything standing on it, so a
+## grounded creature goes down through the identical path it always did.
+func _flush_at(offset: Vector2) -> void:
+	if offset == Vector2.ZERO:
+		_flush()
+		return
+	draw_set_transform(offset, 0.0, Vector2.ONE)
+	_flush()
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 ## Issues the built mesh again, offset and in one flat colour — a shadow.
@@ -477,7 +505,8 @@ static func tissue_color(hp: PackedFloat32Array, base: int, fat_capacity: float,
 ## Material detail deliberately ignores cell boundaries. Intact skin is read as
 ## one continuous membrane through sparse longitudinal tension lines, while a
 ## revealed muscle cell carries several close fibres along the anatomy's grain.
-func _draw_tissue_grain(patch: TissueGrid.Patch, from_col: int, to_col: int) -> void:
+func _draw_tissue_grain(patch: TissueGrid.Patch, from_col: int, to_col: int,
+		offset: Vector2 = Vector2.ZERO) -> void:
 	if patch == null or not patch.live:
 		return
 	_skin_lines.resize(0)
@@ -507,10 +536,16 @@ func _draw_tissue_grain(patch: TissueGrid.Patch, from_col: int, to_col: int) -> 
 				var across: float = float(strand) * 0.25
 				_muscle_lines.append(_quad[0].lerp(_quad[1], across))
 				_muscle_lines.append(_quad[3].lerp(_quad[2], across))
+	if _skin_lines.is_empty() and _muscle_lines.is_empty():
+		return
+	if offset != Vector2.ZERO:
+		draw_set_transform(offset, 0.0, Vector2.ONE)
 	if not _skin_lines.is_empty():
 		draw_multiline(_skin_lines, COL_SKIN_TENSION, 0.75, true)
 	if not _muscle_lines.is_empty():
 		draw_multiline(_muscle_lines, COL_MUSCLE_FIBRE, 0.9, true)
+	if offset != Vector2.ZERO:
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 # ----------------------------------------------------------------- debug ----

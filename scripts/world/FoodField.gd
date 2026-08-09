@@ -11,9 +11,26 @@ extends Node2D
 @export var spawn_outer: float = 1250.0
 @export var cull_radius: float = 1900.0
 
+## How high off the ground a pellet grows. Sampled per pellet between the two
+## bounds below, so the field is a mix of things lying on the floor and things up
+## in the air — and what an animal can eat becomes a question about how high it
+## can get its mouth. This is the whole of "browsing": there is no second kind of
+## food and no browse action, only forage that some animals cannot reach.
+var heights: PackedFloat32Array = PackedFloat32Array()
+
+@export var browse_low: float = 0.0
+@export var browse_high: float = 130.0
+## Share of the field that grows off the ground at all. The rest is forage a
+## sprawled animal can walk over and eat, so the habitat is never closed to one.
+@export_range(0.0, 1.0, 0.05) var browse_share: float = 0.35
+
 var pellets: PackedVector2Array = PackedVector2Array()
 var _phase: float = 0.0
 var _rng := RandomNumberGenerator.new()
+
+## How tall one pellet is. Small — it is a pellet — but not zero, so a mouth
+## reaching to exactly the height it grows at can close on it.
+const PELLET_THICKNESS: float = 8.0
 
 const RING_SEGMENTS: int = 28
 const CORE_SEGMENTS: int = 12
@@ -48,24 +65,57 @@ func _ready() -> void:
 ## Culls pellets left far behind and tops the field back up in a ring ahead of
 ## and around `center`, so the player never walks into an empty world.
 func refresh(center: Vector2) -> void:
+	# `pellets` is written directly in several places — the world clears it on
+	# reset, tests place them by hand — so the heights are reconciled to it here
+	# rather than guarded at every call site. A disagreement means somebody
+	# replaced the array, and there is then no way to tell which surviving height
+	# belonged to which pellet: keeping them would silently hang a stale altitude
+	# on a new pellet. So they all go back to the ground, which is both the honest
+	# answer and the behaviour this field had before it had a vertical axis.
+	if heights.size() != pellets.size():
+		heights.resize(0)
+		heights.resize(pellets.size())
 	for i in range(pellets.size() - 1, -1, -1):
 		if pellets[i].distance_to(center) > cull_radius:
-			pellets.remove_at(i)
+			_forget(i)
 	while pellets.size() < target_count:
 		var angle: float = _rng.randf() * TAU
 		var radius: float = lerpf(spawn_inner, spawn_outer, sqrt(_rng.randf()))
 		pellets.append(center + Vector2.RIGHT.rotated(angle) * radius)
+		heights.append(0.0 if _rng.randf() >= browse_share
+			else lerpf(browse_low, browse_high, _rng.randf()))
 
 
-## Removes every pellet within `radius` of `pos` and returns how many were eaten.
-func consume(pos: Vector2, radius: float) -> int:
+## Removes every pellet within `radius` of `pos` that the mouth can also reach
+## vertically, and returns how many were eaten.
+##
+## `reach` is the band the jaws cover — see Stature. Left unbounded, every pellet
+## in range is eaten exactly as it always was, so nothing that does not know about
+## height is affected by any of this.
+func consume(pos: Vector2, radius: float, reach: Vector2 = Stature.UNBOUNDED) -> int:
 	var eaten: int = 0
 	var r2: float = radius * radius
 	for i in range(pellets.size() - 1, -1, -1):
-		if pellets[i].distance_squared_to(pos) <= r2:
-			pellets.remove_at(i)
-			eaten += 1
+		if pellets[i].distance_squared_to(pos) > r2:
+			continue
+		var at: float = _height_of(i)
+		if not Stature.overlaps(reach, Vector2(at, at + PELLET_THICKNESS)):
+			continue
+		_forget(i)
+		eaten += 1
 	return eaten
+
+
+## How high a pellet is growing. A pellet with no recorded height is one on the
+## ground — see the reconciliation in `refresh`.
+func _height_of(index: int) -> float:
+	return heights[index] if index < heights.size() else 0.0
+
+
+func _forget(index: int) -> void:
+	pellets.remove_at(index)
+	if index < heights.size():
+		heights.remove_at(index)
 
 
 func _process(delta: float) -> void:
@@ -82,7 +132,10 @@ func _draw() -> void:
 		_prepare_topology(count)
 	var vertex: int = 0
 	for i in pellets.size():
-		var p: Vector2 = pellets[i]
+		# Height reads the same way it does on a creature: the thing is drawn
+		# lifted up the screen from where it actually stands. Same constant, so a
+		# pellet growing level with a creature's mouth is drawn level with it.
+		var p: Vector2 = pellets[i] - Vector2(0.0, _height_of(i) * Posture.PERSPECTIVE)
 		# Food is an outlined specimen marker: a restrained breathing ring with an
 		# ink core, rather than a gamey glowing collectible.
 		var pulse: float = 1.0 + 0.12 * sin(_phase * 2.0 + float(i) * 1.7)

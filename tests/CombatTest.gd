@@ -96,27 +96,26 @@ func _run_checks() -> void:
 ## so what has to hold is that they track the thing they are read from: the drawn
 ## silhouette, the head, and how much tissue is left.
 func _check_physique(player: Creature, target: Creature) -> void:
-	var lizard: float = _physique_of(player, "Lizard").mass
-	var gecko: float = _physique_of(player, "Gecko").mass
-	var komodo: Physique = _physique_of(player, "Komodo")
-	var crocodile: Physique = _physique_of(player, "Crocodile")
-	_check(gecko < lizard and lizard < komodo.mass and komodo.mass < crocodile.mass,
-		"mass did not follow build (gecko %.2f, lizard %.2f, komodo %.2f, croc %.2f)"
-			% [gecko, lizard, komodo.mass, crocodile.mass])
-	_check(komodo.mass > lizard * 3.0,
-		"a Komodo came out only %.1fx a Lizard — the silhouette is not reaching mass"
-			% (komodo.mass / lizard))
+	var cat: Physique = _physique_of(player, "Cat")
+	var lizard: Physique = _physique_of(player, "Lizard")
+	var elephant: Physique = _physique_of(player, "Elephant")
+	_check(cat.mass < lizard.mass and lizard.mass < elephant.mass,
+		"mass did not follow build (cat %.2f, lizard %.2f, elephant %.2f)"
+			% [cat.mass, lizard.mass, elephant.mass])
+	_check(elephant.mass > lizard.mass * 3.0,
+		"an Elephant came out only %.1fx a Lizard — the silhouette is not reaching mass"
+			% (elephant.mass / lizard.mass))
 
 	# Square-cube: the big one is stronger outright and weaker per unit of mass.
 	# Without that a large creature would simply be a small one times a constant
 	# and nothing about scale would matter.
-	_check(crocodile.strength > komodo.strength,
+	_check(elephant.strength > lizard.strength,
 		"the heavier creature was not the stronger one")
-	_check(crocodile.strength / crocodile.mass < komodo.strength / komodo.mass,
+	_check(elephant.strength / elephant.mass < lizard.strength / lizard.mass,
 		"strength scaled with mass rather than with cross-section")
-	_check(crocodile.bite_force > komodo.bite_force * 3.0,
-		"a Crocodile's jaws (%.1f) were not in a different league from a Komodo's (%.1f)"
-			% [crocodile.bite_force, komodo.bite_force])
+	_check(elephant.bite_force > lizard.bite_force * 3.0,
+		"an Elephant's jaws (%.1f) were not in a different league from a Lizard's (%.1f)"
+			% [elephant.bite_force, lizard.bite_force])
 
 	# Widening the body has to be enough on its own, or mass is really a slider
 	# that happens to be spelled differently.
@@ -170,15 +169,15 @@ func _check_weight(player: Creature, target: Creature) -> void:
 		"two identical creatures no longer split a contact down the middle (%.3f)"
 			% player._contact_share(target))
 
-	var light_gain: float = _shove(player, target, "Gecko", "Crocodile")
-	var heavy_gain: float = _shove(player, target, "Crocodile", "Gecko")
+	var light_gain: float = _shove(player, target, "Cat", "Elephant")
+	var heavy_gain: float = _shove(player, target, "Elephant", "Cat")
 	_check(heavy_gain > light_gain * 3.0,
-		"weight bought nothing in a shove: a Crocodile moved a Gecko %.0f px and a Gecko moved a Crocodile %.0f px"
+		"weight bought nothing in a shove: an Elephant moved a Cat %.0f px and a Cat moved an Elephant %.0f px"
 			% [heavy_gain, light_gain])
 	_check(light_gain < 40.0,
-		"a Gecko walked a Crocodile %.0f px across the world" % light_gain)
+		"a Cat walked an Elephant %.0f px across the world" % light_gain)
 	_check(heavy_gain > 60.0,
-		"a Crocodile leaning on a Gecko only moved it %.0f px — nothing is being shoved at all"
+		"an Elephant leaning on a Cat only moved it %.0f px — nothing is being shoved at all"
 			% heavy_gain)
 
 	player.params.apply_preset("Lizard")
@@ -212,33 +211,39 @@ func _check_grip(player: Creature, target: Creature) -> void:
 
 	# Jaws shut on a victim and left alone are jaws shut on a victim. Nothing about
 	# a hold generates damage by itself — only chewing and pulling do.
-	_hold(player, target, "Crocodile", "Gecko", "still", 0.0)
+	_hold(player, target, "Elephant", "Cat", "still", 0.0)
 	var untouched: float = target.anatomy.tissue.integrity()
 	_hold_on(player, target, "still", 3.0)
-	_check(player.grip != null, "a Crocodile let go of a Gecko that did nothing at all")
+	_check(player.grip != null, "an Elephant let go of a Cat that did nothing at all")
 	_check(is_equal_approx(target.anatomy.tissue.integrity(), untouched),
-		"three motionless seconds in a Crocodile's jaws chewed the victim anyway")
+		"three motionless seconds in an Elephant's jaws chewed the victim anyway")
 
 	# A heavy set of jaws on light prey: it goes where the biter goes. Towing is
 	# quiet — the two travel together — so it is a drag and not a dismemberment.
-	var towed: float = _hold(player, target, "Crocodile", "Gecko", "drag", 3.0)
+	var towed: float = _hold(player, target, "Elephant", "Cat", "drag", 3.0)
 	_check(player.grip != null,
-		"a Crocodile lost its hold on a Gecko it was simply walking away with")
+		"an Elephant lost its hold on a Cat it was simply walking away with")
 	_check(towed > 100.0,
-		"prey held in a Crocodile's jaws was towed only %.0f px in three seconds" % towed)
+		"prey held in an Elephant's jaws was towed only %.0f px in three seconds" % towed)
 
 	# The same jaws, with the victim thrashing: unshakeable, and now the load has
 	# somewhere to go. The flesh is weaker than the jaws, so it is the flesh that
 	# gives — a mouthful at a time, with the hold re-seating on what is left.
 	var whole: float = target.anatomy.tissue.integrity()
-	_hold(player, target, "Crocodile", "Gecko", "thrash", 3.0)
+	_hold(player, target, "Elephant", "Cat", "thrash", 3.0)
 	_check(player.grip != null,
-		"a thrashing Gecko shook a Crocodile off jaws worth %.1f"
+		"a thrashing Cat shook an Elephant off jaws worth %.1f"
 			% player.physique.bite_force)
 	var torn: float = target.anatomy.tissue.integrity()
+	# Quoted against the yield point rather than as a bare pass/fail, because what
+	# decides this is a margin: flesh gives when the pull passes TEAR_YIELD of its
+	# own strength, and both sides of that comparison are read off the two animals
+	# involved. A failure here is a calibration reading, so it prints one.
 	_check(torn < whole - 0.1,
-		"a Gecko thrashing in a Crocodile's jaws had no meat pulled off it (%.2f -> %.2f)"
-			% [whole, torn])
+		"a Cat thrashing in an Elephant's jaws had no meat pulled off it (%.2f -> %.2f; peak pull %.2f against a yield of %.2f)"
+			% [whole, torn,
+				player.grip.load if player.grip != null else 0.0,
+				(player.grip.tissue_strength() * Creature.TEAR_YIELD) if player.grip != null else 0.0])
 	_check(main.scrap_field.scraps.size() > 0, "tearing meat off a creature shed nothing")
 	# Torn, not ground: a tear is a discrete failure of the tissue, so it has to
 	# leave holes in the lattice rather than uniformly thin the whole victim.
@@ -256,32 +261,41 @@ func _check_grip(player: Creature, target: Creature) -> void:
 	_check(is_equal_approx(target.anatomy.tissue.integrity(), settled),
 		"a victim that stopped thrashing went on being torn apart")
 
-	# Reverse the pair and the same rules produce the opposite outcome.
-	_hold(player, target, "Gecko", "Crocodile", "drag", 2.0)
-	_check(target.head_pos.distance_to(Vector2(60.0, 0.0)) < 60.0,
-		"a Gecko dragged a Crocodile %.0f px" % target.head_pos.distance_to(Vector2(60.0, 0.0)))
+	# Reverse the pair and the same rules produce the opposite outcome. It has to
+	# take the leg: an Elephant's body stands higher than a Cat's jaws go, so the
+	# only hold available is the one down at ground level.
+	var anchored: Vector2 = target.head_pos
+	_hold(player, target, "Cat", "Elephant", "drag", 2.0, true)
+	_check(target.head_pos.distance_to(anchored) < 60.0,
+		"a Cat dragged an Elephant %.0f px" % target.head_pos.distance_to(anchored))
 	_check(absf(player.speed) < player.params.move_speed * 0.5,
-		"a Gecko hauling a Crocodile kept %.0f px/s of its own top speed" % player.speed)
+		"a Cat hauling an Elephant kept %.0f px/s of its own top speed" % player.speed)
 
-	# ...and light jaws on something that will not be held come off it.
-	_hold(player, target, "Gecko", "Crocodile", "thrash", 3.0)
-	_check(player.grip == null,
-		"a Gecko held a thrashing Crocodile with jaws it could never close on it")
-	_check(not player.is_bite_latched(),
-		"a torn-off grip still reported itself as latched")
-	_check(player.bite_held,
-		"tearing free let go of the button as well as of the victim")
+	# ...and a victim that cannot generate load cannot shake anything off, however
+	# overmatched the jaws on it are. A grip is broken by a heave, and a columnar
+	# animal turning at a third of a Cat's rate about a pivot most of its own
+	# length behind its head simply does not produce one — so the Cat stays on the
+	# leg and the Elephant walks about with it attached. Nothing decided that: it
+	# is the load never reaching what the jaws are worth, which is the same test
+	# that pulls those jaws straight off a victim quick enough to swing them.
+	_hold(player, target, "Cat", "Elephant", "thrash", 3.0, true)
+	_check(player.grip != null,
+		"an Elephant shook a Cat off by turning, which is not a heave")
+	if player.grip != null:
+		_check(player.grip.strain() < 1.0,
+			"a hold that survived reported itself already failed (%.2f strain)"
+				% player.grip.strain())
+	# What it does not get to do is stay clean. Jaws that keep hold keep chewing
+	# the flesh they are on, and the tally is on the limb rather than on the body:
+	# the Cat never reached the body, and the vertical layer is why.
 	_check(target.anatomy.tissue.integrity() < 1.0,
-		"jaws pulled off a victim came away clean")
-	# The other half of that: which of the two gave is decided by nothing but
-	# which was weaker. Jaws that lost come off a body still in one piece, where
-	# the same struggle against jaws that held would have opened it up.
+		"a hold on a leg left the animal it was attached to untouched")
 	_check(target.anatomy.tissue.patch(TissueGrid.BODY_KEY).gone_count == 0,
-		"a Crocodile that shook a Gecko off had meat torn out of it anyway")
+		"a Cat that can only reach an Elephant's legs opened a hole in its body")
 
 	# Depth is what is left of the jaws' force after holding on, so the same bite
 	# cuts deeper into something that has stopped fighting.
-	_hold(player, target, "Crocodile", "Komodo", "thrash", 1.5)
+	_hold(player, target, "Elephant", "Lizard", "thrash", 1.5)
 	var strained: float = player.bite_depth()
 	_check(player.grip != null, "the strained-chew case lost its grip before measuring")
 	if player.grip != null:
@@ -305,7 +319,7 @@ func _check_grip(player: Creature, target: Creature) -> void:
 ## Latches `biter_name`'s jaws onto `victim_name` and runs the pair for
 ## `seconds`. Returns how far the victim moved.
 func _hold(biter: Creature, victim: Creature, biter_name: String, victim_name: String,
-		mode: String, seconds: float) -> float:
+		mode: String, seconds: float, at_leg: bool = false) -> float:
 	biter.set_bite_held(false)
 	biter.params.apply_preset(biter_name)
 	victim.params.apply_preset(victim_name)
@@ -318,6 +332,20 @@ func _hold(biter: Creature, victim: Creature, biter_name: String, victim_name: S
 	for _i in 20:
 		biter._physics_process(TICK)
 		victim._physics_process(TICK)
+
+	if at_leg:
+		# A low animal squaring up to a tall one head-on has nothing to bite: the
+		# body it is aiming at is above everything its neck can reach. What it can
+		# reach is the legs, because a leg is the one structure that runs all the
+		# way down to the ground the two of them are standing on — so it goes for
+		# one, which is what the whole vertical layer is for.
+		var foot: Vector2 = victim.gait.limbs[0].joints[2]
+		var away: Vector2 = (foot - victim.head_pos).normalized()
+		var stand: Vector2 = foot + away * 44.0
+		biter.reset(stand, (foot - stand).angle())
+		for _i in 20:
+			biter._physics_process(TICK)
+			victim._physics_process(TICK)
 
 	biter.set_bite_held(true)
 	biter.request_bite(Vector2(200.0, 0.0))

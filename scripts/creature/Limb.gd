@@ -36,7 +36,16 @@ var bend_sign: float = -1.0
 ## [shoulder/hip, elbow/knee, foot]
 var joints: PackedVector2Array = PackedVector2Array([Vector2.ZERO, Vector2.ZERO, Vector2.ZERO])
 var lengths: PackedFloat32Array = PackedFloat32Array([1.0, 1.0])
+## The length the flat IK chain is solved at — the limb *seen from above*. A leg
+## held out sideways shows nearly all of itself; one stacked under the shoulder
+## shows a third of it. That projection is the whole of why posture changes where
+## the feet sit, and it is why this is not the same number as the bone.
 var total_length: float = 2.0
+## The limb's actual length, before the view foreshortens it. Everything about
+## how much *animal* is there — how thick the bone is drawn, how big the foot is,
+## how much tissue the lattice lays down it — is priced off this, because an
+## upright leg is not a spindly one.
+var anatomical_length: float = 2.0
 
 ## Where the foot is nailed to the world while it bears weight.
 var planted: Vector2 = Vector2.ZERO
@@ -80,6 +89,12 @@ var ground: Vector2 = Vector2.ZERO
 ## Fake height above the ground. Top-down has no vertical axis, so height is
 ## faked as a screen-space offset; `visual` is `ground` shifted up by it.
 var lift: float = 0.0
+## How far down the screen the ground itself sits from the plane the torso is
+## drawn on. Zero on a body lying on the floor and most of a leg on one standing
+## a leg clear of it — see Posture.PERSPECTIVE. It is the same lie `lift` already
+## is, told about the socket instead of about the foot, and it is what makes a
+## columnar animal's legs visibly run *down* to the ground from under its body.
+var ground_drop: float = 0.0
 ## Where the foot appears to be, and what the IK actually solves toward — so
 ## the whole leg picks up during a step rather than just the foot marker.
 var visual: Vector2 = Vector2.ZERO
@@ -135,10 +150,33 @@ func setup(p_key: String, p_pair: int, p_side: float) -> void:
 	bend_sign = -1.0 if pair == FRONT else 1.0
 
 
-func set_lengths(total: float) -> void:
-	total_length = maxf(total, 1.0)
+## `anatomical` is the bone; `plan` is what it measures once the view has
+## foreshortened it. The two are the same number on a sprawled animal and pull
+## apart as the limb is brought upright, which is the only place posture touches
+## the IK at all.
+func set_lengths(anatomical: float, plan: float = -1.0) -> void:
+	anatomical_length = maxf(anatomical, 1.0)
+	total_length = maxf(plan if plan >= 0.0 else anatomical, 1.0)
 	lengths[0] = total_length * 0.52
 	lengths[1] = total_length * 0.48
+
+
+## Half-thickness of the upper bone, and the flesh over it. Off the anatomical
+## length, so an upright leg is a stout column rather than a short thin one.
+## Shared by the renderer, the lattice and the hit test so all three agree on how
+## much limb is there.
+func girth(scale: float) -> float:
+	return maxf(anatomical_length * 0.16, 2.5 * scale)
+
+
+func foot_radius(scale: float) -> float:
+	return maxf(anatomical_length * 0.10, 3.0 * scale)
+
+
+## Screen offset from where the foot *is* to where it is drawn: up by the step's
+## fake lift, down by however far the ground sits below the torso's plane.
+func rise() -> Vector2:
+	return Vector2(0.0, ground_drop - lift)
 
 
 ## The centre of the fan this limb swings through, in world space: partly

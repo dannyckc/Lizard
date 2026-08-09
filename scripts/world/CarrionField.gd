@@ -43,6 +43,12 @@ const TETHER_SLACK: float = 6.0
 ## currency as scavenging, and a big piece feeds more because there is more of it.
 const FOOD_PER_UNIT: float = TissueGrid.SKIN_HP + TissueGrid.FAT_HP + TissueGrid.MUSCLE_HP
 
+## The height a part lying on the ground occupies. Meat is flat and it is on the
+## floor, so this is a thin band at zero — which is all the vertical layer needs
+## to know about it. It is what makes carrion reachable by anything standing on
+## that floor and unreachable by anything that has left it.
+const GROUND_BAND := Vector2(0.0, 6.0)
+
 const COL_SHADOW := Color("14140f", 0.055)
 const COL_SKIN_TENSION := Color("f3f1ec", 0.045)
 const COL_MUSCLE_FIBRE := Color("3f160f", 0.62)
@@ -89,8 +95,8 @@ class Part extends RefCounted:
 	var flesh: float = 0.0
 	var full_flesh: float = 0.0
 	## Weight, in the same Lizard units every mass in the simulation is quoted in:
-	## the fraction of the animal that left, times what that animal weighed. So a
-	## Crocodile's thigh is a serious thing to drag and a Gecko's whole tail is not,
+	## the fraction of the animal that left, times what that animal weighed. So an
+	## Elephant's thigh is a serious thing to drag and a Cat's whole tail is not,
 	## without either being written down.
 	var full_mass: float = 0.0
 	## Radius of gyration about the centroid. Decides how much of a pull on the part
@@ -353,10 +359,17 @@ func clear() -> void:
 ## the same volume and bites whichever it reached furthest into. A leg lying across
 ## an animal's flank has to be able to win that comparison, and a leg the jaws only
 ## grazed has to be able to lose it.
-func reach_of(center: Vector2, radius: float) -> Part:
+## `reach` is the height band the jaws asking can bring to bear. A part lying on
+## the ground is a flat thing on the floor, so anything standing on that floor
+## reaches it and anything in the air does not — which is the whole of why a
+## flier has to come down for carrion. A part somebody is already carrying is at
+## that mouth's height by definition and is never height-gated.
+func reach_of(center: Vector2, radius: float, reach: Vector2 = Stature.UNBOUNDED) -> Part:
 	var best: Part = null
 	var best_score: float = radius
 	for part in parts:
+		if part.carrier == null and not Stature.overlaps(reach, GROUND_BAND):
+			continue
 		var score: float = depth_into(part, center)
 		if score <= best_score:
 			best_score = score
