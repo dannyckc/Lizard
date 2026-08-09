@@ -99,7 +99,7 @@ func consume(pos: Vector2, radius: float, reach: Vector2 = Stature.UNBOUNDED) ->
 		if pellets[i].distance_squared_to(pos) > r2:
 			continue
 		var at: float = _height_of(i)
-		if not Stature.overlaps(reach, Vector2(at, at + PELLET_THICKNESS)):
+		if not Volume.overlaps(reach, Vector2(at, at + PELLET_THICKNESS)):
 			continue
 		_forget(i)
 		eaten += 1

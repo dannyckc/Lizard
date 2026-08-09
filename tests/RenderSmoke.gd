@@ -18,6 +18,11 @@ var gripped: bool = false
 ## panel was up over an intact body and its wound-rim pass never ran, which would
 ## make a clean smoke run prove less than it looks like it does.
 var specimen_holes: int = 0
+## Whether the specimen was drawn as a volume — turned off the vertical, so the
+## underside of every cell, the depth sort and the cast shadow all went down.
+## Flat, none of those three paths exist, and the run would prove nothing about
+## them.
+var specimen_turned: bool = false
 
 
 func _initialize() -> void:
@@ -65,10 +70,15 @@ func _physics_process(_delta: float) -> bool:
 	# frames after the first and the fit only eases on the frames after that.
 	if ticks == 70:
 		_open_anatomy()
+	# And then turned, part way through the stretch it is held out for, so the flat
+	# reading and the volumetric one are both drawn over the same opened body.
+	if ticks == 100:
+		_turn_anatomy()
 	if ticks > 70 and ticks < 150:
 		var specimen: AnatomyView = (main.hud as EvolutionHUD).anatomy.view
 		if specimen.visible and specimen.fitted():
 			specimen_holes = maxi(specimen_holes, specimen.tissue().gone_count())
+			specimen_turned = specimen_turned or specimen.orbited()
 	if ticks == 150:
 		main.hud.set_view(EvolutionHUD.VIEW_FIELD)
 	if ticks == 120:
@@ -84,17 +94,20 @@ func _physics_process(_delta: float) -> bool:
 		var smell: SmellSense = (main.get_node("Creature/Senses") as CreatureSenses).smell
 		var sounds: Array[SoundField.SoundWave] = (main.get_node("SoundField") as SoundField).waves
 		var carrion: CarrionField = main.get_node("CarrionField")
-		print("render smoke OK — %d draws / %d ticks | speed %.0f px/s | travelled %.0f px | outline %d verts | feet moved: %s | gripped: %s | target integrity %.2f | %d scraps | %d parts | %d scent / %d marks | specimen holes %d"
+		print("render smoke OK — %d draws / %d ticks | speed %.0f px/s | travelled %.0f px | outline %d verts | feet moved: %s | gripped: %s | target integrity %.2f | %d scraps | %d parts | %d scent / %d marks | specimen holes %d / turned %s"
 			% [draws, ticks, c.speed, c.head_pos.length(), c.body.outline.size(),
 				str(stepped), str(gripped), target.anatomy.tissue.integrity(),
 				main.get_node("ScrapField").scraps.size(), carrion.parts.size(),
 				(main.get_node("ScentField") as ScentField).traces.size(), smell.marks.size(),
-				specimen_holes])
+				specimen_holes, str(specimen_turned)])
 		if smell.marks.is_empty():
 			print("RENDER SMOKE FAIL — the smell layer drew nothing")
 			quit(1)
 		if specimen_holes <= 0:
 			print("RENDER SMOKE FAIL — the anatomy tab was never out over an opened body")
+			quit(1)
+		if not specimen_turned:
+			print("RENDER SMOKE FAIL — the specimen was never turned off the vertical")
 			quit(1)
 		if carrion.parts.is_empty():
 			print("RENDER SMOKE FAIL — the carrion field had no part to draw")
@@ -120,6 +133,18 @@ func _open_anatomy() -> void:
 	var torso: TissueGrid.Patch = panel.creature().anatomy.tissue.patch(TissueGrid.BODY_KEY)
 	panel.view._settle(1.0)
 	panel.view._pick(panel.view.to_panel(torso.centre_of(torso.cells / 2)))
+
+
+## Rolls the specimen off its back and tips the eye off overhead, so the closed
+## shell, the painter's sort and the shadow on the floor are all drawn — and picks
+## a cell again through the turned projection, which is a different hit test.
+func _turn_anatomy() -> void:
+	var view: AnatomyView = (main.hud as EvolutionHUD).anatomy.view
+	view.orbit_by(Vector2(34.0, 26.0))
+	view._settle(1.0)
+	var torso: TissueGrid.Patch = view.tissue().patch(TissueGrid.BODY_KEY)
+	var cell: int = torso.cells / 2
+	view._pick(view.project(torso.centre_of(cell), torso.height_of(cell)))
 
 
 ## Puts the player's jaws on the target and holds them there, so the debug

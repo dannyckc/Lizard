@@ -151,7 +151,8 @@ func _physics_process(_delta: float) -> void:
 		if scavenger == null or scavenger.body == null or not scavenger.alive:
 			continue
 		var scavenged: int = scrap_field.consume(
-			scavenger.body.head.pos, scavenger.mouth_radius(), scavenger)
+			scavenger.body.head.pos, scavenger.mouth_radius(), scavenger,
+			scavenger.stature.bite)
 		if scavenged > 0:
 			scavenger.feed(scavenged)
 			sound_field.emit_sound(scavenger.body.head.pos,

@@ -19,6 +19,17 @@
 ## body into the mean direction of its own spine. That is a rigid transform and
 ## nothing else: it re-orients the animal on the page without straightening it,
 ## so the pose stays exactly the pose.
+##
+## And it can be walked around. The lattice is not a sheet — every cell is a box
+## of flesh standing at a height the pose put it at, which is what the bite query
+## has been reading all along to tell a knee from a belly — so this view takes the
+## third coordinate the cells already carry and projects it, rather than throwing
+## it away as the field's top-down camera does. Dragging orbits the eye around the
+## animal: `spin` rolls it around the spine, from over the back through the flank
+## to the belly; `tilt` swings it off straight-overhead toward the snout. Nothing
+## about the creature moves. The specimen is the same pose of the same body seen
+## from somewhere else, which is the only kind of rotation a reading of a creature
+## is allowed to be.
 class_name AnatomyView
 extends Control
 
@@ -71,7 +82,40 @@ const VESSEL_OFFSET: float = 2.6
 const GRAIN_MIN_CELL: float = 3.2
 const LATTICE_MIN_CELL: float = 3.0
 
+## How far the eye can be tipped off overhead, either way. Short of a right angle
+## deliberately: end-on, an animal has no length left for the fit to frame.
+const TILT_LIMIT: float = PI * 0.44
+## Radians of orbit per pixel dragged.
+const ORBIT_RATE: float = 0.010
+## Orbit under which the projection is the plain top-down one. Below it no height
+## can separate anything on the page, so the volume is skipped entirely — which is
+## the whole cost of the third axis on a specimen nobody has turned.
+const FLAT: float = 0.002
+## How much darker the underside of the shell is drawn than the top of it. Not a
+## light model — it is the one mark that says which side of the animal is facing
+## you once it has been rolled over.
+const UNDERSIDE: float = 0.14
+## How far a cell's ink is lifted or dropped by which way its own patch of body is
+## turned, with the specimen fully side-on.
+##
+## The form is read off the cross-section's own ellipse — the same `sqrt(1 - u²)`
+## the lattice is built out of, so the light lands on a body that is round because
+## the body genuinely is round, and a flank that has been chewed flat stops
+## catching it. Without this a turned specimen in an animal's own inks is a black
+## shape rotating: the silhouette moves and nothing inside it does.
+const RELIEF: float = 0.42
+
 var creature: Creature = null
+## Where the specimen is being looked at from, in the animal's own frame. Camera
+## angles, both of them: nothing here moves the creature.
+var spin: float = 0.0:
+	set(value):
+		spin = fposmod(value, TAU)
+		_bake_orbit()
+var tilt: float = 0.0:
+	set(value):
+		tilt = clampf(value, -TILT_LIMIT, TILT_LIMIT)
+		_bake_orbit()
 ## Which layers of the depth stack are still on the specimen.
 var layers: int = ALL_LAYERS
 var show_vessels: bool = true
@@ -94,16 +138,45 @@ var _lo: Vector2 = Vector2.ZERO
 var _hi: Vector2 = Vector2.ZERO
 var _fitted: bool = false
 
+# Baked orbit. Every projection below is these four numbers and nothing else.
+var _cos_spin: float = 1.0
+var _sin_spin: float = 0.0
+var _cos_tilt: float = 1.0
+var _sin_tilt: float = 0.0
+## Whether the eye is off the vertical far enough for heights to matter.
+var _solid: bool = false
+## How far off straight-overhead it is, as how much relief to draw. Nought looking
+## down, so the specimen at rest is inked exactly as the field inks the creature,
+## and the form fades in with the turn rather than switching on.
+var _relief: float = 0.0
+
 var _hover_key: String = ""
 var _hover_cell: int = -1
+var _orbiting: bool = false
 
 # Reused geometry, on the same terms as CreatureView's: this redraws every frame,
 # so the cell layer writes into these rather than allocating per cell.
 var _quad := PackedVector2Array([Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO])
+## The heights of those same four corners, as [underside, top surface].
+var _band := PackedVector2Array([Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO])
+## The corners once turned into the upright presentation, before any height is
+## folded in — held so a cell's two faces and its shadow share one rotation.
+var _turned := PackedVector2Array([Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO])
+## The same four corners on the page, and the heights they were taken at, for the
+## hit test.
+var _face := PackedVector2Array([Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO])
+var _heights := PackedFloat32Array([0.0, 0.0, 0.0, 0.0])
 var _points := PackedVector2Array()
 var _colors := PackedColorArray()
 var _indices := PackedInt32Array()
 var _flat := PackedColorArray([Color.TRANSPARENT])
+## (depth, face) per drawn face, sorted to put the far side of the animal down
+## first. A packed array of pairs rather than a custom comparator, because
+## Vector2 already sorts on x and the sort is then native rather than a callable
+## per comparison.
+var _depths := PackedVector2Array()
+var _shadow := PackedVector2Array()
+var _shadow_indices := PackedInt32Array()
 var _lattice := PackedVector2Array()
 var _skin_lines := PackedVector2Array()
 var _muscle_lines := PackedVector2Array()
@@ -139,6 +212,33 @@ func reset_fit() -> void:
 	_fitted = false
 	_hover_key = ""
 	_hover_cell = -1
+
+
+## Puts the eye back over the animal's back, looking straight down — the view the
+## field itself is drawn in, and so the one the specimen reads against.
+func reset_orbit() -> void:
+	spin = 0.0
+	tilt = 0.0
+
+
+## Turns the eye by a drag, in pixels across the stage.
+func orbit_by(drag: Vector2) -> void:
+	spin += drag.x * ORBIT_RATE
+	tilt += drag.y * ORBIT_RATE
+
+
+## Whether the specimen is being seen as a volume rather than from overhead.
+func orbited() -> bool:
+	return _solid
+
+
+func _bake_orbit() -> void:
+	_cos_spin = cos(spin)
+	_sin_spin = sin(spin)
+	_cos_tilt = cos(tilt)
+	_sin_tilt = sin(tilt)
+	_solid = absf(_sin_spin) > FLAT or absf(_sin_tilt) > FLAT
+	_relief = sqrt(clampf(1.0 - _cos_spin * _cos_tilt, 0.0, 1.0))
 
 
 func layer_shown(layer: int) -> bool:
@@ -201,10 +301,27 @@ func _settle(delta: float) -> void:
 			if p.gone[cell] != 0:
 				continue
 			p.corners_of(cell, _quad)
+			p.surfaces_of(cell, _band)
 			for k in 4:
 				var at: Vector2 = (_quad[k] - _anchor).rotated(_rot)
-				lo = lo.min(at)
-				hi = hi.max(at)
+				# The corner at its lowest and its highest, which between them bound
+				# everything drawn there — both faces of the cell and the patch of
+				# floor its shadow falls on. Two points rather than three because the
+				# projection is linear in the height, so nothing in between can lie
+				# outside them, and the ground only extends the range on an animal
+				# holding itself above it.
+				var under: float = minf(_band[k].x, 0.0) if _solid else _band[k].y
+				var over: float = maxf(_band[k].y, 0.0) if _solid else _band[k].y
+				# Written out rather than calling `_flatten` twice: this is the one
+				# loop in the file that runs over every corner of every cell of the
+				# animal on every frame, turned or not.
+				var flat_x: float = at.x * _cos_spin
+				var flat_y: float = at.y * _cos_tilt + at.x * _sin_spin * _sin_tilt
+				var drop: float = _cos_spin * _sin_tilt
+				var low := Vector2(flat_x + under * _sin_spin, flat_y - under * drop)
+				var high := Vector2(flat_x + over * _sin_spin, flat_y - over * drop)
+				lo = lo.min(low.min(high))
+				hi = hi.max(low.max(high))
 	if lo.x > hi.x:
 		return
 
@@ -225,16 +342,39 @@ func _settle(delta: float) -> void:
 	_hi = _origin + hi * _scale
 
 
-## Where a place on the animal lands on the page, and back. The whole of the
-## relationship between the specimen and the creature is these two lines: one
-## rotation, one scale, one offset, applied to world coordinates the lattice
-## already holds. There is no second geometry anywhere in this file.
+## Where a place on the animal lands on the page. The whole of the relationship
+## between the specimen and the creature is this and `_flatten`: one rotation, one
+## orbit, one scale, one offset, applied to coordinates the lattice already holds.
+## There is no second geometry anywhere in this file.
+func project(world: Vector2, height: float) -> Vector2:
+	return _origin + _flatten((world - _anchor).rotated(_rot), height) * _scale
+
+
+## The same for a place on the ground under the animal — where the shadow of it
+## falls, and the address anything working in plan view alone asks in.
 func to_panel(world: Vector2) -> Vector2:
-	return _origin + (world - _anchor).rotated(_rot) * _scale
+	return project(world, 0.0)
 
 
-func to_world(panel: Vector2) -> Vector2:
-	return _anchor + ((panel - _origin) / maxf(_scale, 0.0001)).rotated(-_rot)
+## One point of the upright presentation, seen from wherever the eye currently is.
+##
+## `turned` is the body in plan, already rotated snout-up; `height` is how far off
+## the ground that point stands. Spin rolls the eye around the animal's long axis,
+## so the belly-to-back direction sweeps across the page; tilt then swings it off
+## overhead, so the animal's length foreshortens. At an orbit of nothing this is
+## the identity on the plan and drops the height entirely, which is exactly the
+## top-down reading the field is drawn in.
+func _flatten(turned: Vector2, height: float) -> Vector2:
+	return Vector2(
+		turned.x * _cos_spin + height * _sin_spin,
+		turned.y * _cos_tilt - (height * _cos_spin - turned.x * _sin_spin) * _sin_tilt)
+
+
+## How near the eye that same point is. The painter's-order key, and the only
+## reason a rolled specimen reads as a solid animal rather than as a shell turned
+## inside out.
+func _towards(turned: Vector2, height: float) -> float:
+	return turned.y * _sin_tilt + (height * _cos_spin - turned.x * _sin_spin) * _cos_tilt
 
 
 ## Whether the specimen has been framed yet. False for a creature whose lattice
@@ -302,13 +442,22 @@ func _draw_cells(grid: TissueGrid) -> void:
 			standing += p.cells - p.gone_count
 	if standing <= 0:
 		return
-	if _points.size() != standing * 4:
-		_points.resize(standing * 4)
-		_colors.resize(standing * 4)
-		_indices.resize(standing * 6)
+	# Two faces a cell once the eye is off the vertical: the top of the shell and
+	# the underside of it. A body seen from anywhere but straight above is closed,
+	# and a single surface would show the paper through its own flank.
+	var faces: int = standing * 2 if _solid else standing
+	if _points.size() != faces * 4:
+		_points.resize(faces * 4)
+		_colors.resize(faces * 4)
+		_indices.resize(faces * 6)
+		_depths.resize(faces)
+	if _solid and _shadow.size() != standing * 4:
+		_shadow.resize(standing * 4)
+		_build_shadow_indices(standing)
 
 	var v: int = 0
-	var t: int = 0
+	var face: int = 0
+	var s: int = 0
 	for key in _patch_order():
 		var p: TissueGrid.Patch = grid.patch(key)
 		if p == null or not p.live:
@@ -317,32 +466,130 @@ func _draw_cells(grid: TissueGrid) -> void:
 			if p.gone[cell] != 0:
 				continue
 			p.corners_of(cell, _quad)
+			p.surfaces_of(cell, _band)
 			var base: int = cell * TissueGrid.LAYERS
 			var color: Color = COL_WASH
 			if CreatureView.top_layer(p.hp, base, layers) >= 0:
 				color = CreatureView.tissue_color(
 					p.hp, base, grid.fat_capacity(p, cell), layers)
+			# One rotation per corner, shared by the cell's two faces and by the
+			# patch of ground under it.
 			for k in 4:
-				_points[v + k] = to_panel(_quad[k])
-				_colors[v + k] = color
-			_indices[t] = v
-			_indices[t + 1] = v + 1
-			_indices[t + 2] = v + 2
-			_indices[t + 3] = v
-			_indices[t + 4] = v + 2
-			_indices[t + 5] = v + 3
-			v += 4
-			t += 6
+				_turned[k] = (_quad[k] - _anchor).rotated(_rot)
 
-	# The specimen's own shadow, offset off the same mesh — so a hole in the
-	# creature is a hole in its shadow, as it is in the field.
+			# Where this cell sits around its own cross-section, and therefore which
+			# way the two faces of it point. A cell over the spine faces the sky; one
+			# out on the flank faces sideways; and the ellipse says by how much.
+			var lateral: float = p.row_centre(cell % p.rows)
+			var rise: float = sqrt(maxf(1.0 - lateral * lateral, 0.0))
+			var over_ink: Color = _relieved(color, rise * _cos_spin - lateral * _sin_spin)
+
+			var over: float = 0.0
+			for k in 4:
+				_points[v + k] = _origin + _flatten(_turned[k], _band[k].y) * _scale
+				_colors[v + k] = over_ink
+				over += _towards(_turned[k], _band[k].y)
+			_depths[face] = Vector2(over * 0.25, float(face))
+			v += 4
+			face += 1
+			if not _solid:
+				continue
+
+			var under: Color = _relieved(color.lerp(Color(INK, color.a), UNDERSIDE),
+				-rise * _cos_spin - lateral * _sin_spin)
+			var below: float = 0.0
+			for k in 4:
+				_points[v + k] = _origin + _flatten(_turned[k], _band[k].x) * _scale
+				_colors[v + k] = under
+				below += _towards(_turned[k], _band[k].x)
+				_shadow[s + k] = _origin + _flatten(_turned[k], 0.0) * _scale
+			_depths[face] = Vector2(below * 0.25, float(face))
+			v += 4
+			face += 1
+			s += 4
+
+	# Far side of the animal first. Without this the shell is drawn inside out and
+	# a rolled specimen shows its own back through its belly.
+	if _solid:
+		_depths.sort()
+	var t: int = 0
+	for i in faces:
+		var at: int = int(_depths[i].y) * 4
+		_indices[t] = at
+		_indices[t + 1] = at + 1
+		_indices[t + 2] = at + 2
+		_indices[t + 3] = at
+		_indices[t + 4] = at + 2
+		_indices[t + 5] = at + 3
+		t += 6
+
+	# The specimen's own shadow — so a hole in the creature is a hole in its
+	# shadow, as it is in the field. Cast on the ground the lattice's heights are
+	# measured from once there is an angle to see it from, and faked with a plain
+	# offset from overhead, where the two would coincide exactly.
 	_flat[0] = COL_SHADOW
-	draw_set_transform(Vector2(0.0, 5.0), 0.0, Vector2.ONE)
-	RenderingServer.canvas_item_add_triangle_array(
-		get_canvas_item(), _indices, _points, _flat)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	if _solid:
+		RenderingServer.canvas_item_add_triangle_array(
+			get_canvas_item(), _shadow_indices, _shadow, _flat)
+	else:
+		draw_set_transform(Vector2(0.0, 5.0), 0.0, Vector2.ONE)
+		RenderingServer.canvas_item_add_triangle_array(
+			get_canvas_item(), _indices, _points, _flat)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	RenderingServer.canvas_item_add_triangle_array(
 		get_canvas_item(), _indices, _points, _colors)
+
+
+## A face's own colour with the form of the body on it: lifted toward the paper
+## where it is turned toward the eye, dropped toward the ink where it is turned
+## away. Alpha is carried across rather than lerped, so a peeled cell's wash stays
+## a wash instead of the shaded side of it coming up solid.
+func _relieved(color: Color, lit: float) -> Color:
+	var lift: float = _relief * clampf(lit, -1.0, 1.0)
+	if lift >= 0.0:
+		return color.lerp(Color(PAPER, color.a), RELIEF * lift)
+	return color.lerp(Color(INK, color.a), RELIEF * -lift)
+
+
+## The shadow is one quad per standing cell in lattice order and never sorted —
+## it is flat on the floor, so nothing about it can occlude anything else.
+func _build_shadow_indices(cells: int) -> void:
+	_shadow_indices.resize(cells * 6)
+	for i in cells:
+		var at: int = i * 4
+		var t: int = i * 6
+		_shadow_indices[t] = at
+		_shadow_indices[t + 1] = at + 1
+		_shadow_indices[t + 2] = at + 2
+		_shadow_indices[t + 3] = at
+		_shadow_indices[t + 4] = at + 2
+		_shadow_indices[t + 5] = at + 3
+
+
+## The face of a cell currently turned toward the eye: the top of the shell while
+## the animal's back is to you, its underside once it has been rolled past its
+## flank. Every pass that marks a *surface* rather than a volume asks this, so the
+## grain, the lattice, a wound rim and the hit test all describe the side you are
+## actually looking at.
+func _facing(band: Vector2) -> float:
+	return band.y if _cos_spin >= 0.0 else band.x
+
+
+## Whether that face is actually turned toward the eye rather than lying on the
+## far side of the animal. `lateral` is where the cell sits across its own
+## cross-section, so this is the ellipse's own normal against the eye.
+##
+## Asked by the passes that draw *lines*, and by none of the ones that draw fills.
+## A fill is opaque and sorted, so the far side of the body is painted over by the
+## near side and needs no test; a line is not painted over by anything, so without
+## this the far flank's grain and lattice show straight through the near one and a
+## rolled specimen comes out as a wireframe of itself. Nothing is culled while the
+## eye is overhead — no cell of a body seen from above faces away from it.
+func _shows(lateral: float) -> bool:
+	if not _solid:
+		return true
+	var rise: float = sqrt(maxf(1.0 - lateral * lateral, 0.0))
+	return (rise if _cos_spin >= 0.0 else -rise) * _cos_spin - lateral * _sin_spin > 0.0
 
 
 ## Material grain, on the same rule the field uses: skin is read as one membrane
@@ -367,22 +614,25 @@ func _draw_grain(grid: TissueGrid) -> void:
 			var top: int = CreatureView.top_layer(p.hp, cell * TissueGrid.LAYERS, layers)
 			if top != TissueGrid.SKIN and top != TissueGrid.MUSCLE:
 				continue
+			if not _shows(p.row_centre(cell % p.rows)):
+				continue
 			p.corners_of(cell, _quad)
+			p.surfaces_of(cell, _band)
 			var strands: int = clampi(int(_cell_depth() / GRAIN_MIN_CELL), 0, 3)
 			if strands <= 0:
 				continue
 			if top == TissueGrid.SKIN:
 				if cell % p.rows % 2 == 1:
-					_skin_lines.append(to_panel(_quad[0].lerp(_quad[1], 0.5)))
-					_skin_lines.append(to_panel(_quad[3].lerp(_quad[2], 0.5)))
+					_skin_lines.append(_across(0, 1, 0.5))
+					_skin_lines.append(_across(3, 2, 0.5))
 				continue
 			# Fibres thin out with the cell rather than switching off at a size, so a
 			# tapering tail loses its grain the way it loses its width instead of in
 			# bands wherever a column happened to cross the threshold.
 			for strand in range(1, strands + 1):
 				var across: float = float(strand) / float(strands + 1)
-				_muscle_lines.append(to_panel(_quad[0].lerp(_quad[1], across)))
-				_muscle_lines.append(to_panel(_quad[3].lerp(_quad[2], across)))
+				_muscle_lines.append(_across(0, 1, across))
+				_muscle_lines.append(_across(3, 2, across))
 	if not _skin_lines.is_empty():
 		draw_multiline(_skin_lines, CreatureView.COL_SKIN_TENSION, 0.75, true)
 	if not _muscle_lines.is_empty():
@@ -403,16 +653,16 @@ func _draw_holes(grid: TissueGrid) -> void:
 		if p == null or not p.live or p.gone_count == 0:
 			continue
 		for cell in p.cells:
-			if p.gone[cell] == 0:
+			if p.gone[cell] == 0 or not _shows(p.row_centre(cell % p.rows)):
 				continue
 			p.corners_of(cell, _quad)
+			p.surfaces_of(cell, _band)
 			var col: int = cell / p.rows
 			var row: int = cell % p.rows
 			for k in 4:
 				if not _rim(p, col + EDGE_COL[k], row + EDGE_ROW[k]):
 					continue
-				draw_dashed_line(to_panel(_quad[k]), to_panel(_quad[(k + 1) % 4]),
-					COL_HOLE, 0.9, 2.2, true)
+				draw_dashed_line(_corner(k), _corner((k + 1) % 4), COL_HOLE, 0.9, 2.2, true)
 
 
 ## Whether an edge is on the rim of a wound: off the end of the structure, or
@@ -430,23 +680,41 @@ func _draw_lattice(grid: TissueGrid) -> void:
 		if p == null or not p.live:
 			continue
 		for cell in p.cells:
-			if p.gone[cell] != 0:
+			if p.gone[cell] != 0 or not _shows(p.row_centre(cell % p.rows)):
 				continue
 			p.corners_of(cell, _quad)
+			p.surfaces_of(cell, _band)
 			if _cell_depth() < LATTICE_MIN_CELL:
 				continue
 			for k in 4:
-				_lattice.append(to_panel(_quad[k]))
-				_lattice.append(to_panel(_quad[(k + 1) % 4]))
+				_lattice.append(_corner(k))
+				_lattice.append(_corner((k + 1) % 4))
 	if not _lattice.is_empty():
 		draw_multiline(_lattice, COL_LATTICE, 0.5, true)
+
+
+## A point part way along one edge of the cell in `_quad`, lifted onto the surface
+## the edge's own two corners stand at. A body is round, so its skin is nowhere
+## flat across a cell — taking one corner's height for the whole edge would float
+## the grain off the flank exactly where the curvature is steepest.
+func _across(from_corner: int, to_corner: int, along: float) -> Vector2:
+	return project(_quad[from_corner].lerp(_quad[to_corner], along),
+		lerpf(_facing(_band[from_corner]), _facing(_band[to_corner]), along))
+
+
+## Corner `k` of that cell, on the face turned toward the eye.
+func _corner(k: int) -> Vector2:
+	return project(_quad[k], _facing(_band[k]))
 
 
 ## How deep the cell in `_quad` is across the body, on the page. The measure the
 ## two passes above decide by, because it is the direction their marks run
 ## across and therefore the one that runs out of room first.
+##
+## Measured on the page rather than in the world, so a cell foreshortened by the
+## orbit loses its detail on the same rule a cell that is simply small does.
 func _cell_depth() -> float:
-	return _quad[0].distance_to(_quad[1]) * _scale
+	return _corner(0).distance_to(_corner(1))
 
 
 # -------------------------------------------------------------- networks ----
@@ -486,8 +754,11 @@ func _gather_run(grid: TissueGrid, runs: Array[BodyPlan.Conduit],
 	var count: int = run.cells.size()
 	_run.resize(count)
 	_run_gone.resize(count)
+	# At the cell's own centre line, which is where a conduit inside a body is: the
+	# cord threads the vertebrae and the great vessel lies against them, so both run
+	# through the middle of the animal rather than over its back.
 	for i in count:
-		_run[i] = to_panel(p.centre_of(run.cells[i]))
+		_run[i] = project(p.centre_of(run.cells[i]), p.height_of(run.cells[i]))
 		_run_gone[i] = p.gone[run.cells[i]]
 	# Stepped aside before any reversal below, so which flank the vessel lies on
 	# is a fact about the body rather than about which way the blood is going.
@@ -584,15 +855,17 @@ func _draw_organ(grid: TissueGrid, which: int, tint: Color, label: String,
 	if p == null or not p.live:
 		return
 	var centre := Vector2.ZERO
+	var height: float = 0.0
 	var found: int = 0
 	for cell in p.cells:
 		if int(p.organ[cell]) != which or p.gone[cell] != 0:
 			continue
 		centre += p.centre_of(cell)
+		height += p.height_of(cell)
 		found += 1
 	if found == 0:
 		return
-	var at: Vector2 = to_panel(centre / float(found))
+	var at: Vector2 = project(centre / float(found), height / float(found))
 	var health: float = grid.organ(which)
 
 	var radius: float = 7.0
@@ -605,12 +878,15 @@ func _draw_organ(grid: TissueGrid, which: int, tint: Color, label: String,
 
 	if _mono == null:
 		return
-	var text: String = "%s %d%%" % [label, int(round(health * 100.0))]
-	var width: float = _mono.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 8).x
+	# The leader names the organ and nothing else. How much of it is left is on the
+	# ring it is drawn on and read out in words in the drawer — a number here would
+	# be a third statement of the same fact, and the one it spent most of its life
+	# making was "100%".
+	var width: float = _mono.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 8).x
 	var edge: float = minf(maxf(_hi.x + 6.0, at.x + radius + 12.0), size.x - width - 12.0)
 	draw_line(Vector2(at.x + radius + 2.0, at.y), Vector2(edge, at.y),
 		Color(tint, 0.34), 0.7, true)
-	draw_string(_mono, Vector2(edge + 4.0, at.y + 3.0), text,
+	draw_string(_mono, Vector2(edge + 4.0, at.y + 3.0), label,
 		HORIZONTAL_ALIGNMENT_LEFT, -1.0, 8, Color(tint, 0.78))
 
 
@@ -623,13 +899,32 @@ func _draw_hover(grid: TissueGrid) -> void:
 	if p == null or not p.live or _hover_cell >= p.cells:
 		return
 	p.corners_of(_hover_cell, _quad)
+	p.surfaces_of(_hover_cell, _band)
 	for k in 4:
-		draw_line(to_panel(_quad[k]), to_panel(_quad[(k + 1) % 4]), INK, 1.3, true)
+		draw_line(_corner(k), _corner((k + 1) % 4), INK, 1.3, true)
 
 
+## Dragging turns the specimen; moving over it reads a cell. Both are the pointer
+## on the same stage, so which one is happening is decided by whether a button is
+## down and nowhere else.
 func _gui_input(event: InputEvent) -> void:
+	var click := event as InputEventMouseButton
+	if click != null and click.button_index == MOUSE_BUTTON_LEFT:
+		if click.double_click:
+			reset_orbit()
+		_orbiting = click.pressed
+		if click.pressed:
+			_hover_key = ""
+			_hover_cell = -1
+			cell_hovered.emit("", false)
+		accept_event()
+		return
 	var motion := event as InputEventMouseMotion
 	if motion == null:
+		return
+	if _orbiting:
+		orbit_by(motion.relative)
+		accept_event()
 		return
 	_pick(motion.position)
 
@@ -641,33 +936,68 @@ func _on_mouse_exited() -> void:
 		cell_hovered.emit("", false)
 
 
-## Which cell is under the cursor. Tested against the solved quads in world space
-## rather than by inverting the body-space mapping, for the reason the bite query
-## gives: that mapping is curved, tapered and rebuilt every tick, and has no
-## cheap inverse — while the direct test is exact and costs a few hundred
-## comparisons on the frames the pointer actually moves.
+## Which cell is under the cursor.
+##
+## Tested against the cells as they are drawn — each one's own face, projected —
+## rather than by inverting the mapping, for the reason the bite query gives: it is
+## curved, tapered, rebuilt every tick and now turned as well, so it has no cheap
+## inverse, while the direct test is exact and costs a few hundred comparisons on
+## the frames the pointer actually moves.
+##
+## The nearest cell wins rather than the first found, which is the whole difference
+## a rotated specimen makes: from overhead the limbs are simply drawn under the
+## torso, but tipped over, a leg genuinely stands between the eye and the belly and
+## the pointer has to meet the leg.
 func _pick(at: Vector2) -> void:
 	var grid: TissueGrid = tissue()
 	if grid == null or not _fitted:
 		return
-	var world: Vector2 = to_world(at)
-	var order: Array[String] = _patch_order()
-	order.reverse()
-	for key in order:
+	var found_key: String = ""
+	var found_cell: int = -1
+	var nearest: float = -INF
+	for key in _patch_order():
 		var p: TissueGrid.Patch = grid.patch(key)
 		if p == null or not p.live:
 			continue
-		if world.x < p.lo.x or world.x > p.hi.x or world.y < p.lo.y or world.y > p.hi.y:
-			continue
 		for cell in p.cells:
 			p.corners_of(cell, _quad)
-			if not _inside(world, _quad):
+			p.surfaces_of(cell, _band)
+			var lo := Vector2(INF, INF)
+			var hi := Vector2(-INF, -INF)
+			for k in 4:
+				# Inlined, on the same terms as the fit's own walk: this runs over
+				# every cell of the animal on every frame the pointer moves.
+				var turned: Vector2 = (_quad[k] - _anchor).rotated(_rot)
+				var height: float = _facing(_band[k])
+				_turned[k] = turned
+				_heights[k] = height
+				var raised: float = height * _cos_spin - turned.x * _sin_spin
+				_face[k] = _origin + Vector2(
+					turned.x * _cos_spin + height * _sin_spin,
+					turned.y * _cos_tilt - raised * _sin_tilt) * _scale
+				lo = lo.min(_face[k])
+				hi = hi.max(_face[k])
+			# The cell's own box on the page first, which turns almost every cell
+			# away for four comparisons instead of for a winding test apiece.
+			if at.x < lo.x or at.x > hi.x or at.y < lo.y or at.y > hi.y:
 				continue
-			if _hover_key != key or _hover_cell != cell:
-				_hover_key = key
-				_hover_cell = cell
-				cell_hovered.emit(_readout(grid, p, cell), p.gone[cell] != 0)
-			return
+			if not _inside(at, _face):
+				continue
+			var depth: float = 0.0
+			for k in 4:
+				depth += _towards(_turned[k], _heights[k])
+			if depth <= nearest:
+				continue
+			nearest = depth
+			found_key = key
+			found_cell = cell
+	if found_cell >= 0:
+		if _hover_key != found_key or _hover_cell != found_cell:
+			_hover_key = found_key
+			_hover_cell = found_cell
+			var p: TissueGrid.Patch = grid.patch(found_key)
+			cell_hovered.emit(_readout(grid, p, found_cell), p.gone[found_cell] != 0)
+		return
 	if _hover_cell >= 0:
 		_hover_key = ""
 		_hover_cell = -1

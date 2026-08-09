@@ -47,7 +47,11 @@ const FOOD_PER_UNIT: float = TissueGrid.SKIN_HP + TissueGrid.FAT_HP + TissueGrid
 ## floor, so this is a thin band at zero — which is all the vertical layer needs
 ## to know about it. It is what makes carrion reachable by anything standing on
 ## that floor and unreachable by anything that has left it.
-const GROUND_BAND := Vector2(0.0, 6.0)
+##
+## Taken from Volume rather than restated, because a scrap of the same animal
+## lying beside it has to be exactly as reachable: two descriptions of "on the
+## floor" is two things a set of jaws could disagree about.
+const GROUND_BAND := Vector2(0.0, Volume.GROUND_THICKNESS)
 
 const COL_SHADOW := Color("14140f", 0.055)
 const COL_SKIN_TENSION := Color("f3f1ec", 0.045)

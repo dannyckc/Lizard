@@ -36,6 +36,7 @@ godot --path . --editor   # open the editor
 | `F1` | show/hide the tuning panel |
 | `F2` | toggle debug draw |
 | `F3` | switch between the **Field** and **Anatomy** views |
+| drag the specimen | orbit the anatomy view around the creature — roll it off its back, tip the eye off overhead; double-click to look straight down again |
 | `R` | reset |
 | mouse wheel | zoom |
 
@@ -1065,12 +1066,12 @@ slab. The whole of it is a *reading* of a creature; there is no anatomy model
 behind the panel.
 
 The specimen is the creature's own `TissueGrid`. Every quad on it is a cell,
-taken from the world-space corners the lattice re-derives each tick and put
-through one rigid transform — a rotation, a scale and an offset:
+taken from the corners the lattice re-derives each tick and put through one
+transform — a rotation, an orbit, a scale and an offset:
 
 ```gdscript
-func to_panel(world: Vector2) -> Vector2:
-    return _origin + (world - _anchor).rotated(_rot) * _scale
+func project(world: Vector2, height: float) -> Vector2:
+    return _origin + _flatten((world - _anchor).rotated(_rot), height) * _scale
 ```
 
 That is the entire relationship between the drawer and the animal, and it is what
@@ -1082,6 +1083,43 @@ is chewed open here; a leg that has come off is missing from both views because
 it is missing from the lattice they share. The rotation presents it snout-up by
 turning the mean direction of its own spine onto the page — re-orienting the
 animal without straightening it, so the pose survives the presentation.
+
+#### Walking around it
+
+The `height` in that signature is the whole of what the drawer adds to the
+geometry, and it is not new: the lattice has carried a third coordinate per cell
+corner since the bite query needed to tell a knee from a belly. `Patch.surfaces_of`
+hands over the underside and the top of a cell in the same pixels as its `x` and
+`y`, and `_flatten` folds them onto the page from wherever the eye currently is.
+**Drag the specimen to orbit it.** `spin` rolls the eye around the animal's own
+spine, from over the back through the flank to the belly; `tilt` swings it off
+straight-overhead toward the snout; a double-click puts it back. Nothing about
+the creature moves — it is the same pose of the same body seen from somewhere
+else, which is the only kind of rotation a *reading* of a creature is allowed to
+be.
+
+Three things follow from the eye leaving the vertical, and each is skipped
+entirely while it has not, so a specimen nobody has turned costs exactly what it
+did before any of this existed:
+
+* Every cell grows a **second face**. A body seen from anywhere but straight
+  above is closed, so the underside of the shell is drawn as well as the top of
+  it, and the whole set is sorted far-to-near by depth. Painted the other way, a
+  rolled specimen shows its own back through its belly.
+* Every face is **lit off the cross-section it belongs to**. A cell knows where it
+  sits around its own ellipse — the same `sqrt(1 - u²)` the lattice was built with
+  — so the light lands on a body that is round because the body genuinely is, a
+  flank chewed flat stops catching it, and the relief fades in with the turn
+  rather than switching on. Without it a turned animal in its own inks is a black
+  shape rotating: the silhouette moves and nothing inside it does.
+* The **shadow** stops being an offset and becomes the animal's footprint on the
+  ground its own heights are measured from. From overhead the two coincide
+  exactly, which is why it is faked there and only there.
+
+The hit test follows the projection rather than inverting it, and takes the
+*nearest* cell instead of the first found — from overhead the limbs are merely
+drawn under the torso, but tipped over, a leg genuinely stands between the eye
+and the belly and the pointer has to meet the leg.
 
 The colours are not a second palette either. `CreatureView.tissue_color` is the
 one static that decides what a depth stack looks like, and the specimen, the
@@ -1120,10 +1158,47 @@ The rest is what the anatomy stack already computes, drawn where it happens:
 * **Hovering a cell** reads out its region and its stack, layer by layer, listing
   only the layers that cell was built with: `THORAX · SKN 100 FAT 62 MSC 41 BNE 100`.
 
-The four vitals under the layer list are the functional layer's own numbers —
-brain, heart, `BodyState.bleeding`, and how many of the eighteen conduit runs are
-cut off — and the header quotes `tissue.integrity()` against the words the body
-uses for itself, so a collapsed animal says *Collapsed* rather than a percentage.
+#### What it says, and what it stopped saying
+
+Two rules run the readouts, and both are about scanning rather than about taste.
+Anything that is a **proportion is drawn as a bar**, because the eye reads a
+length faster than a number and a column of bars can be taken in at once. And
+**nothing is printed that reads 100% on a healthy animal** — a panel full of
+hundreds is a panel that has to be searched for the one number that moved. What
+is printed instead is what the reading *means*.
+
+* **Composition.** One striped bar carries the whole depth stack, and each tissue
+  row quotes its share of the animal's mass beside a bar of how much of it is
+  still standing. Those are two different questions about the same layer, and the
+  panel is worth having because they come apart: a limb torn off takes muscle and
+  skin with it and leaves the body a larger fraction bone than it started.
+  `TissueGrid.layer_share` answers in hit points, because those are already the
+  game's currency for weight — `Physique.mass` scales the drawn volume by
+  `integrity()`, standing hit points over built ones — so a creature that has lost
+  a third of its tissue weighs a third less and this says which third. Giving each
+  tissue a density of its own here would be a second notion of mass that nothing
+  else in the game agreed with. `MASS` is quoted alongside, because a share is a
+  share *of* something.
+* **Organs.** Brain, heart and blood, each one line: a bar of what it is actually
+  delivering — `consciousness`, `circulation`, `blood` — and a word for the
+  condition it is in. The bar and the word are deliberately about different
+  things, and an intact heart in an animal that has bled out reads STEADY on a bar
+  that is nearly empty, which is the whole story of that death. The words also do
+  what no number could: a brain torn open and a brain perfectly intact in a head
+  with no blood reaching it produce the same fall in consciousness, so the panel
+  says TORN in one case and STARVED in the other. Blood is the one reading quoted
+  as a rate, because it is the one that says what is *about* to happen.
+* **Networks.** The vessel and nerve rows carry mean delivery as a bar and the
+  count of runs cut off as their number, so `9 CUT` beside an empty bar is a body
+  whose supply has been severed at the root rather than starved at the ends.
+* **The header** quotes `tissue.integrity()` as a bar against the words the body
+  uses for itself, so a collapsed animal says *Collapsed* rather than a percentage.
+
+`HEART 100%` and `BRAIN 100%` are gone from the specimen's own leaders too. The
+leader names the organ; how much of it is left is on the ring it is drawn on and
+in words in the drawer, and a number there was a third statement of the same fact
+— the one it spent most of its life making being "100%".
+
 The chips at the bottom right pick which body is on the slab; the world names
 them, since which creature is whose is the world's business and not the HUD's.
 
@@ -1829,10 +1904,17 @@ snout-up, with every station of the animal on the page — the check that fails 
 a creature changes size; that peeling the skin reaches the layer under it, read
 through the same static the field draws with, so a panel that started inking its
 own body is caught; that pointing it at the other creature moves both the specimen
-and every readout; and that a body bitten open stops reading as intact. `RenderSmoke`
-then holds the tab open over a target that has been chewed to the bone and had a
-leg taken off, and fails if the specimen it drew had no holes in it — a clean run
-over an intact body would exercise none of the paths worth smoke-testing.
+and every readout; and that a body bitten open stops reading as intact. It checks
+the composition as a *composition* — the shares have to account for the whole body,
+because the failure worth catching is four unrelated percentages that happen to
+look plausible — and the orbit as a camera: that a height moves nothing while the
+eye is overhead and moves the specimen once it is not, that the animal stays framed
+when it is turned, and that the hit test follows the projection rather than leaving
+a stale grid of hotspots behind the picture. `RenderSmoke` then holds the tab open
+over a target that has been chewed to the bone and had a leg taken off, turns it
+part way through, and fails if the specimen it drew had no holes in it or was never
+turned off the vertical — a clean run flat over an intact body would exercise
+neither the wound rims nor the closed shell, the depth sort and the cast shadow.
 
 `SimTest` drives each preset through idle → walk → turn → pivot → idle and
 asserts that segment lengths hold, bends stay inside the limit, IK bones keep

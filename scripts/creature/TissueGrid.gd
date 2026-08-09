@@ -175,6 +175,28 @@ class Patch extends RefCounted:
 
 	## World positions of every cell corner, rebuilt each tick from the pose.
 	var verts: PackedVector2Array = PackedVector2Array()
+
+	## The third coordinate, rebuilt from the same pose on the same tick.
+	##
+	## A cell is not a tile on a floor — it is a box of flesh somewhere in the
+	## air, and these two arrays are what say where. `mids` is the height of the
+	## middle of each cross-section, one per station, because a body's centre line
+	## does not move up and down across its own width: the neck rises, the back is
+	## level, the leg runs down to the floor, and every corner of a given station
+	## shares that. `halves` is how far the body reaches above and below it at each
+	## corner, which *does* vary across the width, and by a great deal — a body is
+	## round, so it is at its deepest over the spine and tapers to nothing at the
+	## flank. Storing them apart is not a saving; it is the honest shape of the
+	## fact, and it is why a cell out on the flank is the thin sliver it should be
+	## rather than a full-depth slab.
+	##
+	## Together they give every cell an absolute height band, which is the whole
+	## point: `band_of` below is what lets a bite reach a knee and miss the belly
+	## a hand's breadth above it, and what lets a small animal walk through the
+	## gap between the two.
+	var mids: PackedFloat32Array = PackedFloat32Array()
+	var halves: PackedFloat32Array = PackedFloat32Array()
+
 	## Remaining hit points, indexed `cell * layers + layer`.
 	var hp: PackedFloat32Array = PackedFloat32Array()
 	## 1 where the skeleton runs under the cell. Cells without it open into a
@@ -220,6 +242,13 @@ class Patch extends RefCounted:
 	## Conservative world bounds, for rejecting a bite without a cell walk.
 	var lo: Vector2 = Vector2.ZERO
 	var hi: Vector2 = Vector2.ZERO
+	## The same rejection on the third axis: every height any cell of this patch
+	## occupies. A patch is one structure, so this is usually a tight bound — a
+	## leg's is the whole gap under the animal, a head's is a slab at the top of
+	## it — and testing it first means a bite aimed under a belly walks no cells
+	## of the body at all.
+	var zlo: float = 0.0
+	var zhi: float = 0.0
 
 	var full_hp: float = 0.0
 	var remaining_hp: float = 0.0
@@ -235,6 +264,8 @@ class Patch extends RefCounted:
 		cells = cols * rows
 		_stride = rows + 1
 		verts.resize((cols + 1) * _stride)
+		mids.resize(cols + 1)
+		halves.resize((cols + 1) * _stride)
 		hp.resize(cells * layers)
 		bone.resize(cells)
 		region.resize(cells)
@@ -300,22 +331,108 @@ class Patch extends RefCounted:
 
 	## Writes the corners of one cross-section. `half` is the local half-width,
 	## so row 0 lands on one flank and row `rows` on the other.
-	func set_station(station: int, pos: Vector2, perp: Vector2, half: float) -> void:
+	##
+	## `mid` is how high off the ground the middle of this cross-section is and
+	## `thickness` is how far the body reaches above and below it *at the midline*
+	## — the two numbers that turn a ring of corners into a slice of a solid.
+	##
+	## The taper across the width is not a parameter and could not usefully be
+	## one: a cross-section is an ellipse, so the depth at lateral fraction `u` is
+	## the full depth times `sqrt(1 - u²)` and nothing gets to choose otherwise.
+	## That single line is what makes the volume a volume rather than a slab with
+	## a height written on it — the cells over the spine are deep, the cells on
+	## the flank are thin, and a bite skimming the side of an animal takes the
+	## sliver it actually met.
+	func set_station(station: int, pos: Vector2, perp: Vector2, half: float,
+			mid: float = 0.0, thickness: float = 0.0) -> void:
 		var base: int = station * _stride
+		var deep: float = absf(thickness)
+		mids[station] = mid
 		for r in range(_stride):
-			verts[base + r] = pos + perp * (half * (-1.0 + 2.0 * float(r) / float(rows)))
+			var u: float = -1.0 + 2.0 * float(r) / float(rows)
+			verts[base + r] = pos + perp * (half * u)
+			halves[base + r] = deep * sqrt(maxf(1.0 - u * u, 0.0))
 		# Squaring off the cross-section keeps the bounds conservative whatever
 		# way `perp` points, for a fraction of the cost of scanning the corners.
 		if station == 0:
 			lo = Vector2(pos.x - half, pos.y - half)
 			hi = Vector2(pos.x + half, pos.y + half)
+			zlo = mid - deep
+			zhi = mid + deep
 		else:
 			lo = Vector2(minf(lo.x, pos.x - half), minf(lo.y, pos.y - half))
 			hi = Vector2(maxf(hi.x, pos.x + half), maxf(hi.y, pos.y + half))
+			zlo = minf(zlo, mid - deep)
+			zhi = maxf(zhi, mid + deep)
 
 	func centre_of(cell: int) -> Vector2:
 		var i: int = (cell / rows) * _stride + (cell % rows)
 		return (verts[i] + verts[i + 1] + verts[i + _stride] + verts[i + _stride + 1]) * 0.25
+
+	## The height of the cell's own centre line — the third coordinate of
+	## `centre_of`, and so where whatever runs *inside* the body here lies: the cord
+	## in its vertebrae, the great vessel beside them, an organ in the chest.
+	func height_of(cell: int) -> float:
+		var col: int = cell / rows
+		return (mids[col] + mids[col + 1]) * 0.5
+
+	## The heights of the cell's four corners, wound exactly as `corners_of` winds
+	## them: `x` is the underside of the body there, `y` the top surface.
+	##
+	## The pair is what makes a cell a box rather than a tile — between them the two
+	## calls place all eight of its corners, in the same pixels. `band_of` above
+	## answers the same question flattened to one interval, which is all a bite needs
+	## to know; anything drawing the cell as the piece of volume it is needs to know
+	## where each corner of it actually stands.
+	func surfaces_of(cell: int, out: PackedVector2Array) -> void:
+		var col: int = cell / rows
+		var i: int = col * _stride + (cell % rows)
+		var near: float = mids[col]
+		var far: float = mids[col + 1]
+		out[0] = Vector2(near - halves[i], near + halves[i])
+		out[1] = Vector2(near - halves[i + 1], near + halves[i + 1])
+		out[2] = Vector2(far - halves[i + _stride + 1], far + halves[i + _stride + 1])
+		out[3] = Vector2(far - halves[i + _stride], far + halves[i + _stride])
+
+	## The heights this one cell occupies — the third coordinate of `centre_of`,
+	## and the whole reason the two arrays above exist.
+	##
+	## The union over the cell's four corners rather than a value at its middle,
+	## because a cell is a box and something has to clear all of it to pass. Taken
+	## the other way round it would be possible to slip a leg through the corner
+	## of a body, which is not a thing bodies allow.
+	func band_of(cell: int) -> Vector2:
+		var col: int = cell / rows
+		var row: int = cell % rows
+		var i: int = col * _stride + row
+		var near: float = maxf(halves[i], halves[i + 1])
+		var far: float = maxf(halves[i + _stride], halves[i + _stride + 1])
+		return Vector2(
+			minf(mids[col] - near, mids[col + 1] - far),
+			maxf(mids[col] + near, mids[col + 1] + far))
+
+	## The heights a run of columns occupies, as one band. What a consumer working
+	## on the drawn primitives asks — a bone, a foot, the snout cap, one interval
+	## of the torso — because those are runs of columns rather than single cells.
+	##
+	## `to_col` is exclusive, matching `span_solid`, so the two are always asked
+	## about exactly the same piece of animal. What is actually walked is the
+	## cross-sections bounding that range — stations `from_col` through `to_col`
+	## inclusive — so passing one index twice asks about a single cross-section,
+	## which is how to measure the animal's depth somewhere without a sloping cell
+	## reporting the slope as thickness.
+	func column_band(from_col: int, to_col: int) -> Vector2:
+		var first: int = clampi(from_col, 0, cols)
+		var last: int = clampi(to_col, first, cols)
+		var band: Vector2 = Vector2(mids[first], mids[first])
+		for s in range(first, last + 1):
+			var base: int = s * _stride
+			var deep: float = 0.0
+			for r in range(_stride):
+				deep = maxf(deep, halves[base + r])
+			band.x = minf(band.x, mids[s] - deep)
+			band.y = maxf(band.y, mids[s] + deep)
+		return band
 
 	## Nominal side length of a cell — what a chunk shed from it should measure.
 	func extent_of(cell: int) -> float:
@@ -530,30 +647,66 @@ func _fill(p: Patch) -> void:
 func update(creature: Node) -> void:
 	if creature == null or creature.body == null or creature.spine == null:
 		return
-	_update_body(creature.body, creature.spine)
+	# The lattice is posed in three dimensions, so it needs the two things the
+	# pose alone does not carry: how high off the ground this body is holding its
+	# parts, and how deep it is for its width. Both come off the stature that was
+	# solved from the same pose on the same tick — which is also the one the limbs
+	# were drawn against, so the heights here cannot disagree with the positions.
+	_update_body(creature.body, creature.spine, creature.stature,
+		creature.posture.depth_ratio if creature.posture != null else 1.0)
 	if creature.gait == null:
 		return
+	# Everything on a limb is quoted against the creature's own ground, so a body
+	# in the air carries its legs up with it and this is the only place that has
+	# to know.
+	var lift: float = creature.stature.elevation if creature.stature != null else 0.0
 	for limb in creature.gait.limbs:
 		var p: Patch = patch(limb.key)
 		if p != null:
-			_update_limb(p, limb, creature.size_scale)
+			_update_limb(p, limb, creature.size_scale, lift)
 
 
-func _update_body(body: BodyShape, spine: Spine) -> void:
+## Share of the torso the neck occupies — how far back along the trunk the body
+## has finished rising to meet the head.
+##
+## The lattice runs one continuous strip from the snout to the tail tip, so this
+## is where the head's height becomes the back's. It is a real piece of anatomy
+## rather than a blend factor: the cells inside it are the cells of the neck, and
+## what makes a browser able to reach over a fence and a low animal able to bite
+## its throat is that they stand between the two heights rather than at either.
+const NECK_SHARE: float = 0.25
+
+
+func _update_body(body: BodyShape, spine: Spine, stature: Stature,
+		depth_ratio: float) -> void:
 	var p: Patch = patches[BODY_KEY]
 	var last: int = body.last_index
 	if last < 2 or body.widths.size() <= last:
 		return
 	var station: int = 0
 
+	# The two heights the strip runs between, absolute, with whatever the body is
+	# doing about elevation already in them. Read rather than derived, because
+	# Stature has already worked out what the legs are holding this animal at and
+	# a second opinion here could only ever disagree with it.
+	var back: float = 0.0
+	var crown: float = 0.0
+	if stature != null:
+		back = stature.reference + stature.elevation
+		crown = stature.head_height + stature.elevation
+
 	# Snout cap. Spacing the stations by angle puts every outer corner exactly
 	# on the drawn head circle, so the tessellation is inscribed in the
-	# silhouette rather than approximating it from outside.
+	# silhouette rather than approximating it from outside. A head is about as
+	# deep as it is wide, so its thickness is its own radius and the cap is a
+	# hemisphere rather than a disc.
 	for k in HEAD_COLS:
 		var a: float = PI * 0.5 * (float(k) / float(HEAD_COLS))
 		p.set_station(station,
 			body.head.pos + body.head.fwd * (body.head_radius * cos(a)),
 			body.head.perp,
+			body.head_radius * sin(a),
+			crown,
 			body.head_radius * sin(a))
 		station += 1
 
@@ -565,27 +718,34 @@ func _update_body(body: BodyShape, spine: Spine) -> void:
 		var f: float = s - float(i)
 		var perp: Vector2 = spine.perps[i].lerp(spine.perps[i + 1], f)
 		perp = perp.normalized() if perp.length_squared() > 0.000001 else spine.perps[i]
+		var half: float = lerpf(body.widths[i], body.widths[i + 1], f)
+		# Down off the head onto the back over the length of the neck, and level
+		# from there. Smoothstepped rather than linear so the shoulder is a
+		# shoulder: a straight ramp puts a crease at the end of the neck that
+		# every band test downstream would then read as a step in the animal.
+		var mid: float = lerpf(crown, back,
+			smoothstep(0.0, NECK_SHARE, float(k) / float(TORSO_COLS)))
 		p.set_station(station,
 			spine.points[i].lerp(spine.points[i + 1], f),
-			perp,
-			lerpf(body.widths[i], body.widths[i + 1], f))
+			perp, half, mid, half * depth_ratio)
 		station += 1
 
 	# Tail cap: the snout cap mirrored around the last cross-section.
-	var back: Vector2 = -spine.forwards[last]
+	var behind: Vector2 = -spine.forwards[last]
 	var tip_r: float = body.widths[last]
 	for k in range(1, TAIL_COLS + 1):
 		var a2: float = PI * 0.5 * (float(k) / float(TAIL_COLS))
+		var tail_half: float = tip_r * cos(a2)
 		p.set_station(station,
-			spine.points[last] + back * (tip_r * sin(a2)),
+			spine.points[last] + behind * (tip_r * sin(a2)),
 			spine.perps[last],
-			tip_r * cos(a2))
+			tail_half, back, tail_half * depth_ratio)
 		station += 1
 
 	p.live = true
 
 
-func _update_limb(p: Patch, limb: Limb, scale: float) -> void:
+func _update_limb(p: Patch, limb: Limb, scale: float, lift: float) -> void:
 	# Mirrors the widths CreatureView strokes the bones with, so the lattice
 	# covers exactly what is drawn.
 	var upper_half: float = limb.girth(scale) * 0.5
@@ -604,24 +764,47 @@ func _update_limb(p: Patch, limb: Limb, scale: float) -> void:
 	var joint_n: Vector2 = n0 + n1
 	joint_n = joint_n.normalized() if joint_n.length_squared() > 0.000001 else n0
 
+	# A limb is the one structure that spans the whole gap under an animal, and
+	# these three numbers are that gap: the socket the body holds it by, the joint
+	# halfway down, and the foot on the floor. Every station between them takes
+	# the height its own position along the bone implies, so a leg's cells are a
+	# genuine column of flesh from the shoulder to the ground rather than a shape
+	# with one height stamped on it. That is what makes the middle of a leg
+	# bitable by something that can reach neither the belly above it nor the foot
+	# below.
+	#
+	# The chain is drawn foreshortened — `joints` is `plan` seen through the
+	# perspective — but the heights are not projected at all. They are the real
+	# ones, in the same pixels as x and y, which is exactly right: the picture is
+	# allowed to be a picture, and the volume underneath it is not.
+	var hip: float = limb.heights[0] + lift
+	var knee: float = limb.heights[1] + lift
+	var toe: float = limb.heights[2] + lift
+
 	var span: int = LIMB_BONE_COLS / 2
 	var station: int = 0
 	for k in range(span):
+		var t0: float = float(k) / float(span)
 		p.set_station(station,
-			limb.joints[0].lerp(limb.joints[1], float(k) / float(span)), n0, upper_half)
+			limb.joints[0].lerp(limb.joints[1], t0), n0, upper_half,
+			lerpf(hip, knee, t0), upper_half)
 		station += 1
-	p.set_station(station, limb.joints[1], joint_n, lerpf(upper_half, lower_half, 0.5))
+	var joint_half: float = lerpf(upper_half, lower_half, 0.5)
+	p.set_station(station, limb.joints[1], joint_n, joint_half, knee, joint_half)
 	station += 1
 	# The lower bone flares out into the foot, so the ankle is continuous with
 	# the foot circle instead of stepping into it.
 	for k in range(1, span + 1):
 		var t: float = float(k) / float(span)
+		var shaft: float = lerpf(lower_half, foot_r, t)
 		p.set_station(station,
-			limb.joints[1].lerp(limb.joints[2], t), n1, lerpf(lower_half, foot_r, t))
+			limb.joints[1].lerp(limb.joints[2], t), n1, shaft,
+			lerpf(knee, toe, t), shaft)
 		station += 1
 	for k in range(1, LIMB_FOOT_COLS + 1):
 		var a: float = PI * 0.5 * (float(k) / float(LIMB_FOOT_COLS))
-		p.set_station(station, limb.joints[2] + d1 * (foot_r * sin(a)), n1, foot_r * cos(a))
+		var cap: float = foot_r * cos(a)
+		p.set_station(station, limb.joints[2] + d1 * (foot_r * sin(a)), n1, cap, toe, cap)
 		station += 1
 
 	p.live = true
@@ -649,13 +832,16 @@ func _update_limb(p: Patch, limb: Limb, scale: float) -> void:
 ##
 ## `shed` collects the chunks that broke off, for the world to scatter.
 ##
-## `stature` is the body's own heights. Given one, a cell is only reached if the
-## jaws' band overlaps the band that cell's structure stands in — so a bite aimed
-## at a tall animal's legs takes leg and nothing else, even where the mark's
-## footprint lies squarely across the flank above it. Left null, every cell under
-## the mark is fair game, which is what this did before there was a vertical axis
-## and what it still does for anything that is not a creature with a height.
-func bite(mark: BiteMark, shed: Array, stature: Stature = null) -> float:
+## The vertical half of the test is asked of each *cell* rather than of the
+## animal, and it costs one comparison against a band the lattice already
+## carries. Jaws closed at knee height on a tall animal take the cells of the leg
+## that are at knee height: not the shoulder above them, not the foot below them,
+## and not the belly the mark's footprint happens to lie under. Nothing here
+## knows what a leg or a belly is — it is the same loop over the same cells,
+## asked one more question about each. And because a body's own cells stand at
+## different heights, a bite aimed over the back of a browsing animal takes its
+## neck and leaves the trunk beneath, which no structure-wide band could express.
+func bite(mark: BiteMark, shed: Array) -> float:
 	if mark == null or mark.is_empty():
 		return 0.0
 	var removed: float = 0.0
@@ -670,28 +856,14 @@ func bite(mark: BiteMark, shed: Array, stature: Stature = null) -> float:
 		if mark.hi.x < p.lo.x or mark.lo.x > p.hi.x \
 				or mark.hi.y < p.lo.y or mark.lo.y > p.hi.y:
 			continue
-		# One test per patch where the whole patch stands at one height, and one
-		# per column only on the body — which is the single strip that carries the
-		# head cap and the trunk together and can therefore span two of them.
-		var split_at: int = 0
-		if stature != null:
-			if key == BODY_KEY:
-				var head_reached: bool = mark.reaches(stature.head)
-				var trunk_reached: bool = mark.reaches(stature.torso)
-				if not head_reached and not trunk_reached:
-					continue
-				if head_reached != trunk_reached:
-					split_at = HEAD_COLS if head_reached else -HEAD_COLS
-			elif not mark.reaches(stature.limbs):
-				continue
+		# The same rejection on the third axis, and it is the cheap one: a whole
+		# structure standing clear above or below the jaws is discarded for the
+		# price of two comparisons, and no cell of it is ever visited.
+		if not mark.reaches(Vector2(p.zlo, p.zhi)):
+			continue
 		for cell in p.cells:
-			if split_at != 0:
-				var col: int = cell / p.rows
-				# Positive: only the head cap is in reach. Negative: only the trunk.
-				if split_at > 0 and col >= split_at:
-					continue
-				if split_at < 0 and col < -split_at:
-					continue
+			if not mark.reaches(p.band_of(cell)):
+				continue
 			var at: Vector2 = p.centre_of(cell)
 			# Expanded by the cell's own size, because a tooth finer than the
 			# flesh's grain still marks the cell it landed in — see
@@ -1225,6 +1397,61 @@ func limb_solid(key: String, segment: int) -> float:
 	return p.span_solid(LIMB_BONE_COLS, LIMB_COLS)
 
 
+# ------------------------------------------------------------------ heights ----
+# The vertical counterparts of the three solidity queries above, addressed
+# identically so a caller asking "how much of this is left" and "where is it"
+# is always talking about the same piece of animal. Together they are how the
+# rest of the game gets at the third axis without knowing a cell exists: a
+# contact pass, a hit test and a limb router all work on drawn primitives, and
+# these turn each primitive back into the band its cells actually occupy.
+#
+# Every one of them answers UNBOUNDED before the pose has been sampled. That is
+# the fail-open the whole layer depends on: a band nobody has computed yet must
+# never be allowed to *prevent* an interaction, or a creature would spend its
+# first tick unable to touch anything.
+
+## Heights the torso occupies at normalised position `t` along the clipped spine
+## — the same address `body_solid` takes.
+func body_band(t: float) -> Vector2:
+	var p: Patch = patches[BODY_KEY]
+	if not p.live:
+		return Volume.UNBOUNDED
+	var col: int = HEAD_COLS + clampi(int(t * float(TORSO_COLS)), 0, TORSO_COLS - 1)
+	return p.column_band(col, col + 1)
+
+
+## The same, for the snout cap the head is hit-tested as.
+func head_band() -> Vector2:
+	var p: Patch = patches[BODY_KEY]
+	if not p.live:
+		return Volume.UNBOUNDED
+	return p.column_band(0, HEAD_COLS)
+
+
+## The same, for one drawn limb primitive: 0 = upper bone, 1 = lower, 2 = foot.
+func limb_band(key: String, segment: int) -> Vector2:
+	var p: Patch = patch(key)
+	if p == null or not p.live:
+		return Volume.UNBOUNDED
+	var half: int = LIMB_BONE_COLS / 2
+	if segment == 0:
+		return p.column_band(0, half)
+	if segment == 1:
+		return p.column_band(half, LIMB_BONE_COLS)
+	return p.column_band(LIMB_BONE_COLS, LIMB_COLS)
+
+
+## Every height any part of this animal stands in. The broad-phase answer, and
+## the only one that is about the creature rather than about a place on it.
+func whole_band() -> Vector2:
+	var band: Vector2 = Volume.NOWHERE
+	for key in patches:
+		var p: Patch = patches[key]
+		if p.live:
+			band = Volume.union(band, Vector2(p.zlo, p.zhi))
+	return Volume.UNBOUNDED if band.x > band.y else band
+
+
 # ------------------------------------------------------------- tenacity ----
 # The solidity queries above answer *how far the body still reaches* — which is
 # what a bite, a contact and the renderer need. These answer *how much is left
@@ -1370,6 +1597,31 @@ func layer_left(layer: int) -> float:
 		left += region_hp[i]
 		full += region_full[i]
 	return clampf(left / full, 0.0, 1.0) if full > 0.0 else 1.0
+
+
+## What the animal is currently made *of*: the share of everything still standing
+## in it that is in one layer, 0..1 across the whole depth stack.
+##
+## The sibling of `layer_left`, and the difference between the two is the
+## difference between "how much of its muscle has this creature lost" and "how
+## much of this creature is muscle". The first is a wound; the second is a build,
+## and it moves when a species lays on fat or when a bite takes a limb off.
+##
+## Quoted in hit points because those are already the game's currency for weight:
+## `Physique.mass` scales the drawn volume by `integrity()`, which is standing hit
+## points over the hit points the body was built with — so a creature that has lost
+## a third of its tissue weighs a third less, and this says which third. Giving
+## each tissue a density of its own here would be a second notion of mass that
+## nothing else in the game agreed with.
+func layer_share(layer: int) -> float:
+	var left: float = 0.0
+	var total: float = 0.0
+	for region in BodyPlan.REGIONS:
+		var base: int = region * LAYERS
+		for each in LAYERS:
+			total += region_hp[base + each]
+		left += region_hp[base + layer]
+	return left / total if total > 0.0 else 0.0
 
 
 ## Cells the animal was built out of, and how many of them are now holes.

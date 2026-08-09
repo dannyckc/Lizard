@@ -563,6 +563,14 @@ func _lane(player: Creature, target: Creature, leg: Limb, hold_up: bool = false,
 				limb.visual = limb.ground + limb.rise()
 				limb.solve_stance(target.body.anchors[limb.key], limb.ground,
 					target.params.fabrik_iterations)
+			# Posing a limb by hand is only half of moving it. The heights a leg
+			# occupies live on its tissue cells, and those are re-derived once a
+			# tick from the solve that has already been and gone — so without this
+			# the foot is drawn and solved in the air while its flesh is still
+			# lying on the floor, which is precisely the disagreement the whole
+			# volumetric layer exists to rule out. The tick does the same thing in
+			# the same place, immediately after the gait.
+			target.anatomy.update(target)
 		player.command = drive
 		player._physics_process(TICK)
 		out["aside"] = maxf(out["aside"], absf(player.head_pos.y - aim.y))

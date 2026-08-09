@@ -25,7 +25,13 @@ extends RefCounted
 ## A band that overlaps everything. The default on anything that has not been
 ## given a height, so a caller that knows nothing about elevation behaves exactly
 ## as it did before this layer existed.
-const UNBOUNDED := Vector2(-1.0e9, 1.0e9)
+##
+## Aliased from Volume rather than restated, along with `overlaps` at the bottom
+## of this file. Volume owns what a height band *is* and what it means for two of
+## them to touch; this file owns only which bands a body has. There must be
+## exactly one description of the rule, or the day the two drift apart is the day
+## a creature can bite something it cannot collide with.
+const UNBOUNDED := Volume.UNBOUNDED
 
 ## How far above the resting head a bite reaches on top of the neck's own sweep,
 ## as a multiple of the gape. The jaws are the last link in the chain and they
@@ -160,9 +166,11 @@ func stand_height() -> float:
 
 
 ## Whether two height bands touch at all. The whole vertical rule, and the only
-## thing any consumer of this file is really asking for.
+## thing any consumer of this file is really asking for. See Volume, which owns
+## it; this is here so the many callers that already hold a stature do not have
+## to name a second class to ask the obvious question of it.
 static func overlaps(a: Vector2, b: Vector2) -> bool:
-	return a.x <= b.y and b.x <= a.y
+	return Volume.overlaps(a, b)
 
 
 ## Screen offset for something at world height `h` on this body — see

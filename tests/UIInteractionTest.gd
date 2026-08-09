@@ -113,6 +113,9 @@ func _check_anatomy(hud: EvolutionHUD) -> void:
 	_check(panel._readout.text.begins_with("THORAX"),
 		"hovering the chest did not read out the thorax: " + panel._readout.text)
 
+	_check_composition(panel, main.creature)
+	_check_orbit(panel, main.creature)
+
 	# A second specimen is a second body, not a second label — and the readouts
 	# have to follow it. Bitten first, so the two bodies cannot agree by accident.
 	var target: Creature = main.target_creature
@@ -123,21 +126,26 @@ func _check_anatomy(hud: EvolutionHUD) -> void:
 	_check(panel.creature() == target,
 		"picking the other specimen did not change whose anatomy is on the slab")
 	panel.refresh()
-	var wounded: String = panel._integrity.text
+	var wounded: float = panel._integrity.values[0]
 	_check(panel._note.text.contains("OUT OF"),
 		"the stage note did not report the holes bitten in the specimen: " + panel._note.text)
 	_check(panel._status.text != "Intact",
 		"a specimen with its head chewed open still read as intact")
 	panel.select_specimen(0)
 	panel.refresh()
-	_check(panel._integrity.text != wounded,
+	_check(not is_equal_approx(panel._integrity.values[0], wounded),
 		"switching back to the unbitten specimen kept the bitten one's integrity")
 
 	panel.refresh()
-	summary = "specimen %s · integrity %s · %s · %s · brain %s heart %s bleed %s cut off %s" % [
-		panel._chips[0].text, panel._integrity.text, panel._status.text, panel._note.text,
-		panel._vitals[0].text, panel._vitals[1].text,
-		panel._vitals[2].text, panel._vitals[3].text,
+	summary = ("specimen %s · integrity %.3f · %s · %s · %s · skin %s fat %s muscle %s bone %s"
+		+ " · brain %s heart %s blood %s") % [
+		panel._chips[0].text, panel._integrity.values[0], panel._status.text,
+		panel._note.text, panel._mass.text,
+		panel._rows[0]["value"].text, panel._rows[1]["value"].text,
+		panel._rows[2]["value"].text, panel._rows[3]["value"].text,
+		panel._vitals[AnatomyPanel.BRAIN_VITAL]["word"].text,
+		panel._vitals[AnatomyPanel.HEART_VITAL]["word"].text,
+		panel._vitals[AnatomyPanel.BLOOD_VITAL]["word"].text,
 	]
 	_check(panel._note.text.contains(str(main.creature.anatomy.tissue.cell_count())),
 		"the stage note did not count the creature's own lattice: " + panel._note.text)
@@ -148,6 +156,98 @@ func _check_anatomy(hud: EvolutionHUD) -> void:
 	main._unhandled_input(f3)
 	_check(hud.active_view() == EvolutionHUD.VIEW_FIELD, "F3 did not toggle the view back")
 	_check(hud.panel.visible, "returning to the field did not restore the tuning drawer")
+
+
+## What the drawer says the animal is *made of*, and what its organs are doing.
+##
+## Composition is checked as a composition — the shares have to account for the
+## whole body — because the failure worth catching is a panel quoting four
+## unrelated percentages that happen to look plausible. And the organ rows are
+## checked for what they no longer say: a healthy brain reporting "100%" was the
+## reading that took up a quarter of this panel and told nobody anything.
+func _check_composition(panel: AnatomyPanel, each: Creature) -> void:
+	var grid: TissueGrid = each.anatomy.tissue
+	var total: float = 0.0
+	for layer in AnatomyPanel.COMPOSITION:
+		total += grid.layer_share(layer)
+	_check(is_equal_approx(total, 1.0),
+		"the tissue shares did not account for the whole body: %.4f" % total)
+	_check(grid.layer_share(TissueGrid.MUSCLE) > grid.layer_share(TissueGrid.SKIN),
+		"the specimen read as more skin than muscle")
+
+	panel.refresh()
+	var muscle: String = panel._rows[2]["value"].text
+	_check(muscle.ends_with("%") and muscle != "100%",
+		"the muscle row did not read as a share of the body: " + muscle)
+	_check(panel._rows[AnatomyPanel.NERVES_ROW]["value"].text == "SOUND",
+		"an unbitten creature reported cut nerves: "
+			+ panel._rows[AnatomyPanel.NERVES_ROW]["value"].text)
+	# Every proportion on the panel is a bar, and the bars are on the creature's
+	# own numbers rather than on whatever was last set.
+	_check(is_equal_approx(panel._rows[2]["meter"].values[0],
+		grid.layer_left(TissueGrid.MUSCLE)), "the muscle bar was not the muscle left")
+
+	var brain: String = panel._vitals[AnatomyPanel.BRAIN_VITAL]["word"].text
+	var heart: String = panel._vitals[AnatomyPanel.HEART_VITAL]["word"].text
+	_check(brain == "ALERT" and heart == "STEADY",
+		"a whole animal's organs did not read as working: %s / %s" % [brain, heart])
+	_check(not brain.contains("%") and not heart.contains("%"),
+		"an organ was still quoting a percentage: %s / %s" % [brain, heart])
+	_check(is_equal_approx(panel._vitals[AnatomyPanel.HEART_VITAL]["meter"].values[0],
+		each.anatomy.state.circulation), "the heart bar was not what the heart delivers")
+
+
+## Turning the specimen. It is a camera and nothing else, so the two things worth
+## checking are that it genuinely moves the eye through the third axis — the one
+## the lattice has been carrying all along — and that the animal stays framed and
+## still answers the pointer once it has been turned.
+func _check_orbit(panel: AnatomyPanel, each: Creature) -> void:
+	var view: AnatomyView = panel.view
+	var grid: TissueGrid = each.anatomy.tissue
+	var torso: TissueGrid.Patch = grid.patch(TissueGrid.BODY_KEY)
+	var cell: int = (TissueGrid.HEAD_COLS + 5) * torso.rows + torso.rows / 2
+
+	_check(not view.orbited(), "the specimen did not come up looking straight down")
+	var flat: Vector2 = view.to_panel(each.body.head.pos)
+	# A height that reads the same as the ground from overhead and cannot once the
+	# eye is off it. That is the whole claim the third axis makes.
+	_check(view.project(each.body.head.pos, 40.0).is_equal_approx(flat),
+		"a height moved the specimen while the view was still top-down")
+
+	view.spin = deg_to_rad(25.0)
+	view.tilt = deg_to_rad(20.0)
+	_check(view.orbited(), "orbiting the specimen left it flat")
+	_check(not view.project(each.body.head.pos, 40.0).is_equal_approx(
+		view.to_panel(each.body.head.pos)),
+		"the turned specimen still ignored how high the body stands")
+
+	view._settle(1.0)
+	var stage := Rect2(Vector2.ZERO, view.size)
+	var framed: bool = true
+	for i in range(each.body.last_index + 1):
+		framed = framed and stage.has_point(view.to_panel(each.spine.points[i]))
+	_check(framed, "part of the turned specimen was framed off the stage")
+
+	# The hit test has to follow the projection, or a turned specimen is a picture
+	# with a stale grid of hotspots behind it.
+	var band := PackedVector2Array([Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO])
+	torso.surfaces_of(cell, band)
+	var top: float = (band[0].y + band[1].y + band[2].y + band[3].y) * 0.25
+	view._pick(view.project(torso.centre_of(cell), top))
+	_check(panel._readout.text.begins_with("THORAX"),
+		"the turned specimen misread the cell under the pointer: " + panel._readout.text)
+
+	panel.refresh()
+	_check(panel._orbit.text.contains("SPIN"),
+		"the stage did not report where the eye had been moved to: " + panel._orbit.text)
+
+	view.tilt = 4.0
+	_check(view.tilt <= AnatomyView.TILT_LIMIT,
+		"the eye tipped past the limit, where the animal has no length to frame")
+	view.reset_orbit()
+	_check(not view.orbited() and is_zero_approx(view.spin),
+		"resetting the view did not put the eye back over the animal's back")
+	view._settle(1.0)
 
 
 func _check(condition: bool, message: String) -> void:

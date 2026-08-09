@@ -102,12 +102,14 @@ func update(creature: Node, delta: float = 0.0) -> void:
 ## creature count this direct procedural query is both cheaper and more exact
 ## than rebuilding CollisionPolygon2D nodes every tick.
 ##
-## `reach` is the height band the jaws can bring to bear. A structure is a
-## candidate only if what it occupies vertically overlaps that — and because the
-## three kinds of structure stand at three different heights, the gate answers
-## the interesting question by itself: a low predator's reach clears a tall
-## animal's legs and not its body, so the legs are all the query can return. The
-## horizontal test below is untouched by any of it.
+## `reach` is the height band the jaws can bring to bear, and every primitive
+## below is tested against the band its own cells occupy rather than against one
+## band for the whole animal. That distinction is the difference between "can I
+## reach this creature's legs" and "can I reach *this part of this leg*": a low
+## predator's jaws clear a tall animal's belly, meet the middle of its legs, and
+## pass under the foot it has picked up, and all three answers come out of the
+## same one-line test asked of three different pieces. The horizontal test is
+## untouched by any of it — this is a second `and`, never a replacement.
 func hit_test(creature: Node, bite_center: Vector2, bite_radius: float,
 		reach: Vector2 = Stature.UNBOUNDED) -> Hit:
 	if creature == null or creature.body == null or creature.spine == null or creature.gait == null:
@@ -116,10 +118,12 @@ func hit_test(creature: Node, bite_center: Vector2, bite_radius: float,
 	var best: Hit = null
 	var body: BodyShape = creature.body
 	var spine: Spine = creature.spine
-	var stature: Stature = creature.stature
-	var reach_head: bool = stature == null or Stature.overlaps(reach, stature.head)
-	var reach_torso: bool = stature == null or Stature.overlaps(reach, stature.torso)
-	var reach_limbs: bool = stature == null or Stature.overlaps(reach, stature.limbs)
+	# One cheap rejection for the whole animal before any of the per-part work,
+	# for the same reason the broad phase exists horizontally: something standing
+	# entirely above or below these jaws is not worth walking.
+	if not Volume.overlaps(reach, tissue.whole_band()):
+		return null
+	var reach_head: bool = Volume.overlaps(reach, tissue.head_band())
 
 	# Every primitive below is narrowed to the tissue still standing on it, so
 	# jaws closing on a place a previous bite already emptied find nothing there
@@ -144,14 +148,19 @@ func hit_test(creature: Node, bite_center: Vector2, bite_radius: float,
 	# --- torso: one variable-radius capsule per spine interval -------------
 	# Start at interval 1 because interval 0 sits beneath the explicit head cap.
 	var last: int = mini(body.last_index, spine.points.size() - 1)
-	for i in range(1, last if reach_torso else 1):
+	for i in range(1, last):
 		var a: Vector2 = spine.points[i]
 		var b: Vector2 = spine.points[i + 1]
 		var u: float = segment_u(bite_center, a, b)
 		var axis: Vector2 = a.lerp(b, u)
 		var radial: Vector2 = bite_center - axis
-		var solid: float = tissue.body_solid(
-			(float(i) + u) / float(maxi(last, 1)), radial.dot(spine.perps[i]))
+		var along: float = (float(i) + u) / float(maxi(last, 1))
+		# Per interval, because a trunk is not level: the neck rises to the head
+		# over the front of it, so jaws that can reach a browsing animal's throat
+		# genuinely cannot reach the back three segments behind it.
+		if not Volume.overlaps(reach, tissue.body_band(along)):
+			continue
+		var solid: float = tissue.body_solid(along, radial.dot(spine.perps[i]))
 		if solid <= 0.0:
 			continue
 		var tissue_radius: float = lerpf(body.widths[i], body.widths[i + 1], u) * solid
@@ -172,11 +181,16 @@ func hit_test(creature: Node, bite_center: Vector2, bite_radius: float,
 		best = torso_hit
 
 	# --- limbs: the two drawn bone capsules and circular foot --------------
-	if not reach_limbs:
-		return best
 	for limb in creature.gait.limbs:
 		var widths: Vector2 = _limb_widths(limb, creature.size_scale)
 		for segment in 2:
+			# A leg is the one structure that spans the whole gap under an animal,
+			# so asking about it as a whole throws away everything interesting: the
+			# upper bone is up at the shoulder and the lower is down at the floor.
+			# Asked per bone, low jaws take the shin of an animal whose hip they
+			# could never have got near.
+			if not Volume.overlaps(reach, tissue.limb_band(limb.key, segment)):
+				continue
 			var limb_solid: float = tissue.limb_solid(limb.key, segment)
 			if limb_solid <= 0.0:
 				continue
@@ -198,10 +212,15 @@ func hit_test(creature: Node, bite_center: Vector2, bite_radius: float,
 			limb_hit.limb_u = limb_u
 			best = limb_hit
 
+		# The foot is its own band and it is the lowest thing on the animal: a foot
+		# on the floor is reachable by anything that can reach the floor, and the
+		# same foot at the top of a step is not reachable at all.
+		var foot_reached: bool = Volume.overlaps(reach, tissue.limb_band(limb.key, 2))
 		var foot_radius: float = limb.foot_radius(creature.size_scale) \
 			* tissue.limb_solid(limb.key, 2)
 		var foot_score: float = bite_center.distance_to(limb.joints[2]) - foot_radius
-		if foot_radius > 0.0 and foot_score <= bite_radius and (best == null or foot_score < best.score):
+		if foot_reached and foot_radius > 0.0 and foot_score <= bite_radius \
+				and (best == null or foot_score < best.score):
 			var foot_hit := Hit.new()
 			foot_hit.region_id = "limb:%s:foot" % limb.key
 			foot_hit.kind = LIMB
@@ -218,13 +237,14 @@ func hit_test(creature: Node, bite_center: Vector2, bite_radius: float,
 ## Erodes every cell the bite mark covers, outside-in. Returns the tissue
 ## actually removed, and appends whatever broke off to `shed`.
 ##
-## `stature` is this body's own heights, so the lattice can refuse cells the
-## jaws never reached. The gate belongs down there rather than here because a
-## bite covers an area and can straddle several structures at once — the same
-## reason damage was already resolved by position instead of through the region
-## the hit test named.
-func apply_bite(mark: BiteMark, shed: Array, stature: Stature = null) -> float:
-	return tissue.bite(mark, shed, stature)
+## The mark carries how high the jaws that made it could reach, and every cell
+## in the lattice knows what height it stands at, so the vertical gate resolves
+## itself down there with no third party involved. It belongs at cell level
+## rather than here because a bite covers an area and can straddle several
+## structures at once — the same reason damage was already resolved by position
+## instead of through the region the hit test named.
+func apply_bite(mark: BiteMark, shed: Array) -> float:
+	return tissue.bite(mark, shed)
 
 
 ## Where along `a`->`b` the closest point to `point` lies, clamped to the

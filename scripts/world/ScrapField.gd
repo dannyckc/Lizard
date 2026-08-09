@@ -112,7 +112,16 @@ func scatter(chunks: Array, origin: Vector2, source_id: int) -> void:
 ## A creature never eats its own tissue. Without that rule, jaws closing on a
 ## victim's head shed chunks straight into the victim's own mouth volume, and
 ## being bitten *feeds* you — which is both absurd and a growth exploit.
-func consume(pos: Vector2, radius: float, eater: Node) -> int:
+##
+## `reach` is the band the jaws cover. A scrap has fallen out of an animal and is
+## lying on the floor, so it occupies the ground band and nothing else: a flier
+## overhead is over its food, and a creature whose neck will not bend to the
+## ground cannot scavenge however close it stands. One test, and it is the same
+## one a carcass on the same floor answers.
+func consume(pos: Vector2, radius: float, eater: Node,
+		reach: Vector2 = Stature.UNBOUNDED) -> int:
+	if not Volume.overlaps(reach, Volume.ground()):
+		return 0
 	var eaten: int = 0
 	var r2: float = radius * radius
 	var eater_id: int = eater.get_instance_id() if eater != null else 0

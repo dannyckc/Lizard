@@ -47,6 +47,7 @@ func _process(_delta: float) -> bool:
 	_check_states()
 	_check_leap(player)
 	_check_over_a_charge(player, target)
+	_check_walking_over(player, target)
 	_check_out_of_reach(player, target)
 	_check_legs_only(player, target)
 	_check_browsing(player)
@@ -206,9 +207,16 @@ func _peak_leap(creature: Creature, preset: String) -> float:
 ## Jumping over a charge. Two bodies that are not at the same height are not in
 ## each other's way, so the pair simply has no contact to resolve — which is the
 ## same exemption a grip already gets and lands in the same place.
+##
+## Two Cats, and the pairing is the point rather than a convenience. The contact
+## pass compares the piece of one trunk that is actually meeting the piece of the
+## other, so "on the ground" is not by itself enough to guarantee a collision:
+## two animals of different builds standing on the same floor can have no height
+## in common at all, which is the case checked immediately below this one. Matched
+## builds are the fixture in which the leap is the only variable.
 func _check_over_a_charge(player: Creature, target: Creature) -> void:
 	_apply(player, "Cat")
-	_apply(target, "Lizard")
+	_apply(target, "Cat")
 	player.reset(Vector2.ZERO, 0.0)
 	target.reset(Vector2(70.0, 0.0), PI)
 	for _tick in 10:
@@ -276,6 +284,61 @@ func _charge(player: Creature, target: Creature, leap: bool) -> float:
 	return start.distance_to(target.head_pos)
 
 
+## Walking underneath something that stands higher than you reach.
+##
+## The leap's companion, and the same rule with nothing added to it. An Elephant
+## carries its trunk a whole leg off the ground, so a Lizard standing directly
+## beneath it — crown and all — shares no height with any part of that body and
+## the contact pass has nothing to resolve. Nothing anywhere is about elephants:
+## the two simply have no band in common, exactly as a leaping animal has none
+## with the charge passing under it.
+##
+## What keeps this from being a hole in the world is the legs. A leg spans the
+## whole gap under an animal, so the Elephant's are squarely inside the Lizard's
+## band the entire time — going underneath a body means going between its legs,
+## and that is a contact like any other.
+func _check_walking_over(player: Creature, target: Creature) -> void:
+	_apply(player, "Lizard")
+	_apply(target, "Elephant")
+	player.reset(Vector2.ZERO, 0.0)
+	target.reset(Vector2(500.0, 0.0), PI)
+	for _tick in 20:
+		player._physics_process(TICK)
+		target._physics_process(TICK)
+	_check(target.stature.torso.x > player.stature.trunk.y,
+		"an Elephant's belly (%.1f) did not clear a Lizard's crown (%.1f) — nothing to test"
+			% [target.stature.torso.x, player.stature.trunk.y])
+
+	# Straight underneath, with no tick in between: the claim is about the pass
+	# itself, so nothing else gets to move either body first.
+	player.reset(target.spine.points[4], 0.0)
+	_resettle(player)
+	_check(player._push_out_of_creature(target) == Vector2.ZERO,
+		"a body underneath another one's belly was still shouldered aside by it")
+
+	# The same two bodies in the same two places, one number changed: lift the
+	# Lizard to the Elephant's own chest and the identical pass throws it out hard.
+	# Nothing but the height differs, so nothing but the height can be the reason.
+	player.elevation.height = target.stature.reference
+	_resettle(player)
+	_check(player._push_out_of_creature(target) != Vector2.ZERO,
+		"two bodies in the same place at the same height did not collide at all")
+	player.elevation.reset()
+	_resettle(player)
+
+	# And the legs are still down there. If they were not, "underneath" would mean
+	# "through", and a tall animal would be a hologram on four sticks.
+	var underfoot: bool = false
+	for limb in target.gait.limbs:
+		for segment in 3:
+			underfoot = underfoot or Volume.overlaps(player.stature.trunk,
+				target.anatomy.tissue.limb_band(limb.key, segment))
+	_check(underfoot,
+		"nothing on the taller animal reached down into the shorter one's height")
+	player.reset(Vector2.ZERO, 0.0)
+	target.reset(target.spawn_position, target.spawn_heading)
+
+
 ## Flying beyond the reach of a terrestrial predator. The gate is the same one
 ## that decides everything else — the jaws' band against what they are aimed at —
 ## so being out of reach is not a rule about flight, it is a height.
@@ -296,7 +359,7 @@ func _check_out_of_reach(player: Creature, target: Creature) -> void:
 	# purely horizontal query still finds it, which is what proves the vertical
 	# gate is the thing doing the work rather than the two having drifted apart.
 	target.elevation.height = 400.0
-	target._update_stature()
+	_resettle(target)
 	_check(target.query_bite(mark.center, mark.radius) != null,
 		"the horizontal hit test stopped seeing a creature that only went up")
 	_check(target.query_bite(mark.center, mark.radius, mark.reach) == null,
@@ -307,13 +370,13 @@ func _check_out_of_reach(player: Creature, target: Creature) -> void:
 	# And it works both ways: the flier cannot reach down either, so an attack
 	# from above is a dive rather than a hover.
 	target.params.wing_lift = 1.0
-	target._update_stature()
+	_resettle(target)
 	var from_above: BiteMark = target.bite_mark(target.jaw_point(), target.bite_depth())
 	_check(player.query_bite(from_above.center, from_above.radius, from_above.reach) == null,
 		"a creature 400 px up bit something standing on the ground")
 	target.params.wing_lift = 0.0
 	target.elevation.reset()
-	target._update_stature()
+	_resettle(target)
 
 
 ## A low animal on a tall one. The interesting half of the vertical layer: the
@@ -439,6 +502,19 @@ func _check_flat_world_unchanged(player: Creature, target: Creature) -> void:
 
 
 # ------------------------------------------------------------------ tools ----
+
+## Re-derives everything downstream of a body's height, without advancing time.
+##
+## Two steps rather than one, and the second is the one that is easy to forget:
+## the heights a creature occupies are no longer only in its stature, they are on
+## every cell of its tissue lattice. A test that lifts a body off the ground and
+## re-reads the stature alone leaves the flesh where it was — which is exactly the
+## disagreement the volumetric layer exists to make impossible, so it must not be
+## allowed to happen here either. The tick does the same two in the same order.
+func _resettle(creature: Creature) -> void:
+	creature._update_stature()
+	creature.anatomy.update(creature)
+
 
 func _apply(creature: Creature, preset: String) -> void:
 	creature.set_bite_held(false)

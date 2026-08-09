@@ -570,10 +570,16 @@ func _physics_process(delta: float) -> void:
 	if elevation.landed:
 		foot_landed.emit(spine.points[0],
 			clampf(elevation.impact / 900.0, 0.06, 0.34) * size_scale)
+	# Before the tissue rather than after it, and the order matters now that the
+	# lattice is posed in three dimensions: every cell takes its height from this,
+	# so reading a stature solved on the previous tick would put a leaping
+	# animal's flesh where the animal no longer is. Everything the stature is read
+	# off — the pose, the gait's measured support, the elevation — is already
+	# final by this line, so there is nothing to wait for.
+	_update_stature()
 	anatomy.update(self, delta)
 	_release_severed()
 	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
-	_update_stature()
 	_update_bounds()
 	# Last of the derived state, because it is a consequence of all of it: a body
 	# whose brain has gone out or whose circulation has stopped is no longer
@@ -770,10 +776,12 @@ func _dead_process(delta: float) -> void:
 	body.build(spine, params, size_scale, posture)
 	ragdoll.step(delta, body, gait.limbs, params, size_scale,
 		Callable(self, "_limb_contact_push"))
+	# Before the tissue, for the reason the living path gives: the lattice is
+	# posed against these heights.
+	_update_stature()
 	anatomy.update(self, delta)
 	_release_severed()
 	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
-	_update_stature()
 	_update_bounds()
 
 
@@ -1154,6 +1162,13 @@ func _resolve_contacts() -> void:
 		# about elephants: it is two bands per part, asked in the order the parts
 		# are met. Both parties reach the same answer from the same bands, so
 		# neither ever collides with something that is not colliding with it.
+		#
+		# The trunk test here is only the broad phase — a trunk band is the union
+		# of everything from the belly to the crown, so it rejects the pairs that
+		# are nowhere near each other and admits the rest. Which piece of which
+		# body is actually in the way is settled interval by interval inside, off
+		# the lattice's own cell heights, because a trunk is not level: a raised
+		# head passes over a tail that the same animal's chest would have hit.
 		var push: Vector2 = Vector2.ZERO
 		if Stature.overlaps(stature.trunk, other.stature.trunk):
 			push = _push_out_of_creature(other)
@@ -1229,6 +1244,15 @@ func _push_out_of_creature(other: Creature) -> Vector2:
 			var other_solid: float = other._contact_solid(j, uv.y, other_side, other_last)
 			if self_solid <= 0.0 or other_solid <= 0.0:
 				continue
+			# The third axis, asked of the two pieces of trunk that are actually
+			# meeting rather than of the two animals. Both bodies rise from the
+			# back to the head over the neck, so this is what lets a tall animal
+			# put its muzzle down over a small one's back without shouldering it
+			# aside, and what stops a body that is genuinely underneath another
+			# from being pushed out sideways by it.
+			if not Volume.overlaps(_trunk_band_at(i, uv.x, self_last),
+					other._trunk_band_at(j, uv.y, other_last)):
+				continue
 			var self_radius: float = lerpf(body.widths[i], body.widths[i + 1], uv.x) * self_solid
 			var other_radius: float = lerpf(
 				other.body.widths[j], other.body.widths[j + 1], uv.y) * other_solid
@@ -1291,7 +1315,12 @@ func _push_out_of_limbs(other: Creature) -> Vector2:
 				and grip.holds_limb() and grip.limb_key == limb.key:
 			continue
 		for segment in 3:
-			if not Stature.overlaps(stature.trunk, limb.segment_band(segment, other.size_scale)):
+			# Off the other animal's own lattice, so the leg's heights come from
+			# the same cells a bite on it would find — and with that animal's
+			# elevation already in them, which is what stops a leaping creature's
+			# legs colliding with things at the height it took off from.
+			var leg: Vector2 = other.anatomy.tissue.limb_band(limb.key, segment)
+			if not Stature.overlaps(stature.trunk, leg):
 				continue
 			var solid: float = other.anatomy.tissue.limb_solid(limb.key, segment)
 			if solid <= 0.0:
@@ -1299,9 +1328,12 @@ func _push_out_of_limbs(other: Creature) -> Vector2:
 			var radius: float = limb.foot_radius(other.size_scale) if segment == 2 \
 				else limb.girth(other.size_scale) * (0.5 if segment == 0 else 0.36)
 			# `push_capsule_out_of_body` answers for the capsule; this body is the
-			# one that yields, so it goes the other way.
+			# one that yields, so it goes the other way. The leg's band goes with
+			# it: which of *this* creature's own intervals the leg is standing in
+			# is the question, and the answer is not the same all down the back.
 			var clear: Vector2 = push_capsule_out_of_body(
-				limb.plan[segment], limb.plan[mini(segment + 1, 2)], radius * solid, toward)
+				limb.plan[segment], limb.plan[mini(segment + 1, 2)], radius * solid,
+				toward, leg)
 			if clear.length_squared() > deepest.length_squared():
 				deepest = -clear
 	return deepest
@@ -1354,6 +1386,21 @@ func _contact_solid(segment: int, u: float, side: float, last: int) -> float:
 		return maxf(anatomy.tissue.body_solid(t, -1.0),
 			anatomy.tissue.body_solid(t, 1.0))
 	return anatomy.tissue.body_solid(t, side)
+
+
+## The heights one point along a contact capsule occupies. The vertical
+## counterpart of `_contact_solid`, addressed identically, so the two halves of
+## every contact test are always talking about the same piece of animal.
+##
+## The head cap owns the front half of the first interval here for exactly the
+## reason it does above: it is a separate structure standing at a separate height
+## — up on the end of the neck — and a contact that read it as the front of the
+## trunk would have a browsing animal's chin colliding with things its chest is a
+## body's depth above.
+func _trunk_band_at(segment: int, u: float, last: int) -> Vector2:
+	if segment == 0 and u <= 0.5:
+		return anatomy.tissue.head_band()
+	return anatomy.tissue.body_band((float(segment) + u) / float(maxi(last, 1)))
 
 
 ## Closest parameters on two finite line segments, returned as (u, v). This is
@@ -1434,6 +1481,13 @@ func _limb_contact_push(limb_key: String, limb_segment: int,
 	var solid: float = anatomy.tissue.limb_solid(limb_key, limb_segment)
 	if solid <= 0.0:
 		return Vector2.ZERO
+	# The gait and the ragdoll both solve a limb in the creature's own frame, so
+	# the band arrives measured from this animal's ground rather than the world's.
+	# This is the boundary where it becomes a world band, and it has to be crossed
+	# here rather than at either caller: a leaping creature's legs are as far off
+	# the floor as the rest of it, and a band that forgot to say so would have
+	# them barging through bodies the animal is sailing over.
+	band = Volume.lift(band, stature.elevation)
 	var collision_radius: float = radius * solid
 	var midpoint: Vector2 = (a + b) * 0.5
 	var capsule_bound: float = a.distance_to(b) * 0.5 + collision_radius
@@ -1464,10 +1518,16 @@ func _limb_contact_push(limb_key: String, limb_segment: int,
 		# that animal's trunk. A foot swinging through the air over something small
 		# is not touching it, and a leg reaching down past a tall animal's belly to
 		# the floor is touching everything down there.
+		#
+		# Broad phase only: the trunk band is the union of everything from that
+		# animal's belly to its crown, so passing it means "somewhere on that body
+		# is at my height" rather than "that body is". Which part is settled inside
+		# `push_capsule_out_of_body`, interval by interval, off the band this same
+		# piece of leg carries.
 		if not Stature.overlaps(band, other.stature.trunk):
 			continue
 		var push: Vector2 = other.push_capsule_out_of_body(
-			a, b, collision_radius, bounds_center - other.bounds_center)
+			a, b, collision_radius, bounds_center - other.bounds_center, band)
 		if push.length_squared() > deepest.length_squared():
 			deepest = push
 	return deepest
@@ -1477,8 +1537,17 @@ func _limb_contact_push(limb_key: String, limb_segment: int,
 ## for limb bones and feet, including the mid-segment crossings that a point
 ## query cannot see. `preferred` resolves the otherwise ambiguous direction
 ## when the two capsule axes intersect exactly.
+##
+## `band` is the heights the capsule occupies, and it is tested against the
+## heights of each interval of *this* body rather than against the body as a
+## whole. That is what makes the gap between a tall animal's belly and the floor
+## a real gap: a low creature's back passes under the chest and is stopped by the
+## neck sloping down in front of it, from one rule asked twenty times instead of
+## one rule asked once. Left unbounded, every interval is fair game — the flat
+## behaviour, for a caller with no height to declare.
 func push_capsule_out_of_body(a: Vector2, b: Vector2, radius: float,
-		preferred: Vector2 = Vector2.ZERO) -> Vector2:
+		preferred: Vector2 = Vector2.ZERO,
+		band: Vector2 = Stature.UNBOUNDED) -> Vector2:
 	if body == null or spine == null or radius <= 0.0:
 		return Vector2.ZERO
 	var last: int = mini(body.last_index, spine.size() - 1)
@@ -1507,6 +1576,8 @@ func push_capsule_out_of_body(a: Vector2, b: Vector2, radius: float,
 		var side: float = normal.dot(spine.perps[i])
 		var solid: float = _contact_solid(i, uv.y, side, last)
 		if solid <= 0.0:
+			continue
+		if not Volume.overlaps(band, _trunk_band_at(i, uv.y, last)):
 			continue
 		var body_radius: float = lerpf(body.widths[i], body.widths[i + 1], uv.y) * solid
 		var overlap: float = radius + body_radius - distance
@@ -2418,7 +2489,7 @@ func query_bite(center: Vector2, radius: float,
 ## hands whatever came loose to the world.
 func apply_bite(mark: BiteMark) -> float:
 	var shed: Array = []
-	var removed: float = anatomy.apply_bite(mark, shed, stature)
+	var removed: float = anatomy.apply_bite(mark, shed)
 	if removed <= 0.0:
 		return 0.0
 	tissue_damaged.emit(anatomy.tissue.integrity())
