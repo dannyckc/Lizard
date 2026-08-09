@@ -52,6 +52,10 @@ var _topology_count: int = -1
 func _ready() -> void:
 	_rng.randomize()
 	z_index = 1  # above Main's ground grid, below the creature
+	# Forage is a thing in the world with a height, so it can be pointed at like
+	# any other — a pellet up in the air is a target a browser can be told to reach
+	# for and a sprawled animal cannot.
+	add_to_group("forage")
 	_ring_directions.resize(RING_SEGMENTS)
 	for k in RING_SEGMENTS:
 		var angle: float = TAU * float(k) / float(RING_SEGMENTS)

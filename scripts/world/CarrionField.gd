@@ -268,6 +268,10 @@ func _ready() -> void:
 	# ground is a bigger thing than a fleck of meat and a smaller one than an
 	# animal standing on it.
 	z_index = 3
+	# Findable by anything resolving a cursor into a target, on the same terms the
+	# creatures are — meat competes for a click exactly as it already competes for
+	# a bite, and by the same score.
+	add_to_group("carrion")
 
 
 func _init() -> void:

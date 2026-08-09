@@ -63,6 +63,18 @@ var whole: Vector2 = Vector2.ZERO
 var trunk: Vector2 = Vector2.ZERO
 ## What these jaws can be brought to bear on.
 var bite: Vector2 = Vector2.ZERO
+## How much further this animal could still fold its legs — the difference
+## between the height it is standing at and the height it would be at with the
+## limbs drawn up as tight as the IK will solve them.
+##
+## It is the crouch, quoted as a distance rather than as an action, and it is the
+## whole of why the downward half of `bite` is no longer clamped to the floor. An
+## animal reaching for something below itself bends its legs; how far it gets is
+## how much leg it has to bend, which is a fact about the body rather than a
+## concession made on its behalf. A sprawled creature has almost none and needs
+## almost none — its belly is already on the floor. A columnar one has a great
+## deal, and spends every bit of it getting its mouth down to the ground.
+var fold: float = 0.0
 ## Where the ground plane sits for this creature right now — zero, unless it is
 ## off it.
 var elevation: float = 0.0
@@ -110,10 +122,18 @@ func update(posture: Posture, body: BodyShape, p: CreatureParams, scale: float,
 	# falls back to the uncapped trait, which is what a body with no locomotion
 	# solved yet has to use.
 	var reach: float = p.stance_reach if extension < 0.0 else extension
-	clearance = posture.clearance(
-		maxf(p.leg_length, p.arm_length) * scale * reach) if standing else 0.0
+	var bone: float = maxf(p.leg_length, p.arm_length) * scale
+	clearance = posture.clearance(bone * reach) if standing else 0.0
 	if standing and held >= 0.0:
 		clearance = held
+	# How much of that height the animal could still take out of its own legs. Off
+	# the same floor the IK solver uses, so a crouch can never ask for a leg
+	# shorter than the chain may be drawn at. Nothing to fold when the body is not
+	# standing on its legs: a carcass is already down, and an animal in the air is
+	# not pushing against anything, so bending its knees moves nothing but its
+	# knees.
+	fold = maxf(clearance - posture.clearance(bone * Limb.REACH_MIN), 0.0) \
+		if standing and elevation <= 0.0 else 0.0
 	# Depth is read off the widest part of the trunk rather than off an average:
 	# an animal is as tall through the chest as its chest is, and the taper fore
 	# and aft of that is the silhouette's business rather than the height's.
@@ -144,17 +164,29 @@ func update(posture: Posture, body: BodyShape, p: CreatureParams, scale: float,
 	# What the jaws reach. The neck sweeps them either side of where the head
 	# rests, and the gape carries them a little further again.
 	var sweep: float = posture.neck_reach * body_length + gape * GAPE_REACH
-	var low: float = head_height - sweep
 	var high: float = head_height + sweep
-	# Standing on the ground, an animal can always put its mouth on it: it
-	# crouches, it lowers its shoulder, it kneels. None of that is simulated and
-	# none of it needs to be, because the interesting direction is upward — how
-	# high a set of jaws reaches is what decides whether prey is out of reach,
-	# and the floor is only ever the floor. Off the ground that stops being true
-	# and the clamp goes with it, which is exactly why a flier has to come down
-	# to something before it can bite it.
-	if elevation <= 0.0:
-		low = minf(low, 0.0)
+	# Downward is three movements rather than one, and it used to be a clamp: an
+	# animal standing on the ground was simply granted the ground, on the grounds
+	# that the interesting direction was upward. It is not, and the clamp was
+	# hiding the most legible height mechanic in the game — a tall animal reaching
+	# for something at its feet.
+	#
+	# So the three, each of them a length this body already has:
+	#
+	#   * the head comes off its perch. A neck that holds a head above the
+	#     shoulder can also bring it back down to one, and that descent is free —
+	#     which is why the sweep is measured from the *back* rather than from the
+	#     raised head, and why a long neck helps in both directions.
+	#   * the neck sweeps below that, by its own reach and the gape.
+	#   * and the legs fold, by however much of themselves they have left to give.
+	#
+	# A sprawled animal gets to the floor on the second alone and never notices;
+	# a columnar one needs all three and only just manages; and an animal built
+	# tall on a short neck genuinely cannot reach its own feet, which is a real
+	# answer rather than a bug. Off the ground the legs stop counting — see
+	# `fold` — which is exactly why a flier has to come down to something before it
+	# can bite it.
+	var low: float = reference - sweep - fold
 	bite = Vector2(low, high) + Vector2(elevation, elevation)
 
 

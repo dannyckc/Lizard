@@ -120,6 +120,10 @@ var support: float = 0.0
 ## placed four feet, and until then nothing may read them: a body with no gait
 ## solved has no feet to be standing on and has to fall back on its posture.
 var measured: bool = false
+## How extended the legs are actually standing this tick — the locomotion's own
+## answer, less whatever the animal is folding away to get its mouth lower. Read
+## rather than set by anything outside: it is what the crouch *is*.
+var stance_extension: float = 0.78
 
 
 func setup() -> void:
@@ -143,11 +147,19 @@ func setup() -> void:
 ## there is no ground under the feet at all. Both are consequences of the 2.5D
 ## layer above this one; left at their defaults every line below runs exactly as
 ## it did before it existed.
+##
+## `surface_query` is what is under a foot: handed a plan position, a foot radius
+## and the highest that foot could be put down, it answers with the height of the
+## surface there. Left out, the floor is at zero everywhere, which is the flat
+## world this solver was written in and every line below still runs unchanged in
+## it. `crouch` is how much of its own fold the animal is spending on getting
+## lower — see `_stance_extension`.
 func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		p: CreatureParams, scale: float,
 		collision_query: Callable = Callable(),
 		state: BodyState = null,
-		reference: float = 0.0, airborne: bool = false) -> void:
+		reference: float = 0.0, airborne: bool = false,
+		surface_query: Callable = Callable(), crouch: float = 0.0) -> void:
 	landed.clear()
 	if body.anchors.is_empty():
 		return
@@ -170,7 +182,14 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 	# glides. Every other number the stance is built from is already quoted this
 	# way, so the rest pose comes out consistent: extended this far, at this
 	# angle, is one leg described once.
-	var rest: float = loco.extension
+	#
+	# ...and then folded, by however much of its fold the animal is spending on
+	# being lower. Nothing else about the crouch is written anywhere: a leg held
+	# at less of itself is a shorter leg, so the stance comes in, the body comes
+	# down with it, and the bands, the silhouette and the picture follow because
+	# every one of them is read off the height the feet are holding.
+	var rest: float = _stance_extension(crouch)
+	stance_extension = rest
 	var wants := Vector2(posture.clearance(arm * rest), posture.clearance(leg * rest))
 	if not measured:
 		# Somewhere for the first limb solve to hang its sockets from. Replaced by
@@ -316,10 +335,13 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		# behaviour was already here — all a severed nerve does is stop the limb
 		# taking the step that would have ended it.
 		#
-		# Placement is always decided for a foot on the floor, whatever the foot is
-		# doing at this instant: a plant happens on the ground, so the reach that
-		# has to be there is the reach down to it.
-		limb.foot_height = 0.0
+		# Placement is always decided for a foot on the ground, whatever the foot is
+		# doing at this instant: a plant happens on a surface, so the reach that has
+		# to be there is the reach down to whatever is under it. Which is no longer
+		# always the floor — it is the top of whatever this foot is standing on, and
+		# on the open plain that is the same number it always was.
+		limb.surface = _surface_under(limb, limb.planted, scale, surface_query)
+		limb.foot_height = limb.surface
 		# Against what the joint can do rather than against the stride, and the two
 		# are different questions. `sweep_limit` is how far this limb *walks*: it is
 		# where the gait may choose to put a foot down. Where a foot may legally
@@ -337,7 +359,7 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 			continue
 		if not limb.stepping:
 			limb.ground = limb.planted
-			limb.foot_height = 0.0
+			limb.foot_height = limb.surface
 			limb.visual = limb.planted + limb.rise()
 			continue
 
@@ -350,22 +372,35 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		var aim: Vector2 = limb.clamp_to_envelope(
 			body.anchors[limb.key], _landing_spot(limb, remaining))
 		limb.step_to = limb.step_to.lerp(aim, retarget)
+		# The spot keeps moving, so what is under it keeps changing: a foot aimed
+		# past the edge of a ledge while it is in the air is a foot that is about to
+		# be put down on the floor instead, and it has to arrive at the right height
+		# or the leg lands inside the ground.
+		limb.step_to_surface = _surface_under(limb, limb.step_to, scale, surface_query)
 
 		limb.step_t += delta / maxf(limb.step_duration, 0.001)
 		if limb.step_t >= 1.0:
 			limb.step_t = 1.0
 			limb.stepping = false
 			limb.planted = limb.step_to
+			limb.surface = limb.step_to_surface
 			landed.append(limb.planted)
 
 		# Smoothstep along the ground path (ease out of and into the plant) with
 		# a sine arc for the height — a half period is exactly one hop.
 		var eased: float = smoothstep(0.0, 1.0, limb.step_t)
 		limb.ground = limb.step_from.lerp(limb.step_to, eased)
+		# Two terms now, and only the second is the step. The first is the ramp from
+		# the surface the foot left to the one it is arriving at, which is what makes
+		# a step onto a ledge a step *up* rather than a step that ends underground —
+		# and on flat ground the two surfaces are equal and it contributes nothing,
+		# which is why the arc below is unchanged.
+		#
 		# Clearance is the joint's own doing, so it is priced off what is still
 		# working the knee rather than off the limb as a whole. A leg that can
 		# still be swung from the shoulder but cannot flex below it scuffs.
-		limb.foot_height = sin(limb.step_t * PI) * _step_clearance(limb) \
+		limb.foot_height = lerpf(limb.step_from_surface, limb.step_to_surface, eased) \
+			+ sin(limb.step_t * PI) * _step_clearance(limb) \
 			* (0.45 + 0.55 * limb.pace) * lerpf(LIFT_FLOOR, 1.0, limb.flex)
 		limb.visual = limb.ground + limb.rise()
 
@@ -435,7 +470,7 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		if busy[1 - limb.group]:
 			continue
 
-		_start_step(limb, body, p)
+		_start_step(limb, body, p, scale, surface_query)
 		busy[limb.group] = true
 		aloft += 1
 
@@ -455,7 +490,7 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 			if not _can_step(other):
 				continue
 			if other.error > other.stride * (1.0 - coupling):
-				_start_step(other, body, p)
+				_start_step(other, body, p, scale, surface_query)
 				aloft += 1
 
 	# --- 4. let the body down onto the feet that were just placed -------------
@@ -537,19 +572,34 @@ func _carry_body(delta: float, p: CreatureParams, wants: Vector2) -> void:
 ## it simply stands at the height the stance asks for and extends as required,
 ## which is what an animal is doing when it carries a head steady over rough
 ## ground. Neither alone is a walk.
+##
+## `wants` is a *clearance* rather than a height — how far this pair of legs likes
+## to hold its end of the body above whatever it is standing on — so it is quoted
+## against each foot's own surface rather than against the world's floor. On flat
+## ground every surface is zero and the two are the same number, which is why
+## nothing about this function changed for an animal on a plain. On a ledge they
+## are not: a leg standing six pixels up holds the shoulder six pixels higher, and
+## a levelling term that had forgotten to say so would cap the body at the height
+## it stands at on the floor and quietly pin the animal to the ground it had just
+## climbed off.
 func _pair_support(pair: int, p: CreatureParams, wants: float) -> float:
 	var held: float = INF
+	var floor_height: float = INF
 	for limb in limbs:
 		if limb.pair != pair or _skip(limb) or limb.stepping:
 			continue
 		if limb.carry < SUPPORT_MIN:
 			continue
-		var vault: float = limb.support_height(loco.extension)
-		var level: float = minf(wants, limb.support_height(_max_reach(limb, p)))
+		var vault: float = limb.support_height(stance_extension)
+		var level: float = minf(limb.surface + wants,
+			limb.support_height(_max_reach(limb, p)))
 		held = minf(held, lerpf(vault, level, loco.absorbed))
+		floor_height = minf(floor_height, limb.surface)
 	if is_inf(held):
 		return wants
-	return maxf(held, wants * SUPPORT_FLOOR)
+	# The sag is measured from the ground under the feet for the same reason the
+	# stance is. A body crouching on a ledge crouches toward the ledge.
+	return maxf(held, floor_height + wants * SUPPORT_FLOOR)
 
 
 ## The highest one pair of legs could possibly hold its end of the body, with the
@@ -645,14 +695,50 @@ func _swing_fan(limb: Limb, swing: float) -> float:
 	return swing * lerpf(SWING_FAN_FLOOR, 1.0, limb.reach)
 
 
-func _start_step(limb: Limb, body: BodyShape, p: CreatureParams) -> void:
+func _start_step(limb: Limb, body: BodyShape, p: CreatureParams, scale: float,
+		surface_query: Callable) -> void:
 	limb.step_from = limb.planted
+	limb.step_from_surface = limb.surface
 	limb.step_index += 1
 	limb.step_duration = _step_duration(limb)
 	limb.step_to = limb.clamp_to_envelope(
 		body.anchors[limb.key], _landing_spot(limb, limb.step_duration))
+	limb.step_to_surface = _surface_under(limb, limb.step_to, scale, surface_query)
 	limb.step_t = 0.0
 	limb.stepping = true
+
+
+## How high the ground is where this foot is being put down.
+##
+## The ceiling handed to the query is the one anatomical fact in it, and it is the
+## same one `Traversal` makes its first condition of a climb: a foot goes as high
+## as the joint that swings it and no higher, so anything whose top is above the
+## socket is not a surface this leg can stand on and the query answers with
+## whatever is underneath instead. That is the difference between stepping onto a
+## ledge and walking into a wall, and it is decided here — per foot, per tick, off
+## the height that foot's own shoulder is currently being carried at — rather than
+## by anything that knows what the obstacle is.
+##
+## Zero with no query attached, which is the flat floor this solver was written
+## against and the behaviour every line of it still has without one.
+func _surface_under(limb: Limb, at: Vector2, scale: float, query: Callable) -> float:
+	if not query.is_valid():
+		return 0.0
+	var foot: float = limb.foot_radius(scale)
+	var answer: Variant = query.call(at, foot, limb.socket_height + foot)
+	return (answer as Vector2).x if answer is Vector2 else 0.0
+
+
+## How extended the legs stand this tick: what the animal's locomotion asks for,
+## folded toward the tightest a limb may be drawn up by however much crouch is
+## being spent.
+##
+## `Limb.REACH_MIN` is the floor rather than a chosen one — it is the shortest the
+## two-bone chain may be solved to anywhere in the game, so "fully folded" is the
+## same number here and in the IK, and a crouch can never ask for a leg the solver
+## would then refuse to draw.
+func _stance_extension(crouch: float) -> float:
+	return lerpf(loco.extension, Limb.REACH_MIN, clampf(crouch, 0.0, 1.0))
 
 
 ## How high this limb picks its foot up at the top of a step. A real height in

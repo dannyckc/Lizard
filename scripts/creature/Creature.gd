@@ -124,6 +124,40 @@ const HEAD_LOOK_DEADZONE_SQ: float = 36.0
 var head_look_angle: float = 0.0
 var head_look_dir: Vector2 = Vector2.RIGHT
 
+# ------------------------------------------------------------------- aim ----
+# What this creature has been pointed at, and what its body is doing about it.
+# Written from outside — the habitat resolves a cursor into a target and hands it
+# over — because which of the several things under a pointer was meant is a
+# question about the world rather than about any one animal in it. What the
+# animal does with it is entirely its own business, and is the two lines below.
+
+## The selected target: a place, a height, and the structure of whichever body is
+## there. Null when nothing has been pointed at, which is the state every line
+## downstream falls back to and behaves exactly as it did before aiming existed.
+var aim: Reticle.Pick = null
+## Whether the jaws can be got onto it, and what the body has to do to manage it.
+## Re-solved every tick, because both halves of it move.
+var aim_reach: Reach = null
+## How much of its fold the animal is currently spending, 0..1. Eased rather than
+## snapped: legs bend at a rate, and a body that arrived at a crouch instantly
+## would read as a puppet being scaled.
+var crouch: float = 0.0
+## How quickly it gets there. Fast enough to feel like reaching for something,
+## slow enough that the settle underneath it is not fighting a step function.
+const CROUCH_RESPONSE: float = 6.0
+
+## The world's terrain, found once and kept. Null in a habitat that has none, and
+## every query against it is guarded, so a scene with no obstacles behaves as a
+## flat plane exactly as it always did.
+var _terrain_field: Terrain = null
+var _terrain_looked: bool = false
+## Which other bodies this creature currently has a foot on. One tick stale — it
+## is written while the gait places the feet and read by the contact pass at the
+## top of the following tick — and deliberately so, for the same reason the
+## physique is: it is a fact about where the animal is standing, not about this
+## instant.
+var _standing_on: Dictionary = {}
+
 var food_eaten: int = 0
 ## Uniform scale on the whole creature — body, limbs, stride, reach and bite all
 ## read off it. Growth has been taken out for now, so it is pinned at 1.0 and
@@ -429,6 +463,10 @@ func reset(at: Vector2 = Vector2.ZERO, facing: float = 0.0) -> void:
 	head_look_dir = move_dir
 	food_eaten = 0
 	command = MovementInput.Command.new()
+	aim = null
+	aim_reach = null
+	crouch = 0.0
+	_standing_on = {}
 	elevation.reset()
 	anatomy.reset()
 	bite_cooldown_remaining = 0.0
@@ -556,9 +594,15 @@ func _physics_process(delta: float) -> void:
 	# too slowly to measure its own travel direction.
 	var gait_dir: Vector2 = -move_dir if speed < -0.01 \
 		or (absf(speed) <= 0.01 and command.throttle < 0.0) else move_dir
+	# What the body is being asked to reach for, and how far it has to bend to
+	# manage it. Before the gait, because the crouch is spent through the legs:
+	# it is a shorter stance rather than a pose laid over a standing one, so the
+	# feet, the height, the bands and the picture all follow it in the same solve.
+	_update_aim(delta)
 	gait.update(delta, body, gait_dir, speed_norm, params, size_scale,
 		Callable(self, "_limb_contact_push"), anatomy.state,
-		stature.reference, elevation.is_airborne())
+		stature.reference, elevation.is_airborne(),
+		Callable(self, "_surface_under_foot"), crouch)
 	_carry_limp_limbs(delta)
 	for contact in gait.landed:
 		var footfall: float = (0.07 + minf(0.11, absf(speed) / 1600.0)) * size_scale
@@ -877,6 +921,15 @@ func _update_head_look(delta: float) -> void:
 	# drawn head would drift off the place the tether is anchored to.
 	var aim_active: bool = command.aim_active
 	var aim_world: Vector2 = command.aim_world
+	# A selected target beats the raw cursor, and the difference is the vertical
+	# layer showing up in the one place it is easiest to forget. A cursor is a
+	# point in the *picture*; a limb is drawn well below the body it stands under,
+	# so pointing the head at the pixel would aim it at the empty floor behind an
+	# animal rather than at the leg the player picked out. `aim.at` is where that
+	# leg actually stands, which is where a mouth has to go to reach it.
+	if aim != null:
+		aim_active = true
+		aim_world = aim.at
 	if is_bite_latched() and grip != null and grip.is_alive():
 		aim_active = true
 		aim_world = grip.anchor()
@@ -1125,6 +1178,19 @@ func _resolve_contacts() -> void:
 	# it this creature's mass makes it responsible for.
 	var deepest: Vector2 = Vector2.ZERO
 	var deepest_share: float = CONTACT_SHARE
+	# The world's own solids first, and this creature does all of the moving for
+	# them: a rock is not negotiating. It goes through the same brake as everything
+	# else, so walking into one stops the animal rather than grinding it along.
+	var wall: Vector2 = _push_out_of_terrain()
+	if wall != Vector2.ZERO:
+		_translate_contact(wall.limit_length(MAX_CONTACT_PUSH))
+		deepest = wall
+		deepest_share = 1.0
+	# Which bodies this creature had a foot on is re-decided as the feet are
+	# placed, so the record is cleared here — at the top of the tick that will
+	# read last tick's answer and then write this one's.
+	var mounted: Dictionary = _standing_on
+	_standing_on = {}
 	for node in get_tree().get_nodes_in_group("creatures"):
 		var other := node as Creature
 		if other == null or other == self or other.body == null or other.spine == null:
@@ -1170,7 +1236,15 @@ func _resolve_contacts() -> void:
 		# the lattice's own cell heights, because a trunk is not level: a raised
 		# head passes over a tail that the same animal's chest would have hit.
 		var push: Vector2 = Vector2.ZERO
-		if Stature.overlaps(stature.trunk, other.stature.trunk):
+		# ...unless this creature is standing on that one. A body being climbed is a
+		# surface rather than an obstruction, and the two claims point in opposite
+		# directions: the feet are holding the climber up on top of the flank while a
+		# correction whose whole job is separating two bodies shoves it back off. It
+		# is the same exemption a grip already gets, for the same reason, and it is
+		# decided by the feet rather than declared — nothing anywhere sets "climbing",
+		# there is simply a foot on a back.
+		if not mounted.has(other.get_instance_id()) \
+				and Stature.overlaps(stature.trunk, other.stature.trunk):
 			push = _push_out_of_creature(other)
 		var underfoot: Vector2 = _push_out_of_limbs(other)
 		if underfoot.length_squared() > push.length_squared():
@@ -1339,6 +1413,160 @@ func _push_out_of_limbs(other: Creature) -> Vector2:
 	return deepest
 
 
+# ------------------------------------------------------------- underfoot ----
+# Where the floor is, which used to be a constant.
+#
+# Everything in this file already worked in three axes: a leg spans from a socket
+# at one height to a foot at another, a band is compared against a band, and the
+# picture is a projection of both. The one thing that was still flat was the
+# assumption underneath all of it — that the bottom of the world is zero
+# everywhere. These four functions replace that assumption with a query, and
+# nothing else about the solver had to change: a foot put down on a ledge is a
+# foot at a height, and every line that reads a foot's height was already reading
+# one.
+
+## The habitat's terrain, or null in one that has none.
+func terrain() -> Terrain:
+	if not _terrain_looked and is_inside_tree():
+		_terrain_looked = true
+		_terrain_field = get_tree().get_first_node_in_group("terrain") as Terrain
+	return _terrain_field
+
+
+## What one of this creature's feet would be standing on at `at`.
+##
+## Handed to the gait as a callable and asked once per foot per tick. `ceiling` is
+## how high that particular foot can be put down — the gait works it out off the
+## socket carrying it, and it is the first of `Traversal`'s three conditions
+## arriving here as a number rather than as a rule. Anything above it is not a
+## surface for this leg, so the query walks past it and answers with whatever is
+## underneath, which is the difference between stepping onto a ledge and walking
+## into a wall.
+##
+## Returns `(height, foothold)`: how far off the world's floor the surface is, and
+## how much room the foot has on it.
+##
+## Other animals are surfaces too, and they are here rather than in the terrain
+## for the obvious reason — they move. A body part is a footprint and a band like
+## anything else, so a creature low enough to get its foot above one climbs onto
+## it and one that is not, does not; the cat that will not rise over another cat
+## and the lizard that will go over a tail are the same comparison with different
+## numbers in it. Only the trunk, because that is the part with a top: a leg is a
+## round bone held at an angle and nothing stands on one.
+func _surface_under_foot(at: Vector2, foot_radius: float,
+		ceiling: float = INF) -> Vector2:
+	var height: float = 0.0
+	var room: float = INF
+	var field: Terrain = terrain()
+	if field != null:
+		var ground: Vector2 = field.surface(at, foot_radius, ceiling)
+		height = ground.x
+		room = ground.y
+	if not is_inside_tree():
+		return Vector2(height, room)
+
+	for node in get_tree().get_nodes_in_group("creatures"):
+		var other := node as Creature
+		if other == null or other == self or other.body == null or other.spine == null:
+			continue
+		if at.distance_to(other.bounds_center) > other.bounds_radius + foot_radius:
+			continue
+		var last: int = mini(other.body.last_index, other.spine.size() - 1)
+		var tissue: TissueGrid = other.anatomy.tissue
+		for i in range(last):
+			var a: Vector2 = other.spine.points[i]
+			var b: Vector2 = other.spine.points[i + 1]
+			var u: float = AnatomyState.segment_u(at, a, b)
+			var axis: Vector2 = a.lerp(b, u)
+			var t: float = (float(i) + u) / float(maxi(last, 1))
+			# Narrowed to the tissue still standing, exactly as every other contact
+			# with this body is. A flank eaten open is not a step.
+			var solid: float = tissue.body_solid(t, (at - axis).dot(other.spine.perps[i]))
+			if solid <= 0.0:
+				continue
+			var band: Vector2 = tissue.body_band(t)
+			# Too high for this leg, already below the foot, or with its underside
+			# above where the foot is — the same three rejections the terrain makes,
+			# and for the same reasons.
+			if band.y > ceiling or band.y <= height or band.x > height:
+				continue
+			var width: float = lerpf(other.body.widths[i], other.body.widths[i + 1], u) * solid
+			var margin: float = width - at.distance_to(axis) - foot_radius
+			if margin <= -foot_radius:
+				continue
+			height = band.y
+			room = margin
+			_standing_on[other.get_instance_id()] = true
+	return Vector2(height, room)
+
+
+## The height this creature is currently standing at: the lowest of the surfaces
+## under its planted feet. Zero on the open floor, and whatever it has climbed
+## onto otherwise — which is what makes a second ledge on top of the first an
+## ordinary crossing rather than a special case.
+func ground_height() -> float:
+	if gait == null or gait.limbs.is_empty():
+		return 0.0
+	var lowest: float = INF
+	for limb in gait.limbs:
+		if limb.severed or limb.carried or limb.stepping:
+			continue
+		lowest = minf(lowest, limb.surface)
+	return 0.0 if is_inf(lowest) else lowest
+
+
+## What this body could do about the obstacle in front of it, if anything. The
+## whole of `Traversal` reached through one line, so callers — the contact pass
+## below, the debug overlay, the tests — never assemble the measurements
+## themselves and cannot disagree about them.
+func traversal(obstacle: Obstacle) -> int:
+	if obstacle == null:
+		return Traversal.CLEAR
+	return Traversal.assess(Traversal.of(self), obstacle.base(), obstacle.top(),
+		obstacle.girth(), ground_height())
+
+
+## Deepest penetration of this creature's trunk into the terrain, as the vector it
+## must move to get clear.
+##
+## Only into what it cannot get past. That gate is the whole of "adapt locomotion
+## only when traversal is physically possible", stated from the other side: an
+## obstacle this animal can walk over, climb onto or duck under is not a wall, so
+## the contact pass leaves it alone and the legs deal with it — the feet find the
+## top through `_surface_under_foot`, the body rises onto whatever they found, and
+## the bands go up with it. One that it cannot get past is a wall, and is resolved
+## exactly as another animal's flank is.
+##
+## Per interval, like every other contact in this file, because a trunk is not
+## level: a browsing animal's raised head clears a rock its own chest walks into.
+func _push_out_of_terrain() -> Vector2:
+	var field: Terrain = terrain()
+	if field == null or spine == null or body == null:
+		return Vector2.ZERO
+	var here: float = ground_height()
+	var dimensions: Traversal.Body = Traversal.of(self)
+	var last: int = mini(body.last_index, spine.size() - 1)
+	var deepest: Vector2 = Vector2.ZERO
+	for obstacle in field.obstacles:
+		if obstacle.gone():
+			continue
+		if Traversal.passable(Traversal.assess(dimensions, obstacle.base(),
+				obstacle.top(), obstacle.girth(), here)):
+			continue
+		for i in range(last):
+			var a: Vector2 = head_pos if i == 0 else spine.points[i]
+			var b: Vector2 = spine.points[i + 1]
+			var solid: float = _solid_at(i, last)
+			if solid <= 0.0:
+				continue
+			var radius: float = (body.widths[i] + body.widths[i + 1]) * 0.5 * solid
+			var push: Vector2 = obstacle.push_capsule(a, b, radius,
+				_trunk_band_at(i, 0.5, last))
+			if push.length_squared() > deepest.length_squared():
+				deepest = push
+	return deepest
+
+
 ## Translates the pose as one piece and cancels the same shift out of the gait's
 ## socket-velocity history. Feet may remain planted and naturally take a step,
 ## but collision correction must not masquerade as a huge burst of locomotion.
@@ -1492,6 +1720,24 @@ func _limb_contact_push(limb_key: String, limb_segment: int,
 	var midpoint: Vector2 = (a + b) * 0.5
 	var capsule_bound: float = a.distance_to(b) * 0.5 + collision_radius
 	var deepest: Vector2 = Vector2.ZERO
+
+	# The world's solids, on the same terms and with the same gate the trunk pass
+	# uses: a leg routes around what the animal cannot get past, and around
+	# nothing else. Anything it *can* get past is something the foot is about to
+	# be put on top of or swung over, and a router that pushed the bone off it
+	# would be undoing the placement as fast as the gait made it — the leg would
+	# stand beside every ledge it was trying to climb.
+	var field: Terrain = terrain()
+	if field != null:
+		var here: float = ground_height()
+		var dimensions: Traversal.Body = Traversal.of(self)
+		for obstacle in field.obstacles:
+			if obstacle.gone() or Traversal.passable(Traversal.assess(dimensions,
+					obstacle.base(), obstacle.top(), obstacle.girth(), here)):
+				continue
+			var wall: Vector2 = obstacle.push_capsule(a, b, collision_radius, band)
+			if wall.length_squared() > deepest.length_squared():
+				deepest = wall
 	for node in get_tree().get_nodes_in_group("creatures"):
 		var other := node as Creature
 		if other == null or other == self or other.body == null or other.spine == null:
@@ -1854,14 +2100,81 @@ func feed(amount: int = 1) -> void:
 	ate_food.emit(food_eaten)
 
 
+# ------------------------------------------------------------------- aim ----
+
+## Points this creature at something. The habitat resolves a cursor into one
+## target — a place, a height, and the exact structure of whichever body is there
+## — and hands it over; what the animal makes of it is everything below.
+##
+## Null clears it, which is what happens when the pointer is over nothing and
+## what every line downstream treats as "no target", behaving exactly as this file
+## did before it could be aimed.
+func aim_at(target: Reticle.Pick) -> void:
+	aim = target
+	aim_reach = null if target == null else Reach.solve(self, target.at, target.band, terrain())
+
+
+## Whether the jaws could be got onto whatever this creature is pointed at.
+## True with nothing selected, because an animal with no target has not been
+## refused anything — a bite thrown at nothing in particular is still a bite.
+func can_reach_aim() -> bool:
+	return aim_reach == null or aim_reach.possible
+
+
+## One tick of reaching for it.
+##
+## Two things happen and only the second is visible. The reach is re-solved,
+## because both the animal and its target are moving and an answer from last tick
+## is an answer about somewhere neither of them is. And the crouch is eased toward
+## whatever that answer asks for — which is the whole of the body adjustment, and
+## is deliberately one number: the legs fold by this much, and the stance, the
+## height, the bands and the drawn picture are all consequences of a shorter leg
+## rather than four separate things being animated to agree.
+##
+## Nothing here is an animation and nothing here is keyed to biting. An animal
+## pointed at something on the floor lowers itself toward it and stays lowered
+## while it is pointed there, exactly as one browsing does; the bite, if it comes,
+## is thrown from wherever that left it.
+func _update_aim(delta: float) -> void:
+	var wanted: float = 0.0
+	if aim != null:
+		aim_reach = Reach.solve(self, aim.at, aim.band, terrain())
+		# Only for a target it can actually get to. Folding up under something out
+		# of reach is a body straining at nothing, and a creature that crouched
+		# toward the sky would be the same mistake upside down.
+		if aim_reach.possible:
+			wanted = aim_reach.crouch
+	else:
+		aim_reach = null
+	# A body with nothing under it has nothing to fold against, and one whose legs
+	# are already carrying it as low as they go has nothing left to give.
+	if elevation.is_airborne() or not alive:
+		wanted = 0.0
+	crouch = lerpf(crouch, wanted, 1.0 - exp(-CROUCH_RESPONSE * delta))
+
+
 ## Queues one bite for the next solved physics pose. Clicks during an active
 ## strike or recovery are deliberately discarded rather than buffered, so one
 ## click always means at most one attack even when cooldown is tuned shorter
 ## than the lunge animation.
+##
+## A creature that has been pointed at something it cannot physically get its
+## mouth onto does not throw the strike at all, and that refusal is the whole of
+## "no attacks on vertically unreachable targets" — it is one line because the
+## work is all in `Reach`, which has already asked whether the neck, the fold and
+## the lunge between them add up to the height. A ground-level lizard told to bite
+## the top of an elephant simply does not lunge; told to bite the foot standing
+## next to it, it does.
+##
+## Only ever a refusal about a *selected* target. A bite thrown with nothing
+## pointed at is unconditional, exactly as it always was — which is what keeps
+## every caller that does not aim behaving as it did.
 func request_bite(_aim_world: Vector2) -> bool:
 	if not alive:
 		return false
 	if bite_cooldown_remaining > 0.0 or _bite_requested or bite_time >= 0.0:
+		return false
+	if not can_reach_aim():
 		return false
 	_bite_requested = true
 	return true

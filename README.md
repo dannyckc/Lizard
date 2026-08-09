@@ -26,8 +26,8 @@ godot --path . --editor   # open the editor
 |---|---|
 | `W` `S` / up/down arrows | move forward / back up along the creature's orientation — reverse is a slower, deliberate retreat and never sprints |
 | `A` `D` / left/right arrows | turn the body left/right; switching sides sheds the old swing at the brake rate, so the flip answers immediately |
-| move mouse | shift and look the head toward the cursor; the mouse never steers the body |
-| left click | bite (anatomical hit + cooldown) |
+| move mouse | shift and look the head toward the cursor; the mouse never steers the body. The cursor is also a *target* — it selects a place, a height and the exact body part or object under it, and the creature starts reaching for that before any button is pressed: lowering itself toward something on the floor, holding its height for something at chest level |
+| left click | bite (anatomical hit + cooldown). Refused outright on something the body cannot physically get its mouth onto; the reticle is hollow when that is the case |
 | hold left click | keep hold of what you bit — a creature, or a severed part; drag it, carry it off, or be dragged by it |
 | click again while holding | chew: shut the same jaws on the same flesh once more. On a piece of meat this works it in, and swallows it once what is left will fit |
 | `Space` | leave the ground — a leap from a standing start, and a climb for anything with wings. A creature with no leap in its legs stays put |
@@ -433,8 +433,84 @@ since the gait was written — it is that same lie told about the whole animal.
 `Posture.PERSPECTIVE` is the tilt, and it is the only constant in the game that is
 presentation rather than simulation.
 
-Not built, for want of a world rather than for want of the layer: pouncing from
-trees needs trees, and burrowing needs terrain. Both are a height and a band away.
+### Traversal
+
+The vertical layer knew whether two things were in each other's way. What it did
+not know was what a body could *do* about one that was — and the answer to that
+cannot be a rule about species, or the moment "a lizard climbs over a body part"
+is written down, a cat rears up over another cat the instant they touch.
+
+So there is a **world with volume in it**, and a verdict read off the animal
+asking.
+
+**Everything is a footprint and a band.** `Obstacle` is three numbers — where it
+stands, how much ground it covers, and which heights it fills — and `Terrain` is a
+field of them. That is deliberately the same description a leg already has, so a
+rock and a shin are directly comparable without either being converted, and a
+band starting above zero is an overhang with room underneath. Nobody wrote a
+doorway; there is a base a body can be shorter than.
+
+**Four verdicts.** `Traversal.assess` compares three numbers off the obstacle
+against six off the body, and answers with one of:
+
+| | |
+|---|---|
+| **under** | the whole animal fits beneath, plus the headroom its own walk bobs through |
+| **over** | the crossing it already makes without noticing: either the foot comes up higher than this anyway and the belly rides above it, or the thing is narrower than the animal's own stance and its feet simply fall either side |
+| **mount** | the top is a surface this body can put a foot on and carry itself onto |
+| **blocked** | none of the above, which is what a wall is |
+
+**Three conditions on a mount**, and between them they are the whole mechanic:
+
+1. **A foot cannot be raised above the joint that swings it.** A quadruped
+   staying on four legs reaches a surface with its foot, and its foot goes as high
+   as its shoulder. A cat's back is carried at twice the height a cat's shoulder
+   is, so there is nothing up there another cat can reach — which is the brief's
+   own example falling out of one comparison rather than being forbidden.
+2. **A leg must still reach the ground it is leaving.** Half way up, the animal is
+   straddling: the shoulders are on the surface, the hips are still on the floor,
+   and the sockets in between are carried part of the way with them. How much leg
+   is left over after standing at the height it stands at is the difference
+   between a build that steps up and one that is already at its own limit — which
+   is why a columnar animal, spending nearly its whole leg on being tall, walks
+   round what a sprawled one scrambles onto.
+3. **There has to be somewhere to put the feet.** A surface narrower than the
+   animal's own track is one it would be balancing on a line on, and a creature
+   does not balance on a line.
+
+None of the three mentions a species, a posture or a behaviour. Change one
+measurement — put the same lizard on legs three times as long — and a wall
+becomes a step, with the preset, the stance and the rock untouched. That is the
+check `TraversalTest` leads with, because it is the only one that cannot be
+passed by three rules in a trench coat.
+
+**The floor was a constant and is now a query.** The gait was already solving a
+leg as a chain spanning a real gap between a socket at one height and a foot at
+another; the last flat thing in it was the assumption that the bottom of the
+world is zero everywhere. `Gait` now asks what is under each foot as it places it,
+and the ceiling it asks with is the first mount condition arriving as a number —
+so a foot aimed at something above its own shoulder is answered with the floor
+underneath instead, and the leg walks into the wall rather than onto it.
+
+Everything downstream then follows for free, because everything downstream was
+already reading a height:
+
+- `Limb.support_height` measures from the surface the foot is on, so a foot on a
+  ledge holds its shoulder a ledge higher;
+- the body settles onto that through the same `_carry_body` pass its ordinary bob
+  comes out of — a creature rises onto a step the way it rises over a stride;
+- the bands rise with it, so a creature standing on a rock collides, bites and is
+  bitten at the height it is now standing at;
+- and the picture rises with the bands, because the drawn foot has always been the
+  real one projected through `Posture.drop`.
+
+**Adaptation only where it is possible.** The contact pass pushes a body out of
+what it *cannot* get past and leaves everything else alone; the limb router does
+the same. So a crossable obstacle is never a wall and an uncrossable one is never
+negotiated, and there is no third state where an animal is being shoved off
+something its feet are holding it up on. Bodies get the same exemption: a creature
+with a foot on another creature is standing on it, not colliding with it, and that
+is decided by where the feet ended up rather than by anything declaring a climb.
 
 ### Posture
 
@@ -1255,6 +1331,73 @@ there is, and a puncture cannot destroy less than one. Sampling cell centres
 alone would have made the finest points *least* likely to connect, which is
 exactly backwards.
 
+### Aiming, and what a mouth can be got onto
+
+A mouse gives two numbers and the world has three, so a click is ambiguous before
+anything resolves it: the pixel under the pointer is on the ground plane, on a
+rock standing on it, on the shoulder of an animal walking past, and on the belly
+of a taller one behind it, all at once.
+
+**The pick is made in the picture.** Everything in the game is drawn through one
+projection — `Posture.drop` carries a thing up the screen by however high it is —
+so the thing the cursor is pointing at is whichever drawn primitive it lands on,
+and the height comes back for free as the height of whatever was hit. `Reticle`
+scores every candidate in one currency, signed distance to its drawn surface, and
+the deepest wins; that is the same rule `AnatomyState.hit_test` uses to choose
+between the structures of one animal, applied one level up to choose between the
+animals, the terrain and the meat. One rule throughout is the only reason a shin
+can beat a boulder, or lose to one, on the merits.
+
+The picture's own depth order is laid over it in exactly one place, and it earns
+its keep: a limb hangs *below* the body it is attached to, so on a deep-chested
+animal its whole length is drawn inside the torso's silhouette. Scored by depth
+alone the torso wins every time and the legs — the one part of a tall animal a low
+predator can reach — become unclickable.
+
+What comes back is the same `Hit` a bite would produce, bound to the same
+structure of the same creature, so a click and a bite on one leg name one leg.
+
+**Reach is a movement, not a yes or a no.** `Reach.solve` asks whether the jaws
+can be got onto a place at a height, and answers with the movement that makes it
+possible, because in a real animal those are the same answer — a creature does not
+discover it can reach the ground and then play a reaching animation. Three
+lengths, each of which the body already has:
+
+- **the head comes off its perch.** A neck that lifts a head above the shoulder
+  can bring it back down to one, and that descent is free — which is why the
+  downward sweep is measured from the back rather than from the raised head, and
+  why a long neck helps in both directions;
+- **the neck sweeps below that**, by its own reach and the gape;
+- **the legs fold**, by however much of themselves they have left. `Stature.fold`
+  is that: the difference between the height the animal is standing at and the
+  height it would be at with its limbs drawn up as tight as the IK will solve
+  them.
+
+This replaced a clamp. Standing on the ground used to *grant* an animal the
+ground, on the argument that the interesting direction was upward — and it was
+hiding the most legible height mechanic in the game. A sprawled animal reaches the
+floor on the neck alone and never notices; a columnar one needs all three and only
+just manages; and an animal built tall on a short neck genuinely cannot reach its
+own feet, which is a real answer rather than a bug. Stand an elephant on legs half
+as long again and it can no longer eat off the floor.
+
+**The body actually does it.** The crouch is fed back into the gait as a shorter
+stance rather than drawn over a standing one, so the legs fold, the feet come in,
+the height comes down, the bands come with it and the picture follows — one
+number, and everything that reads a leg reads the folded one. An elephant told to
+feed at its feet drops its shoulder by around forty per cent of the height it
+stands at, and stands back up when it stops being pointed there. Nothing is keyed
+to biting: an animal reaches for what it is aimed at whether or not a button is
+ever pressed.
+
+**And it is refused when it cannot.** A creature pointed at something it cannot
+physically get its mouth onto does not throw the strike at all — a ground-level
+lizard told to bite the top of an elephant simply does not lunge, while the same
+lizard told to bite the planted foot beside it does. Something solid in between is
+the same refusal from a third direction: jaws may not close through a boulder, and
+that is the same band test the collision pass runs, asked along a line. A bite
+with nothing selected is unconditional, exactly as it always was.
+
 ### The lunge
 
 A click does not resolve a bite. It starts an animation with a hit frame: a
@@ -1674,9 +1817,9 @@ the other senses.
 
 ## Tests
 
-Fourteen headless checks cover controls, movement feel, simulation, rendering,
+Seventeen headless checks cover controls, movement feel, simulation, rendering,
 UI, combat, sight, smell, hearing, anatomy, feeding, the bodies in the habitat,
-the vertical axis and the three stances:
+the vertical axis, the three stances and getting past things:
 
 ```sh
 godot --headless --path . --script tests/ControlsTest.gd # input/head-look isolation
@@ -1694,6 +1837,8 @@ godot --headless --path . --script tests/FeedingTest.gd   # severed parts, carry
 godot --headless --path . --script tests/HeightTest.gd    # the vertical axis and what it gates
 godot --headless --path . --script tests/PostureTest.gd   # the three stances, from one angle
 godot --headless --path . --script tests/LocomotionTest.gd # legs solved from the foot up
+godot --headless --path . --script tests/VolumeTest.gd    # every cell in three axes
+godot --headless --path . --script tests/TraversalTest.gd # under, over, onto or stopped
 ```
 
 `HeightTest` is weighted toward the seams rather than the arithmetic — the places
@@ -1934,20 +2079,30 @@ the only thing that sees that cause.
 
 Deliberate, in the interest of a stable and readable prototype:
 
-- Creatures collide with each other, but nothing else does: no terrain and no
-  ground to stand on other than the notional plane at height zero. Everything
-  vertical is a scalar and a band — see **Height** — and it is drawn as a
-  screen-space offset plus a widening shadow gap rather than rendered in three
-  dimensions.
+- The ground has things standing on it, but it is not a heightfield. Obstacles are
+  discs with a band — see **Traversal** — so a foot is either on the floor, on the
+  top of one of them, or on the top of another creature; there is no sloping,
+  uneven or continuous terrain underneath any of it. Everything vertical is still a
+  scalar and a band, drawn as a screen-space offset plus a widening shadow gap
+  rather than rendered in three dimensions.
 - Because of that, a body drawn at height is drawn away from where it is. The
   simulation stays on the plane, so a leaping creature's silhouette sits above its
   own hit position by `height × PERSPECTIVE`; aiming at a tall or airborne animal
   means aiming at its shadow. This is the same compromise the gait has always made
   with a foot's `lift`, applied to the whole animal, and it is the price of not
   having a third axis in the solver.
-- The vertical layer has no world to act on yet. Pouncing from trees and burrowing
-  beneath danger both fall out of the same scalar and the same overlap rule, but
-  there are no trees and no terrain to do either with.
+- Stepping *down* is a settle rather than a fall. A body walking off a ledge finds
+  the lower surface under its feet and follows it down at the rate it follows its
+  feet anywhere else; nothing hands the drop over to `Elevation`, so a creature
+  that walks off something tall descends smoothly instead of falling off it. The
+  two systems meet at the feet and would have to meet at the drop as well.
+- Only the trunk is a surface. A creature can be climbed onto, and what it is
+  climbed onto is the top of its back — a leg is a round bone held at an angle and
+  nothing stands on one, which is right for a shin and wrong for a broad
+  outstretched wing that does not exist yet.
+- Nothing has been given a reason to climb. The verdicts, the surfaces and the
+  body rising onto them are all here and are exercised by walking into things, but
+  no creature seeks high ground, and there is no AI to want to.
 - Nothing flies. Gliding and high flight are implemented, tested and reachable
   from the tuning panel — `wing_lift` above zero is the whole of it — but no
   shipped species has wings, and no body plan draws a pair.

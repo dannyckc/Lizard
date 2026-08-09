@@ -95,12 +95,26 @@ var anatomical_length: float = 2.0
 ## Height of the socket above the ground: what the body is holding this limb up
 ## by. The other end of the gap the two bones have to span.
 var socket_height: float = 0.0
-## Height of the foot. Zero for as long as it is on the floor, and the step arc's
-## own clearance while it is not — a real height in the same pixels as x and y,
-## which is why it is the same number the bones span, the same number the foot's
-## band is built from, and the same number something small has to be shorter than
-## to pass underneath.
+## Height of the foot. The surface it is standing on for as long as it is down,
+## and that surface plus the step arc's own clearance while it is not — a real
+## height in the same pixels as x and y, which is why it is the same number the
+## bones span, the same number the foot's band is built from, and the same number
+## something small has to be shorter than to pass underneath.
 var foot_height: float = 0.0
+## How high the ground is where this foot is standing. Zero on the open floor,
+## and the top of whatever it has been put down on otherwise.
+##
+## Kept apart from `foot_height` because the two answer different questions and
+## only during a step do they differ: the foot is lifted *off* its surface and set
+## down on another one, so an arc has to run between two of these while the
+## clearance is added on top. Everything that asks how high the body is being
+## held reads this one, because a leg standing on a ledge holds its shoulder a
+## ledge higher and that is not a step, it is where the animal is standing.
+var surface: float = 0.0
+## The surfaces a step is leaving and arriving at. Sampled when the foot lifts and
+## re-sampled while it is in the air, because the spot it is aimed at keeps moving.
+var step_from_surface: float = 0.0
+var step_to_surface: float = 0.0
 ## The plane the picture is registered to, so this limb draws itself into the
 ## same view as the body it hangs off. See Stature.reference.
 var reference: float = 0.0
@@ -289,10 +303,18 @@ func rise() -> Vector2:
 ## further away is a body held lower. This is what stops an animal floating above
 ## feet it is not standing on, and — because the feet move as it walks — it is
 ## also where the body's bob comes from. Nothing authored it.
+##
+## Measured from the surface the foot is standing on rather than from the world's
+## floor, and that one addition is the whole of how a body gets onto anything. A
+## leg does not know what is under its foot; it knows how far it reaches from it.
+## So a foot set down on a ledge holds the shoulder a ledge higher, the body
+## follows its feet up exactly as it already follows them down over a stride, and
+## the bands, the silhouette and the picture all come with it because every one of
+## them is read off this height.
 func support_height(reach_share: float) -> float:
 	var span: float = (lengths[0] + lengths[1]) * reach_share
 	var out: float = planted.distance_to(plan[0])
-	return sqrt(maxf(span * span - out * out, 0.0))
+	return surface + sqrt(maxf(span * span - out * out, 0.0))
 
 
 ## Highest this limb could hold its socket with its foot exactly where it is right

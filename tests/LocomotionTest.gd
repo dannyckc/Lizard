@@ -50,6 +50,13 @@ func _process(_delta: float) -> bool:
 	# road it walks — close enough to be trodden on inside five seconds, which
 	# would make every stance measurement below a measurement of a collision.
 	target.reset(Vector2(0.0, 6000.0), 0.0)
+	# ...and so is the ground. Every claim in this file up to the last two is about
+	# a body walking on a flat plane — how far its feet travel, how high its own
+	# legs hold it, how much of its reach it spends sideways — and the habitat now
+	# scatters things to walk over, which would turn each of those measurements
+	# into a measurement of a climb. The layer is checked where it belongs, in
+	# TraversalTest, on ground this test deliberately does not have.
+	main.terrain.clear()
 
 	_check_bones_are_rigid_in_the_world(player)
 	_check_the_body_stands_on_its_feet(player)

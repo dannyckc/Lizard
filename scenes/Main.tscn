@@ -1,7 +1,8 @@
-[gd_scene load_steps=16 format=3]
+[gd_scene load_steps=17 format=3]
 
 [ext_resource type="Script" path="res://scripts/Main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/FoodField.gd" id="2_food"]
+[ext_resource type="Script" path="res://scripts/world/Terrain.gd" id="15_terrain"]
 [ext_resource type="Script" path="res://scripts/world/ScrapField.gd" id="6_scrap"]
 [ext_resource type="Script" path="res://scripts/world/CarrionField.gd" id="14_carrion"]
 [ext_resource type="Script" path="res://scripts/creature/Creature.gd" id="3_creature"]
@@ -23,6 +24,9 @@ script = ExtResource("5_params")
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
+
+[node name="Terrain" type="Node2D" parent="."]
+script = ExtResource("15_terrain")
 
 [node name="FoodField" type="Node2D" parent="."]
 script = ExtResource("2_food")
