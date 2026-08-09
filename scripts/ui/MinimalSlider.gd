@@ -1,4 +1,4 @@
-## Hairline slider used by the monochrome tuning panel.
+## Hairline slider used by the monochrome creation menu.
 ##
 ## Godot's stock slider is intentionally quite tactile and large.  This small
 ## control keeps the same mouse and keyboard behaviour while drawing the thin
@@ -31,14 +31,36 @@ var _value: float = 0.0
 	set(next):
 		_set_value(next, false)
 
+## Where this control's own baseline sits on the track — the value the creature's
+## species carries — drawn as a notch under the line. Left infinite on a slider
+## that has nothing to be compared against, and then nothing is drawn.
+##
+## It is here rather than in the panel because it is a fact about *this* track:
+## the whole point of it is that the distance between the notch and the handle is
+## the distance between the animal and its species, and only the control knows
+## where along itself either of those falls.
+var reference: float = INF:
+	get:
+		return _reference
+	set(next):
+		_reference = next
+		queue_redraw()
+
 const INK := Color("14140f")
 const PAPER := Color("f3f1ec")
+## How far the baseline notch drops below the track.
+const NOTCH: float = 4.0
 
+var _reference: float = INF
 var _dragging: bool = false
 
 
 func _ready() -> void:
-	custom_minimum_size = Vector2(76.0, 26.0)
+	# Only if nobody has said otherwise. A panel that has sized its own tracks has
+	# done it to line them up with the rows around them, and the default arriving
+	# late would put every one of them back.
+	if custom_minimum_size == Vector2.ZERO:
+		custom_minimum_size = Vector2(76.0, 26.0)
 	focus_mode = Control.FOCUS_ALL
 	mouse_default_cursor_shape = Control.CURSOR_HSIZE
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -53,6 +75,10 @@ func _draw() -> void:
 
 	draw_line(Vector2(left, y), Vector2(right, y), Color(INK, 0.20), 1.0, true)
 	draw_line(Vector2(left, y), Vector2(x, y), INK, 1.0, true)
+	if is_finite(_reference) and max_value > min_value:
+		var at: float = lerpf(left, right,
+			clampf(inverse_lerp(min_value, max_value, _reference), 0.0, 1.0))
+		draw_line(Vector2(at, y + 2.0), Vector2(at, y + 2.0 + NOTCH), Color(INK, 0.34), 1.0)
 	draw_circle(Vector2(x, y), 6.0, Color(PAPER, 0.96))
 	draw_circle(Vector2(x, y), 3.5, INK)
 	if has_focus():

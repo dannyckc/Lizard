@@ -17,7 +17,9 @@ const INK := Color("14140f")
 
 
 func _ready() -> void:
-	custom_minimum_size = Vector2(76.0, 26.0)
+	# See MinimalSlider: a panel that has sized its controls keeps that size.
+	if custom_minimum_size == Vector2.ZERO:
+		custom_minimum_size = Vector2(76.0, 26.0)
 	focus_mode = Control.FOCUS_ALL
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	mouse_filter = Control.MOUSE_FILTER_STOP

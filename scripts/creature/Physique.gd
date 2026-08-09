@@ -20,7 +20,7 @@ extends RefCounted
 ## Silhouette volume of the default Lizard build, so `density` 1.0 reads as mass
 ## 1.0 there and every other creature is a ratio against it. A constant rather
 ## than a measured baseline for the same reason the lattice's dimensions are: it
-## has to mean the same thing after the tuning panel has restructured the body
+## has to mean the same thing after the creation menu has restructured the body
 ## underneath it.
 const REFERENCE_VOLUME: float = 29000.0
 ## Head cap radius of that same default build, ditto.

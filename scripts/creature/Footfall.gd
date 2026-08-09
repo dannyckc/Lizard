@@ -347,7 +347,7 @@ func off_beat(key: String, since: String, elapsed: float) -> float:
 
 
 ## What a person would call the current pattern. Never read by the simulation —
-## it exists so the tuning panel and the tests can say what came out.
+## it exists so the creation menu and the tests can say what came out.
 func describe() -> String:
 	if not forelimbs_bear:
 		return "hop" if hind_split < 0.2 else "two-legged stride"

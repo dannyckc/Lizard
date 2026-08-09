@@ -10,7 +10,7 @@
 ##
 ## Grid dimensions are deliberately constants rather than functions of
 ## `segment_count`: the cell a bite destroyed has to still be the same cell
-## after the tuning panel restructures the spine underneath it.
+## after the creation menu restructures the spine underneath it.
 ##
 ## Top-down means the tissues stack in *depth*, not sideways — you look down at
 ## skin, and only what a bite has already cleared away is visible beneath it. A

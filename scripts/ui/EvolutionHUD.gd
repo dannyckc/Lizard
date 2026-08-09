@@ -3,6 +3,10 @@ class_name EvolutionHUD
 extends Control
 
 signal species_selected(preset_name: String)
+## One parameter has been moved in the creation menu. Passed straight through
+## from the menu — see CreatureCreator.param_changed — because what to do about a
+## structural change is the world's decision and not the HUD's.
+signal param_changed(prop: String, structural: bool)
 
 const PAPER := Color("f3f1ec")
 const INK := Color("14140f")
@@ -16,7 +20,10 @@ const VIEW_ANATOMY: String = "Anatomy"
 const VIEWS: Array[String] = [VIEW_FIELD, VIEW_ANATOMY]
 
 var params: CreatureParams
-var panel: TuningPanel
+## The animal this HUD is reporting on, handed over so the creation menu has a
+## body to stand on its slab. The HUD itself only reads it.
+var subject: Creature
+var creator: CreatureCreator
 var anatomy: AnatomyPanel
 
 var _sans_base: SystemFont
@@ -27,11 +34,9 @@ var _mono: Font
 var _mono_tracked: Font
 
 var _stats: Dictionary = {}
-var _species_buttons: Dictionary = {}
 var _view_buttons: Dictionary = {}
 var _active_species: String = "Lizard"
 var _active_view: String = VIEW_FIELD
-var _panel_open: bool = true
 var _hint_target: float = 1.0
 
 var _biomass_value: Label
@@ -39,9 +44,9 @@ var _food_value: Label
 var _stage_value: Label
 var _biomass_meter: BiomassMeter
 var _move_hint: Label
-var _tuning_button: Button
+var _creator_button: Button
 var _stats_grid: GridContainer
-var _species_tabs: HBoxContainer
+var _view_tabs: HBoxContainer
 var _field_block: Control
 var _anatomy_note: Label
 
@@ -52,13 +57,11 @@ func _ready() -> void:
 	_build_fonts()
 	_build_frame()
 	_build_identity_and_stats()
-	_build_species_tabs()
 	_build_biomass_and_legend()
-	_build_tuning_panel()
-	_build_tuning_button()
+	_build_creator()
+	_build_creator_button()
 	_build_move_hint()
 	_build_anatomy()
-	_set_active_species(_active_species)
 	set_view(_active_view)
 	resized.connect(_fit_anatomy)
 	_fit_anatomy()
@@ -112,46 +115,32 @@ func update_metrics(
 		_hint_target = 0.0
 
 
-func toggle_panel() -> void:
-	set_panel_open(not _panel_open)
+func toggle_creator() -> void:
+	set_creator_open(not creator_open())
 
 
-func set_panel_open(open: bool) -> void:
-	_panel_open = open
-	if panel == null:
+## Opens or closes the Creature Creation menu. It is a page rather than a drawer —
+## it takes the window — so everything else the HUD is showing stands down while
+## it is out and comes back exactly as it was.
+func set_creator_open(open: bool) -> void:
+	if creator == null:
 		return
-	panel.visible = open and _active_view == VIEW_FIELD
-	_update_tuning_button()
+	creator.set_open(open)
+
+
+func creator_open() -> bool:
+	return creator != null and creator.visible
 
 
 ## Which view the HUD is on. The field's own furniture stands down while the
 ## specimen is out, because the anatomy drawer occupies the same right-hand
-## column the species tabs and the tuning drawer do — and because a dissection
-## should have the page to itself.
+## column the rest of the chrome does — and because a dissection should have the
+## page to itself.
 func set_view(view_name: String) -> void:
 	if not VIEWS.has(view_name):
 		return
 	_active_view = view_name
-	var field: bool = view_name == VIEW_FIELD
-	if _stats_grid != null:
-		_stats_grid.visible = field
-	if _species_tabs != null:
-		_species_tabs.visible = field
-	if _field_block != null:
-		_field_block.visible = field
-	if _tuning_button != null:
-		_tuning_button.visible = field
-	if _move_hint != null:
-		_move_hint.visible = field
-	if _anatomy_note != null:
-		_anatomy_note.visible = not field
-	if anatomy != null:
-		anatomy.visible = not field
-		if not field:
-			anatomy.refresh()
-	if panel != null:
-		panel.visible = _panel_open and field
-	_update_tuning_button()
+	_apply_chrome()
 	for name in _view_buttons:
 		var button: Button = _view_buttons[name]
 		var selected: bool = str(name) == view_name
@@ -159,6 +148,30 @@ func set_view(view_name: String) -> void:
 		button.add_theme_color_override("font_color", INK if selected else Color(INK, 0.42))
 		button.add_theme_color_override("font_hover_color", INK if selected else Color(INK, 0.72))
 		button.add_theme_stylebox_override("normal", _tab_style(selected))
+
+
+## What is on screen, decided in one place from the two things that decide it:
+## which view is up, and whether the creation menu is over the top of both.
+func _apply_chrome() -> void:
+	var creating: bool = creator_open()
+	var field: bool = _active_view == VIEW_FIELD and not creating
+	if _stats_grid != null:
+		_stats_grid.visible = field
+	if _view_tabs != null:
+		_view_tabs.visible = not creating
+	if _field_block != null:
+		_field_block.visible = field
+	if _creator_button != null:
+		_creator_button.visible = field
+	if _move_hint != null:
+		_move_hint.visible = field
+	if _anatomy_note != null:
+		_anatomy_note.visible = not field and not creating
+	if anatomy != null:
+		anatomy.visible = not field and not creating
+		if anatomy.visible:
+			anatomy.refresh()
+	_update_creator_button()
 
 
 func toggle_view() -> void:
@@ -176,6 +189,14 @@ func set_specimens(list: Array) -> void:
 		anatomy.set_specimens(list)
 
 
+## Whose creature this is. The creation menu stands it on its own slab, so the
+## body being tuned is the body being looked at.
+func set_subject(each: Creature) -> void:
+	subject = each
+	if creator != null:
+		creator.set_subject(each)
+
+
 func _fit_anatomy() -> void:
 	if anatomy != null:
 		anatomy.fit_to_height(size.y - 96.0)
@@ -188,9 +209,8 @@ func reset_hint() -> void:
 
 
 func select_species(preset_name: String) -> void:
-	if not CreatureParams.PRESETS.has(preset_name):
-		return
-	_on_species_pressed(preset_name)
+	if creator != null:
+		creator.set_species(preset_name)
 
 
 func _build_fonts() -> void:
@@ -274,6 +294,7 @@ func _build_identity_and_stats() -> void:
 	views.name = "ViewTabs"
 	views.add_theme_constant_override("separation", 4)
 	block.add_child(views)
+	_view_tabs = views
 	for view_name in VIEWS:
 		var button := Button.new()
 		button.text = "   " + view_name.to_upper()
@@ -301,37 +322,6 @@ func _build_identity_and_stats() -> void:
 		var value := _label("—", 10, _mono_tracked, INK)
 		_stats[key] = value
 		_stats_grid.add_child(value)
-
-
-func _build_species_tabs() -> void:
-	var tabs := HBoxContainer.new()
-	tabs.name = "SpeciesTabs"
-	tabs.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	tabs.offset_left = -520.0
-	tabs.offset_top = 30.0
-	tabs.offset_right = -32.0
-	tabs.offset_bottom = 65.0
-	tabs.alignment = BoxContainer.ALIGNMENT_END
-	tabs.add_theme_constant_override("separation", 6)
-	add_child(tabs)
-	_species_tabs = tabs
-
-	for preset_name in CreatureParams.PRESETS:
-		var name := str(preset_name)
-		var button := Button.new()
-		button.text = "   " + name.to_upper()
-		button.flat = true
-		button.focus_mode = Control.FOCUS_ALL
-		button.custom_minimum_size = Vector2(82.0, 32.0)
-		button.add_theme_font_override("font", _sans_tracked)
-		button.add_theme_font_size_override("font_size", 10)
-		button.add_theme_stylebox_override("normal", _tab_style(false))
-		button.add_theme_stylebox_override("hover", _tab_style(false, 0.28))
-		button.add_theme_stylebox_override("pressed", _tab_style(true))
-		button.add_theme_stylebox_override("focus", _tab_style(false, 0.28))
-		button.pressed.connect(_on_species_pressed.bind(name))
-		tabs.add_child(button)
-		_species_buttons[name] = button
 
 
 func _build_biomass_and_legend() -> void:
@@ -391,7 +381,7 @@ func _build_biomass_and_legend() -> void:
 	legend.add_child(_legend_item(["W", "A", "S", "D"], "MOVE"))
 	legend.add_child(_legend_item(["LMB"], "BITE / LATCH"))
 	legend.add_child(_legend_item(["⇧"], "SPRINT"))
-	legend.add_child(_legend_item(["F1"], "TUNING"))
+	legend.add_child(_legend_item(["F1"], "CREATE"))
 	legend.add_child(_legend_item(["F2"], "DEBUG"))
 	legend.add_child(_legend_item(["F3"], "ANATOMY"))
 	legend.add_child(_legend_item(["R"], "RESET"))
@@ -421,33 +411,39 @@ func _legend_item(keys: Array[String], caption: String) -> Control:
 	return row
 
 
-func _build_tuning_panel() -> void:
-	panel = TuningPanel.new()
-	panel.params = params
-	panel.set_ui_fonts(_sans, _sans_tracked, _mono, _mono_tracked)
-	panel.preset_applied.connect(_on_panel_reset)
-	add_child(panel)
+func _build_creator() -> void:
+	creator = CreatureCreator.new()
+	creator.params = params
+	creator.set_ui_fonts(_sans, _sans_tracked, _mono, _mono_tracked)
+	creator.preset_selected.connect(_on_species_chosen)
+	creator.param_changed.connect(param_changed.emit)
+	# Rather than routing every open and close through a second method: the menu
+	# can be shut by its own button, by the key, or by the world, and the chrome
+	# behind it has to come back whichever of those did it.
+	creator.visibility_changed.connect(_apply_chrome)
+	add_child(creator)
+	creator.set_subject(subject)
 
 
-func _build_tuning_button() -> void:
-	_tuning_button = Button.new()
-	_tuning_button.name = "TuningToggle"
-	_tuning_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	_tuning_button.offset_left = -150.0
-	_tuning_button.offset_top = -66.0
-	_tuning_button.offset_right = -32.0
-	_tuning_button.offset_bottom = -30.0
-	_tuning_button.add_theme_font_override("font", _sans_tracked)
-	_tuning_button.add_theme_font_size_override("font_size", 10)
-	_tuning_button.add_theme_color_override("font_color", INK)
-	_tuning_button.add_theme_color_override("font_hover_color", INK)
-	_tuning_button.add_theme_stylebox_override("normal", _button_style(0.13))
-	_tuning_button.add_theme_stylebox_override("hover", _button_style(0.30))
-	_tuning_button.add_theme_stylebox_override("pressed", _button_style(0.45))
-	_tuning_button.add_theme_stylebox_override("focus", _button_style(0.30))
-	_tuning_button.pressed.connect(toggle_panel)
-	add_child(_tuning_button)
-	_update_tuning_button()
+func _build_creator_button() -> void:
+	_creator_button = Button.new()
+	_creator_button.name = "CreatorToggle"
+	_creator_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_creator_button.offset_left = -172.0
+	_creator_button.offset_top = -66.0
+	_creator_button.offset_right = -32.0
+	_creator_button.offset_bottom = -30.0
+	_creator_button.add_theme_font_override("font", _sans_tracked)
+	_creator_button.add_theme_font_size_override("font_size", 10)
+	_creator_button.add_theme_color_override("font_color", INK)
+	_creator_button.add_theme_color_override("font_hover_color", INK)
+	_creator_button.add_theme_stylebox_override("normal", _button_style(0.13))
+	_creator_button.add_theme_stylebox_override("hover", _button_style(0.30))
+	_creator_button.add_theme_stylebox_override("pressed", _button_style(0.45))
+	_creator_button.add_theme_stylebox_override("focus", _button_style(0.30))
+	_creator_button.pressed.connect(toggle_creator)
+	add_child(_creator_button)
+	_update_creator_button()
 
 
 func _build_anatomy() -> void:
@@ -485,41 +481,17 @@ func _build_move_hint() -> void:
 	add_child(_move_hint)
 
 
-func _on_species_pressed(preset_name: String) -> void:
+func _on_species_chosen(preset_name: String) -> void:
 	_active_species = preset_name
-	if params != null:
-		params.apply_preset(preset_name)
-	if panel != null:
-		panel.set_current_preset(preset_name)
-		panel.refresh()
-	_set_active_species(preset_name)
 	species_selected.emit(preset_name)
 
 
-func _on_panel_reset(preset_name: String) -> void:
-	_active_species = preset_name
-	_set_active_species(preset_name)
-	species_selected.emit(preset_name)
-
-
-func _set_active_species(preset_name: String) -> void:
-	_active_species = preset_name
-	for name in _species_buttons:
-		var button: Button = _species_buttons[name]
-		var selected: bool = str(name) == preset_name
-		button.text = ("•  " if selected else "   ") + str(name).to_upper()
-		button.add_theme_color_override("font_color", INK if selected else Color(INK, 0.38))
-		button.add_theme_color_override("font_hover_color", INK if selected else Color(INK, 0.72))
-		button.add_theme_stylebox_override("normal", _tab_style(selected))
-	if panel != null:
-		panel.set_current_preset(preset_name)
-
-
-func _update_tuning_button() -> void:
-	if _tuning_button == null:
+func _update_creator_button() -> void:
+	if _creator_button == null:
 		return
-	_tuning_button.text = ("•" if _panel_open else "·") + "  TUNING   F1"
-	_tuning_button.add_theme_color_override("font_color", INK if _panel_open else Color(INK, 0.58))
+	var open: bool = creator_open()
+	_creator_button.text = ("•" if open else "·") + "  CREATURE   F1"
+	_creator_button.add_theme_color_override("font_color", INK if open else Color(INK, 0.58))
 
 
 func _label(text: String, size_px: int, font: Font, color: Color) -> Label:

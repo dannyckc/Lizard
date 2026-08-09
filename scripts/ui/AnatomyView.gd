@@ -256,7 +256,12 @@ func set_ui_font(mono: Font) -> void:
 
 
 func _process(delta: float) -> void:
-	if not visible:
+	# In the *tree*, not this node's own flag. The fit walks every cell of the
+	# animal, and a stage inside a drawer that is shut is still a visible node —
+	# so asking the cheap question was buying nothing. There are two of these
+	# stages now, one in the anatomy drawer and one in the creation menu, and at
+	# most one of them is ever being looked at.
+	if not is_visible_in_tree():
 		return
 	_clock += delta
 	_settle(delta)

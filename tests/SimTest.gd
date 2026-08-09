@@ -31,7 +31,7 @@ func _initialize() -> void:
 	quit(0 if failures.is_empty() else 1)
 
 
-## The tuning panel drives everything through Object.set()/get() with float
+## The creation menu drives everything through Object.set()/get() with float
 ## slider values, including properties typed as int. If that conversion ever
 ## stopped working the sliders would fail silently, so it is checked here.
 func _check_schema() -> void:

@@ -44,7 +44,7 @@ extends RefCounted
 ## Body length of the default build — 14 segments at 15px — so a creature's
 ## rotational inertia is quoted as a ratio against it. A constant for the same
 ## reason `Physique.REFERENCE_VOLUME` is: it has to keep meaning the same thing
-## after the tuning panel has restructured the animal underneath it.
+## after the creation menu has restructured the animal underneath it.
 const REFERENCE_LENGTH: float = 195.0
 
 ## How far the body will drop over a stride, as a share of the height it stands
@@ -228,7 +228,7 @@ func update(posture: Posture, physique: Physique, p: CreatureParams, scale: floa
 	# legs. Which is why a T. rex and a Kangaroo need no posture of their own to be
 	# bipedal and a Gorilla, whose arms are *longer* than its legs, is emphatically
 	# not — its knuckles are on the ground because they reach it.
-	forelimbs_bear = p.arm_length >= p.leg_length * BEARING_RATIO
+	forelimbs_bear = bears_on_forelimbs(p)
 	bearing_limbs = 4 if forelimbs_bear else 2
 
 	accel = p.acceleration * scale * posture.drive * power
@@ -267,6 +267,16 @@ func update(posture: Posture, physique: Physique, p: CreatureParams, scale: floa
 	# without either of them carrying a flexibility number.
 	spine_freedom = clampf(deg_to_rad(p.max_bend_deg) * float(p.segment_count - 1)
 		/ FLEXIBLE_SPINE, 0.0, 1.0)
+
+
+## Whether a body of these proportions walks on its forelimbs at all.
+##
+## The measurement above, put to the parameters alone. Static because how many
+## legs an animal has is a question about a *build* rather than about a body that
+## has been solved — so the creation menu can ask it of a species nobody has
+## grown yet, and get the same answer the simulation will.
+static func bears_on_forelimbs(p: CreatureParams) -> bool:
+	return p.arm_length >= p.leg_length * BEARING_RATIO
 
 
 ## What one girdle's joints do.

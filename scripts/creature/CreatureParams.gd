@@ -2,7 +2,7 @@
 ##
 ## This is a Resource so it can be edited in the Inspector, saved as a .tres
 ## preset, and swapped at runtime. SCHEMA below mirrors the exported properties
-## and is what the in-game tuning panel builds its sliders from — add a property
+## and is what the in-game creation menu builds its sliders from — add a property
 ## here plus one SCHEMA row and it shows up in the UI automatically.
 class_name CreatureParams
 extends Resource
@@ -268,7 +268,7 @@ extends Resource
 @export_range(0.0, 0.6, 0.01) var tooth_variation: float = 0.18
 
 
-## Drives the runtime tuning panel. Rows with "group" are section headers.
+## Drives the runtime creation menu. Rows with "group" are section headers.
 const SCHEMA: Array = [
 	{"group": "Spine"},
 	{"prop": "segment_count", "label": "Segment count", "min": 6.0, "max": 28.0, "step": 1.0},

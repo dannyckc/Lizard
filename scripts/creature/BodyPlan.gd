@@ -199,7 +199,7 @@ var limb_socket_col: Dictionary = {}
 ## fifteenth of its length are a leg attached to a rib — the skeleton runs out
 ## from the spine to a flank the limb is nowhere near, and the join, the nerve and
 ## the vessel through it are all describing a different animal. They still do not
-## drift under the tuning panel: they move when the *sockets* move and at no other
+## drift under the creation menu: they move when the *sockets* move and at no other
 ## time, which is exactly the thing they have to name the same cells against.
 var shoulder_col: int = SHOULDER_COL
 var pelvis_col: int = PELVIS_COL

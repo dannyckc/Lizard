@@ -1,5 +1,5 @@
 ## Game root: wires input to the creature, follows it with the camera, keeps the
-## food field topped up and owns the HUD / tuning panel.
+## food field topped up and owns the HUD and the creature creation menu.
 ##
 ## Node order in the scene matters — Main ticks before its children, so the
 ## movement command written here is the one the creature consumes this tick.
@@ -38,8 +38,8 @@ const COL_GRID := Color(INK, 0.13)
 @onready var hearing_renderer: HearingRenderer = $HearingRenderer
 
 var input := MovementInput.new()
-var panel: TuningPanel
 var hud: EvolutionHUD
+var creator: CreatureCreator
 ## Paired feet often land on the same gait beat. Register every other contact so
 ## locomotion stays quiet and rhythmic rather than becoming a constant ripple.
 var _footfall_counts: Dictionary = {}
@@ -87,8 +87,12 @@ func _build_ui() -> void:
 	hud = EvolutionHUD.new()
 	hud.params = creature.params
 	layer.add_child(hud)
-	panel = hud.panel
+	creator = hud.creator
+	# Whose body the creation menu is making. The player's, because that is the
+	# animal being worn; the anatomy tab below can be pointed at either.
+	hud.set_subject(creature)
 	hud.species_selected.connect(_on_species_selected)
+	hud.param_changed.connect(_on_param_changed)
 	# Which bodies the anatomy tab can be pointed at. Named here because which
 	# creature is whose is the world's business — the HUD only opens them up.
 	hud.set_specimens([
@@ -236,7 +240,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
 			KEY_F1:
-				hud.toggle_panel()
+				hud.toggle_creator()
+			KEY_ESCAPE:
+				hud.set_creator_open(false)
 			KEY_F2:
 				view.debug = not view.debug
 				target_view.debug = view.debug
@@ -289,12 +295,26 @@ func _zoom_by(factor: float) -> void:
 
 func _on_species_selected(preset_name: String) -> void:
 	# Rebuild immediately so structural changes (especially segment count) feel
-	# as responsive as the sliders and tabs look.
+	# as responsive as the sliders and the species rail look.
 	creature.rebuild()
 	senses.reset_for_species(preset_name)
 	sight_renderer.refresh_profile()
 	smell_renderer.refresh_profile()
 	hearing_renderer.refresh_profile()
+
+
+## One slider moved in the creation menu.
+##
+## Nearly all of them need nothing done: the parameters are read fresh every tick,
+## so a width or a bite depth is already in effect by the time the handle stops
+## moving. The handful that are *built into* the body rather than read off it —
+## the stance, where the girdles sit, what each joint does — are laid down once at
+## rebuild time and would otherwise sit there describing an animal that does not
+## exist until something else happened to grow it. Which is the world's job, and
+## this is the world.
+func _on_param_changed(_prop: String, structural: bool) -> void:
+	if structural:
+		creature.rebuild()
 
 
 ## Resolves one closing of a set of jaws: the apex of a lunge, a chew from jaws

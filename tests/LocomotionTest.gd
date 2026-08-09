@@ -312,7 +312,7 @@ func _check_the_body_rides_its_feet(player: Creature) -> void:
 ## the cube of, so it has under half the Lizard's push per unit of weight — and
 ## that one division is the whole of why it labours into its speed while the Cat
 ## is gone. The check is the ordering rather than the numbers, because the
-## numbers are consequences of a silhouette that the tuning panel may restyle at
+## numbers are consequences of a silhouette that the creation menu may restyle at
 ## any time.
 func _check_anatomy_sets_the_pace(player: Creature) -> void:
 	var power: Array[float] = []

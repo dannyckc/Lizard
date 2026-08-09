@@ -38,7 +38,7 @@ godot --path . --editor   # open the editor
 | `Space` | leave the ground — a leap from a standing start, and a climb for anything with wings. A creature with no leap in its legs stays put |
 | `Ctrl` | come down: a controlled descent with wings out, a dive with them folded |
 | `Shift` | sprint |
-| `F1` | show/hide the tuning panel |
+| `F1` | open/close **Creature Creation** — the species, every parameter and the live specimen on one page. `Esc` also closes it |
 | `F2` | toggle debug draw |
 | `F3` | switch between the **Field** and **Anatomy** views |
 | drag the specimen | turn the anatomy view: the creature is held in a sphere and the drag rolls it, so the part under the pointer follows the hand; double-click to look straight down again |
@@ -1066,7 +1066,7 @@ against a girdle, because two adjacent crossbars are one wide bar with no gap
 left to bite into.
 
 The layout is fixed in body space for the same reason the grid dimensions are:
-it has to name the same cells after the tuning panel has restructured the spine
+it has to name the same cells after the creation menu has restructured the spine
 underneath it. The girdle columns therefore mirror the *default* `front_limb_t`
 and `rear_limb_t` rather than tracking them live.
 
@@ -1108,7 +1108,7 @@ Two decisions carry the rest of it:
   constants.** The pose is rebuilt from the spine every tick, so world-space
   damage is impossible; only the cell *corners* are re-derived each tick. Making
   the dimensions constants rather than functions of `segment_count` is what
-  stops the tuning panel silently remapping existing damage when it restructures
+  stops the creation menu silently remapping existing damage when it restructures
   the spine underneath it.
 - **A bite selects cells by testing their solved world geometry against the
   mark.** The body-space mapping is curved, tapered and per-tick, and has no
@@ -1774,7 +1774,7 @@ bite force = jaw_power × (head radius / 13)² × surviving head tissue
 Volume is the drawn body: a chain of discs, one per cross-section, along the
 lengths the spine actually holds, with a round cap at each end and the tail
 clipped exactly where the silhouette clips it. So the thing you can see is the
-thing it weighs, and widening a body in the tuning panel makes it heavier without
+thing it weighs, and widening a body in the creation menu makes it heavier without
 a second slider to remember. Off the shipped presets that lands at:
 
 | | mass | strength | bite force |
@@ -1957,12 +1957,41 @@ has settled yet. It is the one red check in the suite.
 
 ## Tuning
 
-Press `F1` for live sliders (generated from `CreatureParams.SCHEMA` — add a
-property plus one schema row and it appears automatically). Three presets ship in
-the panel, one per posture: **Lizard** (sprawled), **Cat** (semi-upright) and
-**Elephant** (columnar).
-Mass is not among the sliders — it is on the HUD readout instead, because it is
-something the creature *has* rather than something you set.
+Press `F1` for **Creature Creation** — one page in three columns, because
+choosing a species and adjusting one are the same activity: a preset *is* a set
+of these sliders written down.
+
+* **Left — species.** Every preset, each quoted by the three readings that are
+  not implied by each other (speed, muscle, build) plus its stance and whether it
+  walks on four legs or two. That last one is `Locomotion`'s own measurement put
+  to the preset, not a label — so the rail cannot promise an animal the
+  simulation then declines to build.
+* **Middle — the specimen.** The creature being tuned, live, on the same turnable
+  and peelable stage the Anatomy tab uses: drag to walk around it, click a layer
+  chip to lift it off, hover a cell to read what it is made of. Under it, twelve
+  readings the *body* reports — mass, strength, bite force, how tall it stands,
+  how long it is, what it accelerates and turns at, how many legs it is walking
+  on, and the name of the gait those proportions produce. None of them is
+  authored: they come off `Physique`, `Stature`, `Locomotion` and `Footfall`, so
+  lengthening a leg moves half of them at once.
+* **Right — every parameter,** generated from `CreatureParams.SCHEMA` (add a
+  property plus one schema row and it appears automatically), with the chips at
+  the top jumping to a group. Each track carries a **notch at the species' own
+  value**, so how far a creature has been carried from its preset is visible on
+  the control that carried it; edited rows are dotted in the margin, counted in
+  the header, and put back by one button.
+
+Seven presets ship, laid out along the posture axis: **Lizard** (sprawled),
+**Cat** (semi-upright), **Elephant** (columnar), and **Camel**, **Cheetah**,
+**T. rex** and **Kangaroo** (erect).
+Mass is not among the sliders — it is on the specimen's readout instead, because
+it is something the creature *has* rather than something you set.
+
+Most parameters are read fresh every tick, so a slider takes effect as it moves.
+The handful a body is *built* out of rather than solved with — the stance, where
+the girdles sit, what each joint does — are listed in `CreatureCreator.STRUCTURAL`
+and make the world regrow the animal on the spot. Before this menu existed the
+stance slider silently did nothing until something else forced a rebuild.
 
 The parameters worth reaching for first:
 
@@ -2462,7 +2491,7 @@ Deliberate, in the interest of a stable and readable prototype:
   body rising onto them are all here and are exercised by walking into things, but
   no creature seeks high ground, and there is no AI to want to.
 - Nothing flies. Gliding and high flight are implemented, tested and reachable
-  from the tuning panel — `wing_lift` above zero is the whole of it — but no
+  from the creation menu — `wing_lift` above zero is the whole of it — but no
   shipped species has wings, and no body plan draws a pair.
 - Contacts have weight behind them but no momentum. Mass decides who yields and
   how much speed a contact sheds, so a heavy creature can shoulder a light one
