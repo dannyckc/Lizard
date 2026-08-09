@@ -311,7 +311,7 @@ lift, and it has no tone. `lift` is held at zero — a dead foot is on the groun
 and its shadow is tight under it — and nothing anywhere holds a limb out, so what
 is drawn is only ever what the constraints and the friction left. Measured, that
 leaves a limb resting at about half its length from its socket, against the
-`stance_reach` of 0.78 a walking one holds itself at.
+three quarters of itself a walking sprawled one holds out.
 
 #### A towed carcass trails
 
@@ -602,6 +602,107 @@ Posture also feeds the section above it. Clearance *is* how tall the animal is, 
 the height bands, what its jaws can reach and what can reach its body are all
 downstream of the same one angle.
 
+### Articulation
+
+Posture says how a limb is *carried*. Articulation says what the limb **is**, and
+it is the same fact read at the other end of the leg:
+
+> **the angle the elbow or knee is carried at while the animal stands on it.**
+
+Three numbers used to answer that and none of them could: how extended a leg
+stood, how far it could straighten and how tightly it folded were three *lengths*
+typed into a preset. No value of them produced a column — the reach cap sat a long
+way below straight, so a columnar build was quietly held at the same
+three-quarters-extended crouch as everything else, and what it drew was an
+elephant-coloured animal permanently about to sit down. They are one angle now,
+and the three lengths are projections of it through the cosine rule.
+
+The stance owns the base of it, because how upright a limb is held and how
+straight its joint is carried are one fact about a skeleton — an animal standing
+sprawled with locked elbows does not exist, and neither does a column with a bent
+knee:
+
+| | joint | locks to | folds to | what that is |
+|---|---|---|---|---|
+| sprawled | 102° | 140° | 35° | a humerus out to the side, the forearm turning down |
+| semi-upright | 132° | 158° | 38° | a bend in reserve everywhere — where the leap comes from |
+| erect | 150° | 168° | 40° | open, and far apart: reach to cover ground, fold to gather |
+| columnar | 170° | 177° | 58° | two bones nearly in line, and barely moving |
+
+#### A girdle is the unit, not a creature
+
+What a species carries on top of the stance is per *girdle*, and that is the
+second half of the redesign. A shoulder and a hip are different joints; the two
+ends of an animal may be different limbs doing different jobs, and most of what
+separates a cat from a scaled lizard is exactly that. A Cat's elbow stands at
+150° and its knee at 114° — a strut in front to hold the front of it up and to
+land on, a spring behind to crouch, gather and leap. Its back comes out level over
+the two of them and nothing levels it: a longer hind leg folded further and a
+shorter foreleg held straight arrive at the same height.
+
+Four numbers per girdle, and each is a sentence about a skeleton rather than a
+dial:
+
+- **`*_flex_deg`** — how much more flexed than its stance this girdle stands.
+  Negative is straighter.
+- **`*_fold_range`** — how far the joint closes, against how far its stance
+  closes. Under one is a graviportal leg, and it is worth more than it looks: a
+  joint that will not close is an animal that cannot crouch to the floor, cannot
+  gather itself to jump, and cannot lengthen its stride by sinking into its own
+  legs. Every one of those used to be a special case for heavy animals. None of
+  them is written down anywhere now.
+- **`*_upper_share`** — how the length divides between the two bones. Over a half
+  is weight carried high and close in; under it is a long light segment left out
+  at the bottom to swing.
+- **`*_swing_deg`** — the fan the socket sweeps the whole limb through, which is a
+  genuinely separate joint: a hip that swings far with a knee that barely bends is
+  a horse, and the reverse is a rabbit.
+
+#### What a column walks on
+
+A leg held near vertical is a good pillar and a poor lever, and the two are the
+same sentence: there is almost no plan-view reach to swing a foot across, and
+almost no height lost as the body passes over it. So a columnar build cannot buy
+its stride the way an upright one does — by sinking — because sinking *is* the
+stance limb folding, and its knee does not.
+
+What it has instead is the last joint in the chain. At the end of a stance phase
+the foot rolls forward onto its toe; the ankle comes up, everything standing on it
+comes up with it, and the leg spans a shorter gap and therefore reaches further
+back. That is a push against the ground taken by an animal that never bent a leg
+to do it, and it is `toe_push` — a share of the foot rather than an animation.
+Nothing schedules it: it is read off where the foot sits in its own fore-and-aft
+travel, so it comes round once per stance because that is what a stance is, and it
+is gated on the joint that would do it, so a limb with a cut nerve scuffs instead.
+
+#### A socket is a joint on a round body
+
+The last piece is where a limb *meets* the animal. A shoulder is not the lowest
+point of a body — it is a joint out on the flank, a good way up the side of a
+round trunk, and what hangs lowest is the flesh inboard of it. The two are a fixed
+distance apart and the distance is a fact about the cross-section: the depth the
+body has at its deepest, less how much of that depth is still there at the
+socket's own lateral offset. The section is an ellipse, so the second term is the
+same `sqrt(1 - u²)` the lattice tapers every cell with.
+
+Before that, the two were one number. A body was drawn with its underside at the
+height its legs were holding, and every socket was then placed out on the flank at
+that same height — which is *below* the ellipse, in the air, a good part of a
+depth beneath the tissue the limb was supposed to be joined to. Nothing looked
+wrong from directly overhead, because the torso is drawn over the legs; everything
+was wrong in the volume, and the lattice's limb cells, the skeleton through them
+and the nerve and vessel beside it all began in mid-air.
+
+The girdles themselves follow the sockets for the same reason. The skeleton's
+pectoral and pelvic bars used to be two fixed columns, so a build carrying its
+shoulders a quarter of the way down its back had its forelimbs welded to a rib —
+and the nerve and the vessel branched off wherever that was. They are laid under
+wherever the species actually hangs its limbs, and both networks now run *out of
+the body over the girdle* before they run down the leg, so chewing a shoulder to
+the bone cuts the supply to a limb that is otherwise untouched. That was silently
+false before: a run read from the limb's own cells alone reported a perfectly
+sound nerve.
+
 ### Gait
 
 Purely reactive, no timeline. Each foot has an ideal position derived from the
@@ -609,6 +710,18 @@ body’s current pose; a planted foot stays nailed to the world until it drifts 
 **stride** from that ideal, then arcs to a spot slightly *ahead* and re-plants.
 Step frequency therefore falls out of speed for free, and an idle creature is
 genuinely still.
+
+A body is one object, so it has **one** stride between its four legs, and what
+sets it is the leg with the least to spend. Over a cycle every foot returns to the
+same place relative to the shoulder it hangs from while the whole animal has moved
+forward once, so each foot has covered the same ground — a girdle cannot take a
+longer step than it has room for and the rest of the body cannot walk away from
+it. It never showed while every limb on every creature was solved from one set of
+numbers; the moment a build could carry a straight strut in front and a folded
+spring behind, the girdle with the shorter travel simply stepped more often, and a
+footfall pattern is a statement about phase with no fixed cycle left to be a phase
+of. What is *not* shared is what a limb does with that stride: a leg on the outside
+of a turn covers more ground, and one with no force left in it reaches less far.
 
 A stride is not a parameter and cannot be one. It is the fore-and-aft travel that
 limb actually has — a foot is a point on a sphere of the leg's own radius about
@@ -870,8 +983,9 @@ weakest-first so the hard anatomical ones always win:
 
 | Limit | Why |
 |---|---|
-| `limb_max_reach` from the socket | past it the chain is pulled straight and stops reading as a leg |
-| `limb_swing_deg` either side of the rest stance | taste: how wide a fan the leg sweeps |
+| the joint's own lock-out from the socket | past it the chain is pulled straight and stops reading as a leg |
+| the socket's swing fan either side of the rest stance | how wide an arc that shoulder or hip sweeps |
+| the joint's own fold toward the socket | a limb that does not close cannot draw its foot in under itself |
 | 78° either side of straight-out | a foot may never come round to the body's midline |
 | the bearing at which the knee turns inboard | see below |
 
@@ -1861,7 +1975,11 @@ The parameters worth reaching for first:
 | Silhouette | `head/chest/waist/hip/tail_tip_width`, `body_width` |
 | Longer stride, fewer steps | none — stride is the travel the limb has, off `leg_length`, `posture` and how far the body will sink. See *Gait* |
 | Sprawled, semi-upright, erect or columnar | `posture` — one trait; stance width, clearance, occlusion, undulation and turn character all follow. It does *not* set the gait |
-| Sprawling vs. tucked legs *within* a stance | `stance_width`, `stance_reach`, `arm/leg_length` |
+| Sprawling vs. tucked legs *within* a stance | `stance_width`, `arm/leg_length` |
+| Straighter or more folded legs | `fore_flex_deg` / `hind_flex_deg` — degrees off what the stance carries, negative for straighter. See *Articulation* |
+| Legs that can be drawn up, or cannot | `fore_fold_range` / `hind_fold_range` — under 1 is a joint that will not close, which is a build that can neither crouch nor spring |
+| Weight carried high, or a long light shin | `fore_upper_share` / `hind_upper_share` |
+| Propulsion without bending the leg | `toe_push` up — the foot rolls onto its toe at the end of each stance |
 | Taller, or reaching higher | `leg_length` up (the body rides on it), `neck_lift` up (the jaws do) |
 | Something that can jump | `leap_height` — a multiple of the animal's own standing height; 0 is a body that cannot leave the ground |
 | Something that can fly | `wing_lift` up from 0 — the only thing separating gliding and high flight from a leap |
@@ -1869,7 +1987,7 @@ The parameters worth reaching for first:
 | Walks on two legs | `arm_length` under ~0.46 of `leg_length` — an arm that cannot reach the floor is carried, and nothing else is needed |
 | Gallops, bounds or hops | `leap_height` up, `max_bend_deg` up, an upright `posture` — all three, because a launch needs legs that point along the body, a back that folds and somewhere to push to |
 | Paces, and rolls doing it | long legs on a short trunk: `leg_length` up against `rear_limb_t - front_limb_t` |
-| Wider / tighter leg sweep | `limb_swing_deg`, `limb_max_reach` |
+| Wider / tighter leg sweep | `fore_swing_deg` / `hind_swing_deg` |
 | Jaws that close harder | `bite_damage` up — force at the jaws, not depth in the flesh; the teeth decide what it becomes |
 | Punctures instead of bruising | `tooth_sharpness` up and `tooth_count` down — less tooth on the flesh is more pressure through it |
 | Crushing instead of cutting | `tooth_sharpness` down — a blunt mouth does its damage through the jaw's broad bearing rather than through its points |
@@ -1896,9 +2014,14 @@ Four couplings are easy to trip over:
   tighter than itself and coils into a hook. `turn_speed_falloff` is what buys
   this back: full turn rate at a standstill for pivoting on the spot, reduced at
   speed for wide arcs.
-- **`stance_reach` should stay below ~0.85**, or the IK chain sits locked
-  straight and the legs stop looking like legs. Keep it below `limb_max_reach`
-  too, or the rest pose is already against the envelope boundary.
+- **A girdle's standing angle and its fold range pull against each other.**
+  Straightening a leg (`*_flex_deg` negative) is what makes it a pillar, and a
+  pillar has almost no plan-view reach to swing its foot across — so a build that
+  is straightened without being left some `*_fold_range` to sink into has a very
+  short stride. That is correct for an elephant and wrong for most things. The
+  two girdles are also held to within about half a step of each other: the four
+  legs share one cadence, set by whichever has the least travel, so a girdle with
+  under half its partner's stride ends up taking two steps to its one.
 - **`turn_pivot` places the low-speed turn centre**, measured back from the head.
   At the defaults it lands close to the shoulder station, so a spot pivot
   rotates the creature roughly about its front feet. The offset fades away once
@@ -2016,10 +2139,10 @@ the other senses.
 
 ## Tests
 
-Eighteen headless checks cover controls, movement feel, simulation, rendering,
+Nineteen headless checks cover controls, movement feel, simulation, rendering,
 UI, combat, sight, smell, hearing, anatomy, feeding, the bodies in the habitat,
-the vertical axis, the four stances, how the feet come down and getting past
-things:
+the vertical axis, the four stances, what a limb is and how it is joined on, how
+the feet come down and getting past things:
 
 ```sh
 godot --headless --path . --script tests/ControlsTest.gd # input/head-look isolation
@@ -2038,6 +2161,7 @@ godot --headless --path . --script tests/HeightTest.gd    # the vertical axis an
 godot --headless --path . --script tests/PostureTest.gd   # the four stances, from one angle
 godot --headless --path . --script tests/FootfallTest.gd  # what order the feet come down in
 godot --headless --path . --script tests/LocomotionTest.gd # legs solved from the foot up
+godot --headless --path . --script tests/ArticulationTest.gd # joints, girdles and the join
 godot --headless --path . --script tests/VolumeTest.gd    # every cell in three axes
 godot --headless --path . --script tests/TraversalTest.gd # under, over, onto or stopped
 ```
@@ -2060,6 +2184,33 @@ height goes straight through it; and a short neck eats the forage at its feet an
 not the forage over its head, until `neck_lift` is turned up. Last, the guarantee
 the layer rests on: with everything on the ground and an unbounded reach, the same
 bite removes the same tissue it always did.
+
+`ArticulationTest` asks the three things the joint layer claims, and asks each of
+them of the solved pose rather than of the table it came from — the angle is never
+an input to the solve, so the whole point is whether the two ends agree. That the
+angle *arrives*: every build in the file stands within a few degrees of what its
+own anatomy says. That a column stays one: a walking Elephant never bends a leg
+past 150° and its stance knee swings through under 22° over a whole stride, which
+is the difference between walking on pillars and walking by folding. That the two
+girdles differ and go on differing under load: a Cat's elbow averages 146° over a
+walk against a knee at 117°, and its back stays level over the pair. Then that
+none of it is about elephants or cats — the same two numbers moved on the default
+sprawled build straighten its legs by 40° and take its crouch away, with no preset
+and no posture touched, which is the check that would fail if the behaviour had
+been patched in at the point of use. Then the propulsion: an Elephant's planted
+feet genuinely come up off the ground, late in the stance and not while they are
+still ahead of their own shoulder, and a build with `toe_push` at zero does not do
+it at all.
+
+The last third is the join, and it is walked in the lattice rather than in the
+picture. Every limb of every build, standing, walking and folded right down, must
+have the top of its leg overlapping the flesh of the girdle it hangs from — the
+same span the flood fill, the skeleton and both supply networks cross. Then those
+three in turn: the girdle bar is under the socket rather than under wherever the
+defaults put one, there is unbroken bone from the vertebral column out to the
+socket and down the limb from there, the nerve run starts *at* the cord rather
+than out on the flank, and chewing a shoulder out cuts the supply to a limb
+nothing has touched.
 
 `PostureTest` starts with the projection, since the rest is downstream of it: each
 stance draws its feet in further and stands higher than the one before, and reach
@@ -2274,7 +2425,8 @@ feet don't creep, and every schema row round-trips through `Object.set()`.
 
 It also checks the grounding invariants, which is where the interesting failures
 live. No part of a limb may end up inboard of its own socket (a leg drawn
-through the torso); no foot may exceed `limb_max_reach` (a leg pulled straight);
+through the torso); no foot may exceed its own joint's lock-out (a leg pulled
+straight);
 no foot may fall more than 3.5 strides behind its ideal (a leg being towed
 rather than walked); and straight-line sway must stay within 5x `body_wave` (the
 spine resonating). Each one catches a distinct failure the others let through —

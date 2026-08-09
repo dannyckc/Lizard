@@ -111,6 +111,10 @@ class Body extends RefCounted:
 	## How far apart the feet stand across the body — the width of the base the
 	## animal balances on.
 	var track: float = 1.0
+	## How much the animal can lower its own sockets by folding its legs. What it
+	## has to spend on a straddle, and the reason a build with pillars for legs
+	## climbs differently from one with springs — see condition 2.
+	var fold: float = 0.0
 
 	func describe() -> String:
 		return "clearance %.0f stand %.0f socket %.0f span %.0f lift %.0f track %.0f" \
@@ -135,7 +139,12 @@ static func of(creature: Node) -> Body:
 	var shortest: float = minf(arm, leg)
 	b.clearance = stature.clearance
 	b.stand = stature.stand_height()
-	b.span = shortest * p.limb_max_reach
+	b.fold = stature.fold
+	# The shorter pair's own lock-out, which is now a fact about that girdle's
+	# joint rather than one number for the whole animal — see Articulation.
+	var joints: Articulation = creature.locomotion.articulation
+	var bind: Articulation.Joint = joints.fore if arm <= leg else joints.hind
+	b.span = shortest * bind.lock
 	# Off the gait when it has measured one, because that is the height the feet
 	# are actually holding the sockets at rather than the height the stance would
 	# like them to be. A crouching animal really can reach less far up.
@@ -143,7 +152,7 @@ static func of(creature: Node) -> Body:
 	if gait != null and gait.measured:
 		b.socket = minf(gait.shoulder_height, gait.hip_height)
 	else:
-		b.socket = posture.clearance(shortest * creature.locomotion.extension)
+		b.socket = posture.clearance(shortest * bind.stand)
 	if gait != null and not gait.limbs.is_empty():
 		var limb: Limb = gait.limbs[0]
 		b.foot = limb.foot_radius(scale)
@@ -217,7 +226,15 @@ static func assess(b: Body, base: float, top: float, breadth: float,
 	# wall — see the header for what each of them is a sentence about.
 	if rise > b.socket + b.foot:
 		return BLOCKED
-	if b.span < b.socket + rise * STRADDLE_SHARE:
+	# ...less whatever the animal can take out of its own legs on the way. An
+	# animal climbing lowers itself, which is not a trick — it is the fold the
+	# stature has already measured, spent on the one thing it is for. Without it
+	# the condition says a body standing on straight legs may never step onto
+	# anything at all, which is a true sentence about a leg that cannot bend and
+	# the wrong one about an animal: what gets an elephant onto a kerb is not spare
+	# extension it has not got, it is settling onto the three legs still on the
+	# floor while the fourth goes up.
+	if b.span < b.socket - b.fold + rise * STRADDLE_SHARE:
 		return BLOCKED
 	if breadth * 2.0 < b.track * FOOTING_SHARE:
 		return BLOCKED

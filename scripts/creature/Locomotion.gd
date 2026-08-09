@@ -47,13 +47,6 @@ extends RefCounted
 ## after the tuning panel has restructured the animal underneath it.
 const REFERENCE_LENGTH: float = 195.0
 
-## How much of its reach a standing leg keeps in hand. A leg solved at the exact
-## limit of its own envelope has nowhere left to put its foot: the clamp pins it
-## on the boundary, the distance trigger never fires and the limb is towed for as
-## long as the creature walks. Small, because it only has to keep the stance off
-## the boundary — the stride is bought with the sink below, not with this.
-const EXTENSION_MARGIN: float = 0.06
-
 ## How far the body will drop over a stride, as a share of the height it stands
 ## at. This is where an upright animal's stride comes from and it cannot come from
 ## anywhere else: a leg held near vertical has almost no plan-view reach to swing
@@ -61,6 +54,14 @@ const EXTENSION_MARGIN: float = 0.06
 ## the shoulder to come down as it goes. Which is a walk. A sprawled animal buys
 ## no stride this way and needs none — its foot is already flung out to the side
 ## and sweeps a wide arc at no cost in height at all.
+##
+## Spent out of the joint rather than granted, which is the correction a columnar
+## build needed: sinking over a stride is the limb *folding* a little as the body
+## passes over it, so an animal whose knee barely closes cannot buy stride that
+## way however much it would like to. See `sink`, where the share is taken
+## against what the joint actually has between standing and folded — and note
+## that this leaves such an animal with the swing of the whole limb and the toe
+## at the end of it, which is precisely what a heavy quadruped walks on.
 const STRIDE_SINK: float = 0.12
 ## How much of the travel a limb has, it actually uses. Short of all of it so a
 ## walking foot is not permanently sitting on its own envelope boundary.
@@ -89,6 +90,13 @@ const STANCE_FLOOR: float = 0.45
 ## out of the same travel the stride is measured in, so at 1.0 the two cancel and
 ## the stride collapses to nothing.
 const LEAD_CEILING: float = 0.75
+
+## How much of the room the lift limit leaves a body actually spends. Short of
+## all of it, because a gait held at exactly its own ceiling has no free slot at
+## any instant: a foot goes up only as another comes down, so which foot goes next
+## is whichever has been waiting longest and the footfall pattern never gets to
+## choose. The margin is what leaves it a choice.
+const SLOT_MARGIN: float = 0.85
 
 ## Swing time of a limb one pixel long, in seconds — the constant of
 ## proportionality on `sqrt(length / gravity)`. Chosen so the default build lands
@@ -164,9 +172,12 @@ const BUNCH_SHARE: float = 0.16
 ## mass^(2/3) and weight as mass, so this falls as the cube root of size all on
 ## its own — and every slow thing about a large animal below is this one number.
 var power: float = 1.0
-## How extended the legs stand, as a fraction of a bone. The species' own
-## `stance_reach`, capped at what leaves the limb an envelope to walk in.
-var extension: float = 0.78
+## What each girdle's joints do — how extended its limbs stand, how far they lock
+## out and how far they fold. Held rather than derived: it is a description of the
+## skeleton, refreshed when the body is rebuilt, and every reading below that used
+## to consult a `stance_reach` or a `limb_max_reach` parameter now asks the limb
+## it is about. See Articulation.
+var articulation: Articulation = Articulation.new()
 ## Share of its cycle each limb must have a foot on the ground.
 var duty: float = 0.5
 ## Whether the forelimbs reach the ground at all — see BEARING_RATIO. False
@@ -194,19 +205,22 @@ var spine_freedom: float = 1.0
 ## `physique` carries the mass and the muscle, and it already has this creature's
 ## damage folded into both — a limb that is present and not answering contributes
 ## its weight and none of its pull — so nothing here has to ask about injuries.
-func update(posture: Posture, physique: Physique, p: CreatureParams, scale: float) -> void:
+func update(posture: Posture, physique: Physique, p: CreatureParams, scale: float,
+		joints: Articulation = null) -> void:
 	if posture == null or physique == null or p == null:
 		return
 	power = clampf(physique.strength / maxf(physique.mass, 0.0001), 0.05, 8.0)
 
-	# A stance that reaches further than the limb's own working envelope is not a
-	# tall animal, it is an animal with no stride: the foot is clamped onto the
-	# boundary at rest, so the distance trigger can never fire and the leg is towed
-	# for as long as the creature keeps walking. The cap is the whole of what a
-	# columnar build needed and none of what a sprawled one did, because only an
-	# upright leg is ever asked to stand at nine tenths of itself.
-	extension = clampf(minf(p.stance_reach, p.limb_max_reach - EXTENSION_MARGIN),
-		0.2, 0.98)
+	# What the joints do. There is no longer a cap here, and its absence is the
+	# whole of what let a column stand up: the old one held every limb a fixed
+	# distance short of its own limit, which on a build whose standing angle is
+	# within three degrees of straight is the difference between a pillar and a
+	# permanent half-crouch. What keeps a standing joint off its stop is now the
+	# stop's own definition — see Articulation.CARRY_MARGIN_DEG — and what keeps
+	# a walking foot off its envelope boundary is the sink and the swing, which is
+	# where it always belonged.
+	if joints != null:
+		articulation = joints
 
 	# Whether there are four legs under this animal or two. Nothing selects it: an
 	# arm too short to reach the floor from a shoulder the hind legs are holding up
@@ -255,10 +269,41 @@ func update(posture: Posture, physique: Physique, p: CreatureParams, scale: floa
 		/ FLEXIBLE_SPINE, 0.0, 1.0)
 
 
+## What one girdle's joints do.
+func joint(pair: int) -> Articulation.Joint:
+	return articulation.of(pair)
+
+
+## How extended that girdle's limbs stand.
+func extension(pair: int) -> float:
+	return articulation.of(pair).stand
+
+
+## The mean of the two, for the handful of readings that are about the animal
+## rather than about one of its ends — how tall it stands before any foot has been
+## placed, chiefly. Anything asking about a limb asks the limb.
+func mean_extension() -> float:
+	return (articulation.fore.stand + articulation.hind.stand) * 0.5
+
+
 ## The span a limb of this bone stands at — the radius of the sphere its foot
 ## moves on.
-func stand(bone: float) -> float:
-	return bone * extension
+func stand(bone: float, pair: int) -> float:
+	return bone * extension(pair)
+
+
+## How far the body may sink over a stride, as a share of the height it is
+## standing at.
+##
+## Not a constant any more, and it could not be one. Sinking is the stance limb
+## folding as the body passes over it, so what is available is what the joint has
+## between where it stands and where it folds to — nearly all of it on a
+## semi-upright build, and next to nothing on a columnar leg whose knee does not
+## close. That is why an elephant walks with a level back and a cat's shoulders
+## rise and fall over every step, and neither of them was told to.
+func sink(pair: int) -> float:
+	var j: Articulation.Joint = articulation.of(pair)
+	return STRIDE_SINK * clampf((j.stand - j.fold) / maxf(j.stand, 0.0001), 0.0, 1.0)
 
 
 ## How far across the ground a foot may be placed from directly beneath its
@@ -286,8 +331,15 @@ func plan_reach(bone: float, socket_height: float, max_reach: float) -> float:
 ## underneath it. Nothing is over-extended by the difference — `_carry_body` puts
 ## a hard ceiling on the body at what its legs can actually reach, so the sinking
 ## always happens.
-func walking_reach(bone: float, socket_height: float, max_reach: float) -> float:
-	return plan_reach(bone, socket_height * (1.0 - STRIDE_SINK), max_reach)
+## `rise` is how far the foot's own toe holds the ankle off the ground over the
+## stance — the second way the gap shrinks, and on a build whose joints do not
+## fold it is much the larger of the two. A leg spanning less gap reaches further
+## across the ground, so this is the push-off spent where a columnar animal
+## actually spends it: on stride rather than on height.
+func walking_reach(bone: float, socket_height: float, max_reach: float,
+		pair: int, rise: float = 0.0) -> float:
+	return plan_reach(bone, maxf(socket_height * (1.0 - sink(pair)) - rise, 0.0),
+		max_reach)
 
 
 ## Half the fore-and-aft travel a foot has, from where it rests.
@@ -312,13 +364,14 @@ func walking_reach(bone: float, socket_height: float, max_reach: float) -> float
 ## `lat` is how far out to the side the foot rests and `fan` the joint's own
 ## limit on the sweep, which is what a stiffened limb loses first.
 func excursion(bone: float, socket_height: float, lat: float,
-		max_reach: float, fan: float) -> float:
+		max_reach: float, fan: float, pair: int, rise: float = 0.0) -> float:
 	# Short of the whole disc, for the same reason the stance is short of the whole
 	# leg. Size the travel to the exact edge and the design point *is* the
 	# boundary: the foot arrives there whenever its stride extreme and the body's
 	# sway peak land on the same tick, and a foot on the boundary is a foot the
 	# clamp is skidding.
-	var across: float = walking_reach(bone, socket_height, max_reach) * TRAVEL_MARGIN
+	var across: float = walking_reach(bone, socket_height, max_reach, pair, rise) \
+		* TRAVEL_MARGIN
 	# However wide the stance and however far the body throws itself, a limb is
 	# left something to walk with. Without the floor a body that swayed as far as
 	# its own leg reaches would be given a stride of nothing at all — and a stride
@@ -330,7 +383,7 @@ func excursion(bone: float, socket_height: float, lat: float,
 	# stance — the reach above runs out first — but it is the whole of what a limb
 	# that has lost its range of motion has left, and it is what makes that limb
 	# take short steps rather than being quietly dragged.
-	return minf(travel, stand(bone) * sin(clampf(fan, 0.0, PI * 0.5)))
+	return minf(travel, stand(bone, pair) * sin(clampf(fan, 0.0, PI * 0.5)))
 
 
 ## The widest a foot may rest from the line under its own socket.
@@ -381,8 +434,21 @@ func swing_time(bone: float) -> float:
 ## This is the duty factor stated as a deadline, and it is what keeps three feet
 ## under a columnar animal instead of letting two legs use the whole of a
 ## single-support gait between them.
-func swing_budget(cycle: float) -> float:
-	return maxf(cycle * (1.0 - duty), SWING_FLOOR)
+##
+## `aloft_share` is the second half of the same arithmetic and it was missing.
+## Over one cycle every leg spends the same share of it in the air, so the mean
+## number of feet off the ground is that share times the number of legs — and no
+## more than `Footfall.lift_limit` of them may be off at once. A duty factor that
+## asks for more than the lift limit allows is not a fast gait; it is a body
+## permanently saturated at its own ceiling, where a foot goes up whenever a slot
+## falls free rather than when the pattern says. What comes out is four legs
+## taking turns in the order they happened to become overdue in, which is the one
+## thing the footfall pattern exists to replace — and it is invisible until a
+## build has enough interference to want something other than the even four-beat
+## that order produces.
+func swing_budget(cycle: float, aloft_share: float = 1.0) -> float:
+	return maxf(cycle * minf(1.0 - duty, maxf(aloft_share, 0.05) * SLOT_MARGIN),
+		SWING_FLOOR)
 
 
 ## How quickly the body settles onto the height its feet are holding it at, given

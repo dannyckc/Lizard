@@ -33,6 +33,25 @@
 ##     lines outside it, and it is the whole of the difference — the stride, the
 ##     envelope and the fold plane are all read off it below.
 ##
+## A fourth reading is not a projection at all but the same fact stated at the
+## other end of the limb, and it is what the table was missing:
+##
+##   * `joint` — the angle the elbow or knee is carried at while the animal
+##     stands on it. How upright a limb is held and how straight its joint is
+##     carried are one fact about a skeleton, not two: a leg swung out sideways
+##     is a leg folded up under its own shoulder, and a leg stacked underneath
+##     the body is two bones very nearly in line. An animal standing sprawled
+##     with locked elbows does not exist, and neither does a column with a bent
+##     knee — which is precisely what a columnar build was being drawn as for as
+##     long as the stance said nothing about the joint and a preset set it to the
+##     same three-quarters-extended crouch every other animal used.
+##
+## `joint_lock` and `joint_fold` are the two stops either side of it, and they
+## are the stance's business for the same reason: what a limb held as a pillar
+## can do is stand and swing, and what one folded under a body can do is crouch,
+## gather and spring. Articulation reads all three, and a species leans on them
+## per girdle rather than replacing them.
+##
 ## The rest of the table is per-posture tuning, and it is deliberately a table
 ## rather than four code paths. Nothing below names a gait, a species or a
 ## behaviour: they are multipliers on numbers the existing systems already read,
@@ -98,7 +117,17 @@ const TABLE: Array[Dictionary] = [
 		# top-to-bottom. The spine does much of the walking: a sprawled stride is
 		# lengthened by the lateral wave, which is why undulation is left at full
 		# strength here and taken away from the two upright builds.
+		#
+		# A sprawled elbow is folded to a right angle and a little over: the
+		# humerus runs out sideways and the forearm turns down to the floor, so
+		# the two bones meet at very nearly the corner they draw. It is also the
+		# joint with the least to give either way — a limb already folded has
+		# little further to fold, and one built to row rather than to bear never
+		# straightens out at all.
 		"tilt_deg": 12.0,
+		"joint_deg": 102.0,
+		"joint_lock_deg": 140.0,
+		"joint_fold_deg": 35.0,
 		"socket_inset": 0.0,
 		"depth_ratio": 0.60,
 		"wave_gain": 1.0,
@@ -115,7 +144,15 @@ const TABLE: Array[Dictionary] = [
 		# the torso that alone hides the upper bone — the occlusion is the body
 		# standing over its own shoulder, not a decision to stop drawing part of
 		# a leg.
+		#
+		# The joint comes up out of its crouch with the limb, but only halfway: a
+		# semi-upright build is the one that keeps a bend in reserve everywhere,
+		# which is where its leap comes from and why it is the springiest thing in
+		# the file.
 		"tilt_deg": 50.0,
+		"joint_deg": 132.0,
+		"joint_lock_deg": 158.0,
+		"joint_fold_deg": 38.0,
 		"socket_inset": 0.42,
 		"depth_ratio": 0.92,
 		"wave_gain": 0.30,
@@ -143,6 +180,12 @@ const TABLE: Array[Dictionary] = [
 		# it is what lets an erect animal have two feet — or on the run, all four —
 		# off the ground at once, which is what a springing gait is made of.
 		"tilt_deg": 66.0,
+		# A long-striding runner stands with its joints well open and its stops far
+		# apart: it needs the extension to cover ground and the fold to gather, and
+		# it is the only stance that wants both at once.
+		"joint_deg": 150.0,
+		"joint_lock_deg": 168.0,
+		"joint_fold_deg": 40.0,
 		# Sockets barely inboard. The limb is already directly beneath the shoulder
 		# at this tilt, and drawing the socket in as well would put the whole leg
 		# inside the silhouette on an animal that is defined by the length of its
@@ -169,6 +212,18 @@ const TABLE: Array[Dictionary] = [
 		# animal built like this is going slowly for its size whatever it does, so
 		# the walking regime is where its own proportions leave it.
 		"tilt_deg": 72.0,
+		# Two bones very nearly in line, and the joint between them barely opens or
+		# closes at all. That is what a column *is*, and it is where every other
+		# consequence of this stance comes from: an animal whose legs are pillars
+		# cannot bend them to crouch, cannot fold them to spring, and does not lose
+		# height as it walks over its own feet — so what it has instead of a stride
+		# bought by sinking is a stride bought by swinging, and a push off the toe
+		# at the end of it. The old table said nothing about the joint, so this
+		# build stood at the same three-quarters-extended crouch as everything else
+		# and read as an animal permanently about to sit down.
+		"joint_deg": 170.0,
+		"joint_lock_deg": 177.0,
+		"joint_fold_deg": 58.0,
 		# Less inset than the semi-upright stance, not more, and the reason is the
 		# view rather than the anatomy: a columnar body is drawn high enough that
 		# the tilt alone already hides the top of every leg, and the far pair then
@@ -190,6 +245,13 @@ const TABLE: Array[Dictionary] = [
 var kind: int = SPRAWLED
 ## The trait, in radians.
 var tilt: float = 0.0
+## The same trait seen at the other end of the limb: the included angle the elbow
+## or knee is carried at while standing, and the two stops either side of it. All
+## three in radians, and all three read by Articulation rather than here — this
+## file owns what a stance *is*, and a stance is a whole limb rather than a socket.
+var joint: float = 0.0
+var joint_lock: float = 0.0
+var joint_fold: float = 0.0
 ## Fraction of the body's half-width the limb socket is drawn inboard by.
 var socket_inset: float = 0.0
 ## The body's vertical thickness as a multiple of its drawn width. Sprawled
@@ -223,6 +285,9 @@ func configure(p_kind: int) -> void:
 	kind = clampi(p_kind, 0, COUNT - 1)
 	var row: Dictionary = TABLE[kind]
 	tilt = deg_to_rad(float(row["tilt_deg"]))
+	joint = deg_to_rad(float(row["joint_deg"]))
+	joint_lock = deg_to_rad(float(row["joint_lock_deg"]))
+	joint_fold = deg_to_rad(float(row["joint_fold_deg"]))
 	socket_inset = float(row["socket_inset"])
 	depth_ratio = float(row["depth_ratio"])
 	wave_gain = float(row["wave_gain"])

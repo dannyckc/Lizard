@@ -120,6 +120,7 @@ func _check_the_body_stands_on_its_feet(player: Creature) -> void:
 		var drive := MovementInput.Command.new()
 		drive.throttle = 1.0
 		var worst: float = 0.0
+		var limit: float = INF
 		var low: float = INF
 		var high: float = -INF
 		for tick in 300:
@@ -132,14 +133,21 @@ func _check_the_body_stands_on_its_feet(player: Creature) -> void:
 			for limb in player.gait.limbs:
 				if limb.stepping:
 					continue
+				# Socket to *foot*, not socket to ground. The two are the same on a
+				# flat-footed animal and they part company the moment one rolls onto
+				# its toe at the end of a stance phase — the ankle comes off the floor
+				# and the leg above it is no longer spanning the whole gap. Measured
+				# to the ground it would read as a leg stretched past its own bones by
+				# exactly the push-off, which is a limb doing its job.
+				var lift: float = limb.socket_height - limb.foot_height
 				var span: float = sqrt(
-					limb.plan[0].distance_squared_to(limb.planted)
-					+ limb.socket_height * limb.socket_height)
+					limb.plan[0].distance_squared_to(limb.planted) + lift * lift)
 				worst = maxf(worst, span / (limb.lengths[0] + limb.lengths[1]))
+				limit = minf(limit, limb.lock)
 		player.command = MovementInput.Command.new()
-		_check(worst <= player.params.limb_max_reach + 0.01,
+		_check(worst <= limit + 0.01,
 			"a standing %s was held %.3f of a leg off its own foot (limit %.2f)"
-				% [preset, worst, player.params.limb_max_reach])
+				% [preset, worst, limit])
 		_check(player.stature.clearance > 0.0, "%s stood at no height at all" % preset)
 		lines.append("%s rides %.0f-%.0f px" % [preset, low, high])
 
@@ -147,9 +155,14 @@ func _check_the_body_stands_on_its_feet(player: Creature) -> void:
 	# what the legs can extend to, touching nothing about the stance, and the body
 	# comes down onto what is left — because there is nothing else deciding how
 	# high it rides.
+	# Take away some of what the joints can straighten to — a stance thirty degrees
+	# more flexed, and nothing else touched — and the body comes down onto what is
+	# left, because there is nothing else deciding how high it rides.
 	_apply(player, "Elephant")
 	var stood: float = player.gait.support
-	player.params.limb_max_reach = 0.75
+	player.params.fore_flex_deg += 30.0
+	player.params.hind_flex_deg += 30.0
+	player.rebuild()
 	for _tick in 60:
 		player._physics_process(TICK)
 	_check(player.gait.support < stood - 4.0,

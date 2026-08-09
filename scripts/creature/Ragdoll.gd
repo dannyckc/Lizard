@@ -28,7 +28,7 @@ const LIMB_DAMPING: float = 0.35
 ## Relaxation passes over one limb. Two bones and two limits settle in very few.
 const LIMB_ITERATIONS: int = 4
 ## Widest fan a settled foot may sit in, measured from the limb's rest stance.
-## Wider than the gait's `limb_swing_deg`, because sprawling is exactly what a
+## Wider than the gait's own swing fan, because sprawling is exactly what a
 ## dead limb does — that parameter is a constraint on walking. The hard
 ## anatomical limits inside `clamp_to_envelope` still bind first.
 const SPRAWL_DEG: float = 88.0
@@ -99,14 +99,17 @@ func _lay_flat(limb: Limb, a: Spine.Frame, p: CreatureParams, scale: float) -> v
 	limb.socket_height = 0.0
 	limb.foot_height = 0.0
 	limb.reference = 0.0
+	limb.toe = 0.0
 	# The whole of the bone, less whatever the envelope holds back from a
 	# locked-out chain — a limb lying flat has no height to spend, so its plan
-	# reach is simply its reach.
-	limb.plan_limit = limb.total_length * p.limb_max_reach
+	# reach is simply its reach. Its own lock-out, because a dead animal's joints
+	# are the joints it had: a graviportal leg lies out nearly straight and a
+	# folded one does not.
+	limb.plan_limit = limb.total_length * limb.lock
 	limb.inboard_limit = 0.0
 	# Straight out to the side: a limp limb has no swing plane to have rotated,
 	# so the whole of its rest radius is lateral.
-	limb.set_stance(a, p, limb.total_length * p.stance_reach, 1.0)
+	limb.set_stance(a, p, limb.total_length * limb.stand, 1.0)
 
 
 ## Takes over four limbs exactly where the gait left them.

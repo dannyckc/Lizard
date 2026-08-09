@@ -66,6 +66,22 @@ func reset() -> void:
 	state.reset()
 
 
+## Moves the girdles under wherever this species hangs its limbs, and rebuilds
+## everything laid out against them.
+##
+## The pairing is the same one `set_fat_reserve` makes and for the same reason: a
+## skeleton re-laid under a lattice that still has the old one's bone flags in it
+## is an animal with two skeletons. So the plan answers whether anything moved,
+## and only then is the tissue re-laid and the functional state read off it again.
+## A slider that leaves the girdles where they were costs one integer comparison.
+func set_girdles(front: float, rear: float) -> void:
+	if not plan.set_girdles(front, rear):
+		return
+	tissue.rebuild_layout()
+	state.configure(plan)
+	state.reset()
+
+
 ## Re-lays this species' fat, and the functional state that was read off the old
 ## body with it.
 ##

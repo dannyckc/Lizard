@@ -85,6 +85,10 @@ func _run_case(preset_name: String) -> void:
 	# reaches, and how far behind its ideal the gait ever lets a foot fall.
 	var worst_inboard: float = 99.0
 	var max_limb_reach: float = 0.0
+	## The straightest any of this animal's limbs may be drawn. Per girdle now —
+	## see Articulation — so the limit is the looser of the two and every limb is
+	## measured against it.
+	var reach_limit: float = 0.0
 	var max_foot_drift: float = 0.0
 	# undulation: peak sway while walking dead straight from the origin, so the
 	# undisturbed path is y = 0 and |y| is the sway directly.
@@ -198,6 +202,7 @@ func _run_case(preset_name: String) -> void:
 				anchor.pos.distance_squared_to(limb.plan[2]) + lift * lift)
 			max_limb_reach = maxf(max_limb_reach,
 				span / maxf(limb.lengths[0] + limb.lengths[1], 0.001))
+			reach_limit = maxf(reach_limit, limb.lock)
 			max_foot_drift = maxf(max_foot_drift, limb.error / maxf(limb.stride, 0.001))
 		max_airborne = maxi(max_airborne, airborne)
 		# What this build is allowed at the speed it is currently going. Read off
@@ -232,7 +237,7 @@ func _run_case(preset_name: String) -> void:
 		% [label, max_seg_error, worst_seg_tick, worst_seg_index, max_bend_excess, max_bone_error,
 			steps_taken, max_airborne, idle_drift, distance_travelled])
 	print("%-14s limb: inboard=%+.3f  reach=%.3f/%.2f  drift=%.2f x stride   sway=%.1f px (%.1f x body_wave)"
-		% ["", worst_inboard, max_limb_reach, params.limb_max_reach, max_foot_drift,
+		% ["", worst_inboard, max_limb_reach, reach_limit, max_foot_drift,
 			max_sway, max_sway / maxf(params.body_wave, 0.001)])
 
 	if nan_seen:
@@ -257,9 +262,9 @@ func _run_case(preset_name: String) -> void:
 			% [label, -worst_inboard])
 	# Past the reach limit the chain is pulled straight and stops reading as a
 	# leg; 1% of slack covers the solver's tolerance.
-	if max_limb_reach > params.limb_max_reach + 0.01:
+	if max_limb_reach > reach_limit + 0.01:
 		failures.append("%s stretched a limb to %.3f of its reach (limit %.2f)"
-			% [label, max_limb_reach, params.limb_max_reach])
+			% [label, max_limb_reach, reach_limit])
 	# Feet may fall behind — the diagonal gate makes them queue — but a foot
 	# several strides adrift is being towed, not walked.
 	if max_foot_drift > 3.5:

@@ -425,7 +425,10 @@ func _check_dead_nerve_drags(c: Creature) -> void:
 		_walk(c, 1)
 		dead_steps += 1 if dead.stepping else 0
 		live_steps += 1 if live.stepping else 0
-		dead_lift = maxf(dead_lift, dead.lift)
+		# How far the foot is off whatever it is standing on. Not `foot_height`,
+		# which is measured from the world's floor and so reads a leg standing on a
+		# ledge as a foot in the air.
+		dead_lift = maxf(dead_lift, dead.foot_height - dead.surface)
 	_check(dead_steps == 0,
 		"a limb with no nerve took %d ticks of steps" % dead_steps)
 	_check(live_steps > 0, "the sound limb stopped walking too")

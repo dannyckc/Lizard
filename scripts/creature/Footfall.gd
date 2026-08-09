@@ -108,6 +108,14 @@ const SUSPENSION_AT: float = 0.55
 ## collapsed every pattern back into a trot.
 const BEAT_WINDOW: float = 0.12
 
+## How much same-side interference a build can carry before it starts moving the
+## pair together, and how much of it settles the matter. Both are shares of the
+## two legs' combined travel — see `interference` — and the span between them is
+## deliberately narrow, because the thing being described is a build either having
+## room for its own feet or not having it.
+const INTERFERENCE_FREE: float = 0.20
+const INTERFERENCE_FULL: float = 0.55
+
 
 # --- what the pattern currently is -------------------------------------------
 # All three are read out rather than set. Between them they are the footfall
@@ -230,7 +238,16 @@ func update(posture: Posture, loco: Locomotion, p: CreatureParams,
 	# once and then have nothing for half a cycle; interference pulls it the other
 	# way toward a pace. Both are pulls on one number rather than three cases.
 	var symmetric: float = lerpf(0.5, 0.25, caution)
-	symmetric = lerpf(symmetric, 0.0, interference)
+	# Interference is not a preference and does not blend like one. Either a hind
+	# foot swinging forward arrives where the forefoot on the same side is standing
+	# or it does not, and an animal with the problem commits to the way out rather
+	# than going part of the way toward it — which is why a camel paces and does not
+	# spend its life half-pacing. Blended linearly the same 0.6 of a problem came
+	# out as 0.6 of a solution: a lag too large for the two legs to be one footfall,
+	# so they were never coupled, and what the animal actually did was trot with a
+	# pattern politely asking for something else.
+	symmetric = lerpf(symmetric, 0.0,
+		smoothstep(INTERFERENCE_FREE, INTERFERENCE_FULL, interference))
 	# Past the symmetrical family the fore girdle falls behind instead: the hind
 	# pair gathers, launches, and the forelimbs land late into the next stride.
 	girdle_lag = lerpf(symmetric, GALLOP_LAG, aerial)

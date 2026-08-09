@@ -132,10 +132,6 @@ var support: float = 0.0
 ## placed four feet, and until then nothing may read them: a body with no gait
 ## solved has no feet to be standing on and has to fall back on its posture.
 var measured: bool = false
-## How extended the legs are actually standing this tick — the locomotion's own
-## answer, less whatever the animal is folding away to get its mouth lower. Read
-## rather than set by anything outside: it is what the crouch *is*.
-var stance_extension: float = 0.78
 
 # --- how the body is tipped on its feet ---------------------------------------
 # The other half of the same measurement `shoulder_height` and `hip_height` are.
@@ -247,7 +243,6 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		return
 
 	var top_speed: float = maxf(p.move_speed * scale, 1.0)
-	var swing: float = deg_to_rad(p.limb_swing_deg)
 	var impaired: bool = state != null and state.impaired
 	var arm: float = p.arm_length * scale
 	var leg: float = p.leg_length * scale
@@ -255,24 +250,28 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 	# quoted separately because they are held up by different bones: a body with
 	# short arms stands nose-down, and nothing had to decide that it should.
 	#
-	# Against `stance_reach` of the bone rather than the whole of it, and that is
-	# not a fudge factor: a standing animal's legs are bent, and a stance quoted
-	# against a locked-out leg is one the limb has nothing left to walk with. A
-	# columnar build is where it shows — asked for the full 95% of its leg it
-	# stands at the exact limit of its own reach, and a foot at the limit of its
-	# reach cannot be moved forward at all, so the creature stands rigid and
-	# glides. Every other number the stance is built from is already quoted this
-	# way, so the rest pose comes out consistent: extended this far, at this
-	# angle, is one leg described once.
+	# Against what the joint stands at rather than against the whole bone, and that
+	# is an angle rather than a fudge factor: an elbow at a hundred and two degrees
+	# is a chain measuring seventy-eight per cent of itself, and one at a hundred
+	# and seventy-three is a chain measuring ninety-nine and a half. Both are legs
+	# a real animal stands on, and the second was previously unreachable — which is
+	# why every build in the game stood in the same crouch. See Articulation.
 	#
 	# ...and then folded, by however much of its fold the animal is spending on
 	# being lower. Nothing else about the crouch is written anywhere: a leg held
 	# at less of itself is a shorter leg, so the stance comes in, the body comes
 	# down with it, and the bands, the silhouette and the picture follow because
 	# every one of them is read off the height the feet are holding.
-	var rest: float = _stance_extension(crouch)
-	stance_extension = rest
-	var wants := Vector2(posture.clearance(arm * rest), posture.clearance(leg * rest))
+	#
+	# Per girdle, because the two ends of an animal are not the same limb. A cat
+	# carries a straight strut in front and a folded spring behind, so its
+	# shoulders and its hips are held up by legs standing at quite different
+	# fractions of themselves — and the fact that they arrive at nearly the same
+	# height is a consequence of the bones being different lengths, not of anything
+	# levelling the body.
+	var wants := Vector2(
+		_rest_clearance(arm, _stance_extension(crouch, Limb.FRONT), p, Limb.FRONT),
+		_rest_clearance(leg, _stance_extension(crouch, Limb.REAR), p, Limb.REAR))
 	if not measured:
 		# Somewhere for the first limb solve to hang its sockets from. Replaced by
 		# a real reading of the feet at the end of this same tick.
@@ -299,7 +298,19 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		var a: Spine.Frame = body.anchors[limb.key]
 		var front: bool = limb.pair == Limb.FRONT
 		var bone: float = arm if front else leg
-		limb.set_lengths(bone, posture.drawn_reach(bone))
+		# How much of the stance radius goes out to the side rather than fore and
+		# aft: the tilt again, taken a second time, and the species' own width.
+		var lean: float = cos(posture.tilt) * p.stance_width
+		# What this limb's own girdle does with itself, cached onto the limb before
+		# anything below asks. Everything that used to be a whole-animal parameter —
+		# how extended it stands, how far it may straighten, how tightly it folds,
+		# how wide it swings, how the two bones divide — is read here and read once,
+		# so the gait, the IK, the height solve and the overlay cannot disagree.
+		var joint: Articulation.Joint = loco.joint(limb.pair)
+		limb.read_joint(joint)
+		limb.working = _stance_extension(crouch, limb.pair)
+		limb.set_lengths(bone, posture.drawn_reach(bone), joint.upper)
+		limb.foot_size = limb.foot_radius(scale)
 		limb.swing_base = loco.swing_time(bone)
 		limb.reference = reference
 		# How high this socket is being carried — measured last tick off the feet
@@ -330,8 +341,27 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		# down would settle into a permanent splay-legged crouch with its shoulders
 		# at half height. The envelope is a property of the stance; the sag is what
 		# happens inside it.
+		# ...and how much of the gap the foot's own toe takes out of it over the
+		# stance. Half the peak, because the toe rolls up progressively and the disc
+		# it is sizing is symmetrical while the push-off is not: all of it happens at
+		# the back, where the foot needs the reach, and none at the front.
+		var push: float = limb.foot_size * limb.push * 0.5 * limb.flex
 		limb.plan_limit = loco.walking_reach(bone, wants.x if front else wants.y,
-			_max_reach(limb, p))
+			_max_reach(limb), limb.pair, push)
+		# ...and again, now that there is a reach to narrow the stance against. The
+		# height everything below is sized at is the height this animal *stands* at,
+		# which is neither the posture's guess nor where the wave has it this
+		# instant: the stance is squeezed inward to leave the stride room, and a
+		# squeezed stance is a foot closer in, which is a socket held higher.
+		#
+		# With the wave taken out, and that is not a detail. The envelope is sized
+		# off this height and a height that breathed with the body's own undulation
+		# would be an envelope that breathed — so the radius a planted foot is
+		# clamped into would move under it twice a cycle and skid it along.
+		var steady: float = sqrt(maxf(pow(bone * limb.working, 2.0)
+			- _steady_stance(limb, p, lean), 0.0))
+		limb.plan_limit = loco.walking_reach(bone, steady, _max_reach(limb),
+			limb.pair, push)
 
 		# Where this foot rests, then: the circle the leg reaches across at the
 		# stance it stands in, and how much of it the swing plane has left out to
@@ -342,10 +372,32 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		# happen — see Locomotion.stance_limit. The two are spent out of one disc,
 		# and a stance that uses the whole of it is an animal with no stride and
 		# feet that are dragged by its own wave.
-		var lean: float = cos(posture.tilt) * p.stance_width
-		limb.set_stance(a, p, minf(posture.plan_reach(bone * rest) * limb.reach,
+		limb.set_stance(a, p, minf(
+			posture.plan_reach(bone * limb.working) * limb.reach,
 			loco.stance_limit(limb.plan_limit, limb.sway) / maxf(lean, 0.0001)), lean)
 		limb.inboard_limit = body.socket_out.get(limb.key, 0.0) * posture.adduction()
+
+		# ...and now the height again, off the stance the limb actually stands in
+		# rather than the one it was quoted. The two are the same whenever the
+		# posture gets the width it asked for and they part company whenever it does
+		# not — which is every sprawled build, whose stance is squeezed inward to
+		# leave the stride room. Left unrefined, the levelling term spends every
+		# tick pulling the body below what its own legs are holding it at and the
+		# legs bend to meet it, which is a creature standing a good deal more folded
+		# than its joints say.
+		#
+		# Measured with the sway taken out, and that is not a detail. The envelope
+		# is sized off this height, and a height that breathed with the body's own
+		# wave would be an envelope that breathed — so the radius a planted foot is
+		# clamped into would move under it twice a cycle and skid it. The stance is
+		# narrowed by the wave; where the animal *stands* is not.
+		# ...and the height this limb is actually holding its end of the body at,
+		# which is the stance it ended up in and so does move with the wave. It is
+		# the levelling term rather than the envelope: where the body wants to be
+		# rather than where its foot may go, and the two want different answers to
+		# the same question for the reason above.
+		limb.rest_height = sqrt(maxf(pow(bone * limb.working, 2.0)
+			- Vector2(limb.rest_lat, limb.rest_fore).length_squared(), 0.0))
 
 		# ...and how much of that the fore-and-aft swing may use — see
 		# Locomotion.excursion. Quoted at the bottom of the animal's own bob, so it
@@ -369,10 +421,14 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		# clamps the foot into — and a stride longer than the travel a limb has is
 		# not a long stride, it is no stride at all: the trigger can never fire and
 		# the leg is towed for as long as the creature walks.
+		# ...and the width that travel was measured against, kept so the placement
+		# cannot exceed it. One disc, spent once: whatever the stance and the body's
+		# own wave are using sideways is not available fore-and-aft, and a foot put
+		# down outside it would be taking the stride's share of the budget.
+		limb.lat_limit = absf(limb.rest_lat) + limb.sway
 		limb.sweep_limit = maxf(
-			loco.excursion(bone, wants.x if front else wants.y,
-				absf(limb.rest_lat) + limb.sway,
-				_max_reach(limb, p), _swing_fan(limb, swing)),
+			loco.excursion(bone, steady, limb.lat_limit,
+				_max_reach(limb), _swing_fan(limb), limb.pair, push),
 			0.001)
 
 		# Stride is that travel, and nothing else. Not a species number capped by
@@ -395,9 +451,19 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		# the trigger fired only after the foot had been skidded along its own
 		# envelope for the last few pixels. A stance that wants a longer stride
 		# already has one, because it stands its legs at a different angle.
-		limb.stride = loco.stride(limb.sweep_limit, p.foot_lead) \
-			* (0.45 + 0.55 * limb.pace) * lerpf(STRIDE_FLOOR, 1.0, limb.drive)
+		# ...and how long a step this limb could take if nothing else on the animal
+		# had a say. It has not got the last word — see `_share_stride`, which is
+		# where a body of four legs becomes one gait — so what is written here is a
+		# capacity rather than the answer.
+		limb.stride = loco.stride(limb.sweep_limit, p.foot_lead)
 
+	# --- 1a. one animal, one stride -----------------------------------------
+	_share_stride()
+
+	for limb in limbs:
+		if _skip(limb):
+			continue
+		var a: Spine.Frame = body.anchors[limb.key]
 		limb.plan[0] = a.pos
 		limb.joints[0] = a.pos + Posture.drop(limb.socket_height, reference)
 		limb.heights[0] = limb.socket_height
@@ -454,6 +520,7 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		# always the floor — it is the top of whatever this foot is standing on, and
 		# on the open plain that is the same number it always was.
 		limb.surface = _surface_under(limb, limb.planted, scale, surface_query)
+		_read_toe(limb, a)
 		limb.foot_height = _hold(limb, airborne)
 		# Against what the joint can do rather than against the stride, and the two
 		# are different questions. `sweep_limit` is how far this limb *walks*: it is
@@ -463,7 +530,7 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		# somewhere it can perfectly well stand. Held to the stride instead, it is
 		# hauled back into the corridor every tick while the contact pass pushes it
 		# out again, and the leg buzzes between the two forever.
-		limb.planted = limb.clamp_to_envelope(a, limb.planted, _swing_fan(limb, swing))
+		limb.planted = limb.clamp_to_envelope(a, limb.planted, _swing_fan(limb))
 		limb.error = limb.planted.distance_to(limb.ideal)
 
 	# --- 1b. what pattern are these four feet in? ---------------------------
@@ -532,7 +599,7 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 	# rather than failing every limb's test is the same distinction `_skip` draws:
 	# these legs are not stepping badly, they are not stepping.
 	if airborne:
-		_carry_body(delta, p, wants)
+		_carry_body(delta, wants)
 		for limb in limbs:
 			if not _skip(limb):
 				_solve_limb(limb, body, p, scale, collision_query)
@@ -636,7 +703,7 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 	#
 	# Settling first, the chain is solved to a body that is already standing where
 	# these feet put it.
-	_carry_body(delta, p, wants)
+	_carry_body(delta, wants)
 	for limb in limbs:
 		if _skip(limb):
 			continue
@@ -820,8 +887,8 @@ func _mark_beat(limb: Limb) -> void:
 ##
 ## Only feet that are down are asked. A limb in the air is not carrying anything,
 ## and a limb that cannot bear weight has already said so.
-func _carry_body(delta: float, p: CreatureParams, wants: Vector2) -> void:
-	var rear: float = _pair_support(Limb.REAR, p, wants.y)
+func _carry_body(delta: float, wants: Vector2) -> void:
+	var rear: float = _pair_support(Limb.REAR, wants.y)
 	# A girdle with nothing under it is not held up by legs — it is held up by the
 	# back. That is what the front of a two-legged animal is doing, and it is why
 	# nothing had to write a special pose for one: the shoulders ride level over
@@ -830,7 +897,7 @@ func _carry_body(delta: float, p: CreatureParams, wants: Vector2) -> void:
 	# the height bands, the bite reach, the drawn attitude — follows without a
 	# single line knowing the creature is bipedal.
 	var front: float = rear if not loco.forelimbs_bear \
-		else _pair_support(Limb.FRONT, p, wants.x)
+		else _pair_support(Limb.FRONT, wants.x)
 	# Weight takes a moment to settle onto a leg, but a body that has just been
 	# built is not settling onto anything — it is already standing there. Easing
 	# in from the posture's guess instead would spend the first third of a second
@@ -852,10 +919,10 @@ func _carry_body(delta: float, p: CreatureParams, wants: Vector2) -> void:
 	# leaves it a fraction of a second above its own feet after every fast
 	# placement, and a body above its feet is a body floating — which is the whole
 	# thing the vertical limb solve exists to prevent.
-	shoulder_height = minf(lerpf(shoulder_height, front, response), _pair_ceiling(Limb.FRONT, p))
-	hip_height = minf(lerpf(hip_height, rear, response), _pair_ceiling(Limb.REAR, p))
+	shoulder_height = minf(lerpf(shoulder_height, front, response), _pair_ceiling(Limb.FRONT))
+	hip_height = minf(lerpf(hip_height, rear, response), _pair_ceiling(Limb.REAR))
 	support = (shoulder_height + hip_height) * 0.5
-	_carry_corners(response, p, wants)
+	_carry_corners(response)
 
 
 ## The same measurement again, one leg at a time, and the whole of the creature's
@@ -886,14 +953,19 @@ func _carry_body(delta: float, p: CreatureParams, wants: Vector2) -> void:
 ## A limb in the air holds nothing, so its corner eases toward the *pair's* height
 ## rather than toward the floor — the body over an unsupported corner is held by
 ## the girdle and the back, not dropped.
-func _carry_corners(response: float, p: CreatureParams, wants: Vector2) -> void:
+func _carry_corners(response: float) -> void:
 	for limb in limbs:
 		var held: float = shoulder_height if limb.pair == Limb.FRONT else hip_height
 		if not _skip(limb) and limb.bearing and not limb.stepping \
 				and limb.carry >= SUPPORT_MIN:
-			var wanted: float = wants.x if limb.pair == Limb.FRONT else wants.y
-			held = lerpf(limb.support_height(stance_extension),
-				limb.surface + wanted, loco.absorbed)
+			# The clearance this pair asks for, measured from wherever its foot
+			# currently is rather than from the floor — which on a foot rolled up
+			# onto its toe is a little above the floor. Left off, the levelling term
+			# spends the whole push-off arguing with it: the leg lifts the body and
+			# the level pulls it back down, and what comes out is a columnar limb
+			# solved twenty degrees more bent than it stands.
+			held = lerpf(limb.support_height(limb.working),
+				limb.surface + limb.toe_rise() + limb.rest_height, loco.absorbed)
 		# Eased toward what the leg is offering, and *then* cut off at what it can
 		# physically reach — the same two-step the girdles get and in the same
 		# order, which is the whole of why the order matters. Clamping the target
@@ -904,7 +976,7 @@ func _carry_corners(response: float, p: CreatureParams, wants: Vector2) -> void:
 		# nothing, but it is still attached, and the body may not ride away from it.
 		var settled: float = lerpf(float(corner[limb.key]), held, response)
 		if not _skip(limb) and limb.bearing and limb.carry >= SUPPORT_MIN:
-			settled = minf(settled, limb.carry_ceiling(_max_reach(limb, p)))
+			settled = minf(settled, limb.carry_ceiling(_max_reach(limb)))
 		corner[limb.key] = settled
 
 	# The two differences, over the two lengths they are spread across. The levers
@@ -917,6 +989,34 @@ func _carry_corners(response: float, p: CreatureParams, wants: Vector2) -> void:
 	pitch = (shoulder_height - hip_height) / along
 	roll = ((float(corner["FL"]) + float(corner["RL"]))
 		- (float(corner["FR"]) + float(corner["RR"]))) * 0.5 / across
+
+
+## The line the body tips about: the midpoint of the four sockets, and the
+## animal's own fore-aft axis through it.
+##
+## The same two the picture is sheared about — shoulders to hips, which is the one
+## line on a creature that does not swing when it looks at something — so the
+## drawn attitude and the volume underneath it cannot disagree about which way the
+## body is leaning or where it is leaning about.
+func girdle_line() -> Array:
+	var fore := Vector2.ZERO
+	var rear := Vector2.ZERO
+	var counted := Vector2.ZERO
+	for limb in limbs:
+		if limb.pair == Limb.FRONT:
+			fore += limb.plan[0]
+			counted.x += 1.0
+		else:
+			rear += limb.plan[0]
+			counted.y += 1.0
+	if counted.x <= 0.0 or counted.y <= 0.0:
+		return [Vector2.ZERO, Vector2.RIGHT]
+	fore /= counted.x
+	rear /= counted.y
+	var axis: Vector2 = fore - rear
+	if axis.length_squared() < 0.0001:
+		return [(fore + rear) * 0.5, Vector2.RIGHT]
+	return [(fore + rear) * 0.5, axis.normalized()]
 
 
 ## Distance between the two girdles' sockets, measured on the ground plane.
@@ -972,7 +1072,7 @@ func _track() -> float:
 ## a levelling term that had forgotten to say so would cap the body at the height
 ## it stands at on the floor and quietly pin the animal to the ground it had just
 ## climbed off.
-func _pair_support(pair: int, p: CreatureParams, wants: float) -> float:
+func _pair_support(pair: int, wants: float) -> float:
 	var held: float = INF
 	var floor_height: float = INF
 	for limb in limbs:
@@ -980,11 +1080,12 @@ func _pair_support(pair: int, p: CreatureParams, wants: float) -> float:
 			continue
 		if limb.carry < SUPPORT_MIN:
 			continue
-		var vault: float = limb.support_height(stance_extension)
-		var level: float = minf(limb.surface + wants,
-			limb.support_height(_max_reach(limb, p)))
+		var vault: float = limb.support_height(limb.working)
+		var level: float = minf(limb.surface + limb.toe_rise() + limb.rest_height,
+			limb.support_height(_max_reach(limb)))
 		held = minf(held, lerpf(vault, level, loco.absorbed))
 		floor_height = minf(floor_height, limb.surface)
+		wants = minf(wants, limb.rest_height)
 	if is_inf(held):
 		return wants
 	# The sag is measured from the ground under the feet for the same reason the
@@ -1003,13 +1104,13 @@ func _pair_support(pair: int, p: CreatureParams, wants: float) -> float:
 ##
 ## Infinite when nothing is attached — a body with no legs of that pair left is
 ## not being held up by them, and whatever is deciding its height, it is not this.
-func _pair_ceiling(pair: int, p: CreatureParams) -> float:
+func _pair_ceiling(pair: int) -> float:
 	var ceiling: float = INF
 	for limb in limbs:
 		if limb.pair != pair or _skip(limb) or not limb.bearing \
 				or limb.carry < SUPPORT_MIN:
 			continue
-		ceiling = minf(ceiling, limb.carry_ceiling(_max_reach(limb, p)))
+		ceiling = minf(ceiling, limb.carry_ceiling(_max_reach(limb)))
 	return ceiling
 
 
@@ -1025,8 +1126,32 @@ func _pair_ceiling(pair: int, p: CreatureParams) -> float:
 ## standing length beneath a body that is in the air.
 func _hold(limb: Limb, airborne: bool) -> float:
 	if not airborne and limb.bearing:
-		return limb.surface
+		return limb.surface + limb.toe_rise()
 	return limb.hang_height(TUCK_REACH)
+
+
+## How far this foot has rolled forward onto its toe.
+##
+## Where the foot sits in its own fore-and-aft travel, and nothing else: nothing
+## ahead of the rest stance, everything at the back of it. So it comes round once
+## per stance phase because that is what a stance phase is — the foot arrives
+## ahead of the shoulder, the body walks over it, and by the time it leaves the
+## animal is up on the toe pushing off it. No clock and no curve; the same
+## reading of the same geometry the stride is measured in.
+##
+## It is the whole of the propulsion left to a limb that does not bend. A
+## columnar leg is a pillar by construction — that is what makes it good at
+## carrying and useless as a lever — so it has no knee flexion to push out of and
+## no sinking to lengthen its stride with. What it has is a foot, and this is the
+## foot working. Zero on anything the animal is not standing on, because a push
+## needs something to push against, and zero the instant a limb loses the joint
+## that would do it: see Limb.toe_rise.
+func _read_toe(limb: Limb, a: Spine.Frame) -> void:
+	if limb.stepping or not limb.bearing or limb.push <= 0.0:
+		limb.toe = 0.0
+		return
+	var behind: float = limb.rest_fore - limb.local(a, limb.planted - a.pos).y
+	limb.toe = clampf(behind / maxf(limb.sweep_limit, 0.001), 0.0, 1.0)
 
 
 ## Limbs this solver has no business touching: the ones that are not there, and
@@ -1095,12 +1220,12 @@ func _can_step(limb: Limb) -> bool:
 ## The reach and the fan this limb may currently be placed inside. Both narrow
 ## with its range of motion, which is what stops a stiffened leg from being
 ## solved to a stance it could no longer physically adopt.
-func _max_reach(limb: Limb, p: CreatureParams) -> float:
-	return p.limb_max_reach * limb.reach
+func _max_reach(limb: Limb) -> float:
+	return limb.lock * limb.reach
 
 
-func _swing_fan(limb: Limb, swing: float) -> float:
-	return swing * lerpf(SWING_FAN_FLOOR, 1.0, limb.reach)
+func _swing_fan(limb: Limb) -> float:
+	return limb.swing * lerpf(SWING_FAN_FLOOR, 1.0, limb.reach)
 
 
 func _start_step(limb: Limb, body: BodyShape, p: CreatureParams, scale: float,
@@ -1150,12 +1275,103 @@ func _surface_under(limb: Limb, at: Vector2, scale: float, query: Callable) -> f
 ## folded toward the tightest a limb may be drawn up by however much crouch is
 ## being spent.
 ##
-## `Limb.REACH_MIN` is the floor rather than a chosen one — it is the shortest the
-## two-bone chain may be solved to anywhere in the game, so "fully folded" is the
-## same number here and in the IK, and a crouch can never ask for a leg the solver
-## would then refuse to draw.
-func _stance_extension(crouch: float) -> float:
-	return lerpf(loco.extension, Limb.REACH_MIN, clampf(crouch, 0.0, 1.0))
+## Settles what one step of this animal is worth, for all four legs at once.
+##
+## A body is one object. Over one cycle every foot on it returns to the same
+## place relative to the shoulder it hangs from, and in between the whole animal
+## has moved forward by exactly one stride — so each foot has travelled the same
+## ground, and the four legs therefore have one step length between them rather
+## than four. What sets it is the leg with the least to spend, because a girdle
+## cannot take a longer step than it has room for and the rest of the body cannot
+## walk away from it.
+##
+## Without this the two ends of an animal run at two cadences. It never showed
+## while every limb on every creature was solved from one set of numbers; the
+## moment a build could carry a straight strut in front and a folded spring
+## behind, the girdle with the shorter travel simply stepped more often — three
+## strides of the forelimbs to two of the hind — and the footfall pattern, which
+## is a statement about *phase*, had no fixed cycle to be a phase of. What came
+## out was a creature whose legs drifted continuously through every gait in the
+## catalogue, which is not a gait at all.
+##
+## What is *not* shared is the two per-limb terms applied afterwards. A limb on
+## the outside of a turn genuinely covers more ground than one near the centre,
+## and a limb with no force left in it genuinely reaches less far — the first is
+## the geometry of turning and the second is the whole of a limp. Both are
+## differences in what a limb does with the animal's stride rather than
+## disagreements about what the stride is.
+func _share_stride() -> void:
+	var shared: float = INF
+	for limb in limbs:
+		if _skip(limb) or not limb.bearing:
+			continue
+		shared = minf(shared, limb.stride)
+	if is_inf(shared):
+		return
+	for limb in limbs:
+		limb.stride = maxf(shared, 0.001) * (0.45 + 0.55 * limb.pace) \
+			* lerpf(STRIDE_FLOOR, 1.0, limb.drive)
+
+
+## The square of how far this limb's foot rests from directly beneath its socket,
+## with the body's own wave taken out of it.
+##
+## The same split `Limb.set_stance` makes — as much of the stance radius out to
+## the side as the swing plane has not rotated away, and the fore-and-aft bias
+## spent out of what is left — asked of the width the animal stands at rather than
+## the width the wave has squeezed it to this instant. Squared because the one
+## caller wants it that way and a square root taken here would only be taken back.
+func _steady_stance(limb: Limb, p: CreatureParams, lean: float) -> float:
+	var wide: float = minf(limb.plan_limit,
+		loco.stance_limit(limb.plan_limit, 0.0) / maxf(lean, 0.0001))
+	var lat: float = wide * lean
+	var fore: float = sqrt(maxf(wide * wide - lat * lat, 0.0)) \
+		* (p.front_foot_bias if limb.pair == Limb.FRONT else p.rear_foot_bias)
+	return lat * lat + fore * fore
+
+
+## How high one pair of legs holds its end of the body with its feet where they
+## rest — which is the height that pair *wants*, and the one the envelope has to
+## be sized at.
+##
+## Not `Posture.clearance` of the same leg, and the difference is the whole of why
+## a columnar build used to be solved twenty degrees more bent than it stands. The
+## posture answers for a foot out at the full plan reach of the leg; a real rest
+## stance is not there. The fore-and-aft bias spends only a fraction of what is
+## left after the lateral offset, so the foot ends up well inside its own circle —
+## and a foot closer in is a body held *higher*, by Pythagoras, exactly as it is
+## everywhere else in this file. Asked for the posture's number instead, the
+## levelling term spent every tick pulling the body down below what its own legs
+## were holding it at, and the legs bent to meet it.
+##
+## Closed-form, from the parameters rather than from the solved stance, and that
+## matters: the rest stance is narrowed by the room left for the stride, which is
+## sized off this, which would be a loop. What it quotes is where the foot would
+## rest if nothing narrowed it, which is where it rests on every build the
+## narrowing does not bind on and a slight over-estimate of the height on the ones
+## it does — a body a shade lower than its envelope was drawn for, which is the
+## safe direction.
+func _rest_clearance(bone: float, extension: float, p: CreatureParams,
+		pair: int) -> float:
+	var reach: float = bone * extension
+	var stance: float = posture.plan_reach(reach)
+	var lat: float = stance * cos(posture.tilt) * p.stance_width
+	var fore: float = sqrt(maxf(stance * stance - lat * lat, 0.0)) \
+		* (p.front_foot_bias if pair == Limb.FRONT else p.rear_foot_bias)
+	var out: float = sqrt(minf(lat * lat + fore * fore, reach * reach))
+	return sqrt(maxf(reach * reach - out * out, 0.0))
+
+
+## The floor is this girdle's own fold rather than a number shared by every
+## animal, and that is what makes a crouch anatomical: a build whose joints close
+## right up gets its mouth to the floor, and one standing on pillars that barely
+## bend lowers itself by a few pixels and has to reach the rest of the way with
+## its neck. Nothing forbids the second animal anything — it simply has no fold
+## to spend.
+func _stance_extension(crouch: float, pair: int) -> float:
+	var joint: Articulation.Joint = loco.joint(pair)
+	return lerpf(joint.stand, maxf(joint.fold, Limb.REACH_MIN),
+		clampf(crouch, 0.0, 1.0))
 
 
 ## How high this limb picks its foot up at the top of a step. A real height in
@@ -1188,7 +1404,8 @@ func _step_clearance(limb: Limb) -> float:
 func _step_duration(limb: Limb) -> float:
 	var labour: float = lerpf(SWING_SLOWEST, 1.0, limb.drive)
 	var base: float = limb.swing_base * (1.0 - 0.55 * limb.pace) * labour
-	var budget: float = loco.swing_budget(limb.stride / maxf(limb.socket_speed, 1.0))
+	var budget: float = loco.swing_budget(limb.stride / maxf(limb.socket_speed, 1.0),
+		float(footfall.lift_limit) / float(maxi(loco.bearing_limbs, 1)))
 	return clampf(minf(base, budget), Locomotion.SWING_FLOOR, limb.swing_base * labour)
 
 
@@ -1252,7 +1469,7 @@ func _solve_limb(limb: Limb, body: BodyShape, p: CreatureParams,
 	# being pushed somewhere, and where it may be pushed is an anatomical question.
 	# Held to the walking corridor the leg has nowhere to go round a body parked
 	# against its shank, and stands in it.
-	var fan: float = _swing_fan(limb, deg_to_rad(p.limb_swing_deg))
+	var fan: float = _swing_fan(limb)
 	var target: Vector2 = limb.clamp_to_envelope(a, limb.ground, fan)
 	limb.solve_stance(a, target, p.fabrik_iterations)
 

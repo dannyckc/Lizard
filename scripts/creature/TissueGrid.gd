@@ -564,6 +564,15 @@ func set_fat_reserve(value: float) -> void:
 	reset()
 
 
+## Re-lays the lattice against a plan whose layout has changed underneath it —
+## girdles moved to sit under the sockets, and therefore bone flags, organ sites
+## and the sockets the limbs are welded through. Everything about *where* the
+## animal's structures are is rebuilt; nothing about what the lattice is.
+func rebuild_layout() -> void:
+	_build_address_space()
+	reset()
+
+
 func reset() -> void:
 	region_full.fill(0.0)
 	organ_full.fill(0.0)
@@ -1675,6 +1684,17 @@ func conduit(run: BodyPlan.Conduit) -> float:
 	if p == null or run.cells.is_empty():
 		return 1.0
 	var worst: float = 1.0
+	# The crossing first, where there is one. A limb's run comes in over the
+	# girdle from the vertebral column, and those cells are as much a part of it
+	# as the ones down the leg — so a shoulder chewed to the bone cuts the nerve to
+	# a limb that is otherwise untouched, which is the whole point of asking about
+	# a run rather than about a place.
+	var link: Patch = patch(run.link_key) if not run.link_key.is_empty() else null
+	if link != null:
+		for cell in run.link_cells:
+			worst = minf(worst, _conduit_at(link, cell, run.shielded))
+			if worst <= 0.0:
+				return 0.0
 	for cell in run.cells:
 		worst = minf(worst, _conduit_at(p, cell, run.shielded))
 		if worst <= 0.0:

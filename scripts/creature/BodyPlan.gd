@@ -53,13 +53,17 @@ const LIMB_KEYS: Array[String] = ["FL", "FR", "RL", "RR"]
 const SKULL_SPAN: float = 0.72
 const RIB_SPAN: float = 0.78
 const GIRDLE_SPAN: float = 0.95
-## Torso columns carrying the pectoral and pelvic girdles. TORSO_COLS spans the
-## whole clipped spine, so a column index reads directly as a fraction of body
-## length, and these mirror the *default* front_limb_t / rear_limb_t rather than
-## tracking them live — the layout has to name the same cells after the tuning
-## panel has restructured the spine underneath it.
+## Torso columns carrying the pectoral and pelvic girdles, for a body that has
+## not said where its limbs hang. TORSO_COLS spans the whole clipped spine, so a
+## column index reads directly as a fraction of body length, and these are the
+## defaults' own `front_limb_t` / `rear_limb_t` read through that.
 const SHOULDER_COL: int = 3
 const PELVIS_COL: int = 9
+## Least a girdle bar may be from the ends of the trunk and from the other
+## girdle. Two bars closer than this leave no room for the ribs between them, and
+## a bar at the very front or back of the trunk is a girdle hanging off the neck.
+const GIRDLE_MARGIN: int = 2
+const GIRDLE_GAP: int = 3
 
 # --- regions ----------------------------------------------------------------
 # The unit everything downstream is quoted in. A region is a piece of the animal
@@ -148,6 +152,20 @@ class Conduit extends RefCounted:
 	var shielded: bool = false
 	var patch_key: String = BODY_KEY
 	var cells: PackedInt32Array = PackedInt32Array()
+	## The run's other half: the cells it crosses in its *parent's* patch on the
+	## way in. Empty on an axial run, which lies in one lattice from end to end,
+	## and the girdle crossing on a limb one.
+	##
+	## A limb is a separate lattice joined to the body at the shoulder, so a nerve
+	## drawn from the limb's own cells alone starts out on the flank with nothing
+	## between it and the cord it is supposed to be a branch of. That gap was
+	## visible in the overlay and, worse, invisible to the tissue: the run through a
+	## shoulder eaten out to the bone was still reported intact, because none of the
+	## cells it was read from were in the shoulder. These are those cells — the same
+	## ones the limb is structurally hung from, so the nerve, the vessel and the
+	## bone all cross the join in the same place and fail together.
+	var link_key: String = ""
+	var link_cells: PackedInt32Array = PackedInt32Array()
 
 
 ## A block of muscle acting across a joint. Force is its surviving fibre times
@@ -173,15 +191,51 @@ var vessel_root: int = THORAX
 ## Limb key -> its region, and the body column of the girdle it is slung from.
 var limb_region: Dictionary = {}
 var limb_socket_col: Dictionary = {}
+## Torso columns the two girdle bars actually occupy on *this* animal.
+##
+## Variables rather than constants, and that is a fix rather than a loosening. A
+## limb hangs off the girdle under its socket, so a build that carries its
+## shoulders a quarter of the way down its back and a bar bolted across the
+## fifteenth of its length are a leg attached to a rib — the skeleton runs out
+## from the spine to a flank the limb is nowhere near, and the join, the nerve and
+## the vessel through it are all describing a different animal. They still do not
+## drift under the tuning panel: they move when the *sockets* move and at no other
+## time, which is exactly the thing they have to name the same cells against.
+var shoulder_col: int = SHOULDER_COL
+var pelvis_col: int = PELVIS_COL
 
 
 func _init() -> void:
+	_lay_out()
+
+
+## Puts the girdles under the sockets. `front` and `rear` are fractions along the
+## clipped spine, exactly as the animation rig reads them. Answers whether
+## anything actually moved, because re-laying the skeleton means re-laying the
+## tissue over it, and a body should not be rebuilt for a slider that changed
+## nothing about where its bones are.
+func set_girdles(front: float, rear: float) -> bool:
+	var shoulder: int = clampi(torso_column(front) - HEAD_COLS,
+		GIRDLE_MARGIN, TORSO_COLS - GIRDLE_MARGIN - GIRDLE_GAP)
+	var pelvis: int = clampi(torso_column(rear) - HEAD_COLS,
+		shoulder + GIRDLE_GAP, TORSO_COLS - GIRDLE_MARGIN)
+	if shoulder == shoulder_col and pelvis == pelvis_col:
+		return false
+	shoulder_col = shoulder
+	pelvis_col = pelvis
+	_lay_out()
+	return true
+
+
+func _lay_out() -> void:
+	# The sockets first: the networks below run out through them, so where the
+	# girdles are has to be settled before anything is plumbed across one.
+	for key in LIMB_KEYS:
+		limb_region[key] = _limb_region_of(key)
+		limb_socket_col[key] = HEAD_COLS + (shoulder_col if key.begins_with("F") else pelvis_col)
 	_build_regions()
 	_build_networks()
 	_build_muscles()
-	for key in LIMB_KEYS:
-		limb_region[key] = _limb_region_of(key)
-		limb_socket_col[key] = HEAD_COLS + (SHOULDER_COL if key.begins_with("F") else PELVIS_COL)
 
 
 # ------------------------------------------------------------------ layout ----
@@ -202,12 +256,12 @@ func body_has_bone(col: int, v: float) -> bool:
 		return false
 	# Girdles: full-width bars under the limb sockets, so the limb bones read as
 	# attached to the axial skeleton rather than floating alongside it.
-	if torso == SHOULDER_COL or torso == PELVIS_COL:
+	if torso == shoulder_col or torso == pelvis_col:
 		return lateral <= GIRDLE_SPAN
 	# Ribs: alternating columns between the girdles, so a bite landing in a gap
 	# reaches the muscle the ribs do not cover. A rib is never laid against a
 	# girdle — two adjacent crossbars are one wide bar with no gap left to bite.
-	return torso > SHOULDER_COL + 1 and torso < PELVIS_COL - 1 \
+	return torso > shoulder_col + 1 and torso < pelvis_col - 1 \
 		and torso % 2 == 1 and lateral <= RIB_SPAN
 
 
@@ -348,6 +402,11 @@ func _build_network(parents: Array[int], root: int, axial_shielded: bool) -> Arr
 			conduit.patch_key = REGION_NAMES[region]
 			conduit.shielded = false
 			conduit.cells = _limb_conduit_cells()
+			# ...and where it comes in from: out along the girdle from the vertebral
+			# column to the socket, which is the one stretch of the run that is in
+			# the body rather than in the limb.
+			conduit.link_key = BODY_KEY
+			conduit.link_cells = limb_socket_cells(REGION_NAMES[region])
 		else:
 			conduit.patch_key = BODY_KEY
 			conduit.shielded = axial_shielded
@@ -473,14 +532,20 @@ static func limb_side(key: String) -> float:
 ## This is the only join in the animal that is not two cells side by side in the
 ## same lattice, which is why it is declared here with the rest of the layout
 ## rather than discovered by whatever walks it.
+##
+## Ordered from the midline outward on either flank, so the run reads as a
+## journey rather than as a set: whatever follows it — the flood fill, the nerve,
+## the vessel, the line the overlay draws — starts at the vertebral column and
+## arrives at the socket, and then carries straight on down the limb.
 func limb_socket_cells(key: String) -> PackedInt32Array:
 	var cells := PackedInt32Array()
 	var col: int = int(limb_socket_col.get(key, -1))
 	if col < 0:
 		return cells
-	var outboard: bool = limb_side(key) > 0.0
-	var from_row: int = SPINE_ROW if outboard else 0
-	var to_row: int = BODY_ROWS if outboard else SPINE_ROW + 1
-	for row in range(from_row, to_row):
-		cells.append(col * BODY_ROWS + row)
+	if limb_side(key) > 0.0:
+		for row in range(SPINE_ROW, BODY_ROWS):
+			cells.append(col * BODY_ROWS + row)
+	else:
+		for row in range(SPINE_ROW, -1, -1):
+			cells.append(col * BODY_ROWS + row)
 	return cells

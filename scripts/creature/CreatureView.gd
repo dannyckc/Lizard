@@ -215,15 +215,10 @@ func _attitude(body: BodyShape, stature: Stature) -> Transform2D:
 	var gait: Gait = creature.gait
 	if gait == null or not gait.measured or body.anchors.size() < 4:
 		return Transform2D(0.0, base)
-	var fore: Vector2 = ((body.anchors["FL"] as Spine.Frame).pos
-		+ (body.anchors["FR"] as Spine.Frame).pos) * 0.5
-	var rear: Vector2 = ((body.anchors["RL"] as Spine.Frame).pos
-		+ (body.anchors["RR"] as Spine.Frame).pos) * 0.5
-	var axis: Vector2 = fore - rear
-	if axis.length_squared() < 0.0001:
-		return Transform2D(0.0, base)
-	return Posture.tip((fore + rear) * 0.5, axis.normalized(),
-		gait.pitch, gait.roll, base)
+	# The one definition of the line a body tips about — see Gait.girdle_line, which
+	# the volume asks the same question of. Two of them would be two attitudes.
+	var line: Array = gait.girdle_line()
+	return Posture.tip(line[0], line[1], gait.pitch, gait.roll, base)
 
 
 # ------------------------------------------------------------------ body ----
@@ -714,13 +709,30 @@ func _draw_conduits(tissue: TissueGrid, runs: Array[BodyPlan.Conduit],
 		if patch == null or not patch.live or run.cells.size() < 2:
 			continue
 		_conduit_lines.resize(0)
-		var previous: Vector2 = patch.centre_of(run.cells[0])
-		for index in range(1, run.cells.size()):
+		# A limb's run starts in the *body*, out along the girdle from the vertebral
+		# column, and only then continues down the leg — so it is walked as one
+		# journey through two lattices. Drawn from the limb's own cells alone it
+		# began out on the flank with nothing joining it to the cord it branches
+		# off, which read as four floating threads beside an animal.
+		var previous: Vector2 = Vector2.ZERO
+		var started: bool = false
+		var link: TissueGrid.Patch = tissue.patch(run.link_key) \
+			if not run.link_key.is_empty() else null
+		if link != null and link.live:
+			for cell in run.link_cells:
+				var at: Vector2 = link.centre_of(cell)
+				if started and link.gone[cell] == 0:
+					_conduit_lines.append(previous)
+					_conduit_lines.append(at)
+				previous = at
+				started = true
+		for index in run.cells.size():
 			var at: Vector2 = patch.centre_of(run.cells[index])
-			if patch.gone[run.cells[index]] == 0:
+			if started and patch.gone[run.cells[index]] == 0:
 				_conduit_lines.append(previous)
 				_conduit_lines.append(at)
 			previous = at
+			started = true
 		if _conduit_lines.is_empty():
 			continue
 		# Alpha carries what arrives rather than what survives locally, so a run

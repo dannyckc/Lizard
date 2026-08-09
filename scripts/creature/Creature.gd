@@ -63,6 +63,11 @@ var gait: Gait
 ## How this animal holds its legs under it. An anatomical trait, rebuilt with the
 ## rest of the structure when the parameter changes — see Posture.
 var posture: Posture = Posture.new()
+## What each girdle does with the limbs hanging off it: how its bones divide, what
+## angle its joint stands at, how far it locks out and how far it folds. Rebuilt
+## beside the posture and for the same reason — it is skeleton rather than
+## setting. See Articulation.
+var articulation: Articulation = Articulation.new()
 ## Where the body is in the one direction the plane does not have. Zero on
 ## anything standing on the ground, which is nearly everything nearly always.
 var elevation: Elevation = Elevation.new()
@@ -387,6 +392,13 @@ func rebuild() -> void:
 	# the same few numbers used twice.
 	var rng: RandomNumberGenerator = null if alive else _rest_rng()
 	posture = Posture.new(params.posture)
+	articulation = Articulation.new()
+	articulation.configure(posture, params)
+	# Where the girdles are is where the limbs hang from, and the skeleton has to
+	# be told: a pectoral bar bolted across the third torso column is no use to a
+	# forelimb whose socket has been moved to the sixth. Cheap and idempotent —
+	# it does nothing at all unless the columns have actually changed.
+	anatomy.set_girdles(params.front_limb_t, params.rear_limb_t)
 	spine = Spine.new()
 	var seg_len: float = params.segment_length * size_scale
 	if alive:
@@ -398,6 +410,11 @@ func rebuild() -> void:
 	gait = Gait.new()
 	gait.setup()
 	gait.posture = posture
+	# Every limb is told what its own girdle does before anything poses it. The
+	# gait refreshes this each tick for a living body; a carcass is never walked,
+	# and its legs still have to know how far they bend.
+	for limb in gait.limbs:
+		limb.read_joint(articulation.of(limb.pair))
 	body.build(spine, params, size_scale, posture)
 	# How much fat this species carries is part of what it is built out of, so it
 	# is laid down here with the rest of the structure rather than per tick.
@@ -408,7 +425,7 @@ func rebuild() -> void:
 	# about walking: the stance the legs are solved to, and so the height the whole
 	# picture is registered to, is one of its answers.
 	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
-	locomotion.update(posture, physique, params, size_scale)
+	locomotion.update(posture, physique, params, size_scale, articulation)
 	gait.loco = locomotion
 	_update_stature()
 	if alive:
@@ -434,9 +451,13 @@ func _update_stature() -> void:
 	# it: the gait has just measured it off four planted feet, and a body is only
 	# ever as tall as the legs under it can hold it. Before the gait has run once
 	# there is nothing to read, and the posture answers instead.
-	var held: float = gait.support if gait != null and gait.measured else -1.0
+	# The two girdles rather than one number for the animal: they are held up by
+	# different bones and a body's underside has to be below both of them.
+	var held := Vector2(-1.0, -1.0)
+	if gait != null and gait.measured:
+		held = Vector2(gait.shoulder_height, gait.hip_height)
 	stature.update(posture, body, params, size_scale, body_length(),
-		elevation.height, gape_radius(), alive, held, locomotion.extension)
+		elevation.height, gape_radius(), alive, held, locomotion)
 
 
 ## The generator a carcass's resting shape is drawn from.
@@ -528,7 +549,7 @@ func _physics_process(delta: float) -> void:
 	# physique, and that lag is deliberate — mass and muscle are properties of a
 	# body being eaten over seconds, not of this frame, and the alternative is
 	# solving the whole tick before knowing how fast it was allowed to move.
-	locomotion.update(posture, physique, params, size_scale)
+	locomotion.update(posture, physique, params, size_scale, articulation)
 	gait.loco = locomotion
 
 	bite_cooldown_remaining = maxf(bite_cooldown_remaining - delta, 0.0)

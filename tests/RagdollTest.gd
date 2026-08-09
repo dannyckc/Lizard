@@ -126,7 +126,7 @@ func _check_invariants(body: Creature) -> void:
 
 ## No gait, no lift, and no stance being held. The last one is the difference
 ## between a body that is limp and one that is merely standing still: a live
-## creature holds its feet at `stance_reach` of full extension, and a dead one is
+## creature holds its feet out at whatever its joints stand at, and a dead one is
 ## folded under its own weight well inside that.
 func _check_limbs_limp(body: Creature) -> void:
 	var reach: float = 0.0
@@ -143,9 +143,10 @@ func _check_limbs_limp(body: Creature) -> void:
 			_check(inside.length() < limb.total_length * 0.35,
 				"a dead limb was lying %.1f px inside its own body" % inside.length())
 
-	_check(reach < body.params.stance_reach,
+	var standing: float = body.articulation.hind.stand
+	_check(reach < standing,
 		"a dead limb was held out at %.2f of its length — as far as a walking one (%.2f)"
-			% [reach, body.params.stance_reach])
+			% [reach, standing])
 
 
 ## The same body in the same place has to lie the same way every run. A carcass

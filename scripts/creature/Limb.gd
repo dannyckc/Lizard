@@ -39,7 +39,13 @@ const REAR: int = 1
 ## whole point: an upright leg standing straight down is a foot with no plan-view
 ## offset at all and a perfectly ordinary limb, while the same reading on a
 ## sprawled one is a leg folded up against its own shoulder.
-const REACH_MIN: float = 0.30
+##
+## The floor under `fold` rather than the answer to it. What a *particular* limb
+## folds to is an angle at its own joint — see Articulation — and it is usually a
+## good deal more than this: a graviportal leg barely closes at all. This is the
+## line below which the two-bone chain stops being solvable at any proportion,
+## and it exists so nothing downstream ever has to check.
+const REACH_MIN: float = 0.22
 ## Corrections under this many pixels are not applied by the envelope clamp.
 ## Far below anything visible, far above the resting spine's micro-jitter —
 ## see clamp_to_envelope.
@@ -83,6 +89,50 @@ var total_length: float = 2.0
 ## down it — is priced off this, because an upright leg is not a spindly one.
 var anatomical_length: float = 2.0
 
+# --- what this limb's joint does ----------------------------------------------
+# Read off the girdle's Articulation once per tick and cached here for the same
+# reason the functional numbers below are: the gait, the IK, the height solve and
+# the debug overlay all ask, and there must be one answer. All four are shares of
+# the whole chain rather than angles, because every consumer is asking a question
+# about a length — how far this limb spans, how high it holds the body, how far
+# in it can be drawn.
+
+## How extended this limb stands while bearing weight. What the old `stance_reach`
+## parameter was, except that it is now a reading of the joint's own resting
+## angle, so a column stands like a column and a folded hind leg stays folded.
+var stand: float = 0.78
+## The straightest it goes: the outright limit of the working envelope, and the
+## line the body may never be held on the wrong side of.
+var lock: float = 0.94
+## The tightest it folds. A limb's own floor rather than a shared one — a heavy
+## columnar leg cannot be drawn up much past where it stands, and that single
+## fact is why such an animal can neither crouch to the ground nor gather itself
+## to jump.
+var fold: float = 0.30
+## How extended this limb is standing *this tick*: `stand`, less however much of
+## its own fold the animal is spending on getting lower. The crouch, and nothing
+## else about it is written down anywhere — a leg held at less of itself is a
+## shorter leg, so the stance comes in, the body comes down with it, and every
+## band and silhouette follows because all of them are read off the height the
+## feet are holding.
+var working: float = 0.78
+## Half-angle of the fan the socket swings the whole limb through.
+var swing: float = 1.08
+## How much of the foot is a toe to push off from — see `toe_rise`.
+var push: float = 0.15
+## Share of the limb in the upper bone. Held here as well as applied to
+## `lengths`, so a limb re-measured after it has stopped walking keeps the
+## proportions it grew with.
+var upper_share: float = 0.52
+## How far this foot has rolled forward onto that toe, 0 to 1. Measured rather
+## than animated: it is where the foot sits in its own fore-and-aft travel, so it
+## comes round once per stance phase because that is what a stance phase is.
+var toe: float = 0.0
+## The foot's own radius in world pixels, cached because `toe_rise` is asked by
+## the height solve, which has a limb and no idea what scale the creature is
+## drawn at. Written beside the bone lengths, off the same scale.
+var foot_size: float = 1.0
+
 # --- where this limb stands ---------------------------------------------------
 # The stance in the socket's own frame: how high the socket and the foot are, how
 # far out to the side and fore-or-aft of the socket the foot rests, and the region
@@ -95,6 +145,19 @@ var anatomical_length: float = 2.0
 ## Height of the socket above the ground: what the body is holding this limb up
 ## by. The other end of the gap the two bones have to span.
 var socket_height: float = 0.0
+## How high this limb holds its socket with its foot at rest — the height it
+## *wants*, as against `socket_height`, which is where the feet have actually left
+## it this tick.
+##
+## Pythagoras on the stance and nothing else, which is why it has to be read off
+## the stance the limb ended up in rather than the one its posture asked for. The
+## two differ whenever the stance is narrowed to leave the stride somewhere to
+## happen — always, on a sprawled build — and a levelling term quoting the second
+## spends every tick pulling the body down below what its own legs are holding it
+## at. What comes out is a creature standing a good deal more folded than its
+## joints say, which was most of a sprawled animal's error and some of everyone
+## else's.
+var rest_height: float = 0.0
 ## Height of the foot. The surface it is standing on for as long as it is down,
 ## and that surface plus the step arc's own clearance while it is not — a real
 ## height in the same pixels as x and y, which is why it is the same number the
@@ -136,6 +199,17 @@ var swing_base: float = 0.25
 ## whose foot belongs outside the shoulder; most of the way to the spine on a
 ## columnar one, which stands underneath itself.
 var inboard_limit: float = 0.0
+## ...and how far outboard a foot may be *placed*, which is a different question
+## and belongs to the walk rather than to the joint. The stance and the stride are
+## spent out of one disc — see Locomotion.excursion, which reserves the
+## fore-and-aft travel by taking this exact width off the radius first — so a foot
+## put down any further out than the excursion was measured against is a foot with
+## less fore-and-aft room than it was promised. It then runs out at the edge of
+## the disc part way through its stance, is skidded along it while the body walks
+## on, and reaches its own step trigger late. Bounding the placement is the same
+## statement the excursion already makes, said in the one other place that has to
+## agree with it.
+var lat_limit: float = 1.0
 
 ## Where the foot is nailed to the world while it bears weight.
 var planted: Vector2 = Vector2.ZERO
@@ -285,11 +359,47 @@ func setup(p_key: String, p_pair: int, p_side: float) -> void:
 ## `drawn` is what the same limb measures on screen at full stretch, used to
 ## normalise. Left out, the two are the same, which is the truth for a limb lying
 ## flat on the floor and so the right default for a carcass.
-func set_lengths(anatomical: float, drawn: float = -1.0) -> void:
+##
+## `upper` is how the length divides between the two bones. It used to be 52/48
+## for every limb on every animal, which is a statement that all skeletons have
+## the same proportions — and they emphatically do not: weight goes high and
+## close in on a heavy build and stays low and light on a fast one, and that is
+## the difference between a pillar and a spring drawn with the same total length.
+func set_lengths(anatomical: float, drawn: float = -1.0, upper: float = -1.0) -> void:
 	anatomical_length = maxf(anatomical, 1.0)
 	total_length = maxf(drawn if drawn >= 0.0 else anatomical_length, 1.0)
-	lengths[0] = anatomical_length * 0.52
-	lengths[1] = anatomical_length * 0.48
+	if upper >= 0.0:
+		upper_share = clampf(upper, Articulation.SHARE_MIN, Articulation.SHARE_MAX)
+	lengths[0] = anatomical_length * upper_share
+	lengths[1] = anatomical_length * (1.0 - upper_share)
+
+
+## Caches what this limb's girdle can do with itself, so the gait, the IK and the
+## height solve read one agreed set of numbers. Left uncalled — a carcass, a body
+## with no articulation attached — the defaults are the sprawled build every one
+## of these numbers used to be hard-coded to.
+func read_joint(joint: Articulation.Joint) -> void:
+	if joint == null:
+		return
+	stand = joint.stand
+	lock = joint.lock
+	fold = maxf(joint.fold, REACH_MIN)
+	swing = joint.swing
+	push = joint.push
+	upper_share = joint.upper
+
+
+## What angle this limb's joint is currently solved at, in radians. A reading
+## taken off the pose rather than an input to it — nothing here is posed by
+## angle — and the honest way to ask "is this leg actually straight".
+func joint_angle() -> float:
+	var flat: float = plan[0].distance_to(plan[2])
+	var up: float = heights[2] - heights[0]
+	var span: float = sqrt(flat * flat + up * up)
+	var l0: float = lengths[0]
+	var l1: float = lengths[1]
+	return acos(clampf((l0 * l0 + l1 * l1 - span * span)
+		/ maxf(2.0 * l0 * l1, 0.000001), -1.0, 1.0))
 
 
 ## Half-thickness of the upper bone, and the flesh over it. Off the anatomical
@@ -297,11 +407,37 @@ func set_lengths(anatomical: float, drawn: float = -1.0) -> void:
 ## Shared by the renderer, the lattice and the hit test so all three agree on how
 ## much limb is there.
 func girth(scale: float) -> float:
-	return maxf(anatomical_length * 0.16, 2.5 * scale)
+	return girth_of(anatomical_length, scale)
 
 
 func foot_radius(scale: float) -> float:
 	return maxf(anatomical_length * 0.10, 3.0 * scale)
+
+
+## The same, asked of a length rather than of a limb. Stature needs it to know
+## how far inside the body a socket has to sit before there is a leg at that
+## station, and it is asking about a limb that has not been built yet.
+static func girth_of(anatomical: float, scale: float) -> float:
+	return maxf(anatomical * 0.16, 2.5 * scale)
+
+
+## How far the ankle is lifted off the ground by the foot rolling forward onto
+## its toe, in world pixels.
+##
+## The last joint in the chain and the only one a column has. A leg held near
+## vertical loses almost no height as it swings, which is exactly what makes it a
+## good pillar and a poor lever: there is no sinking to lengthen the stride with
+## and no knee flexion to push out of. What is left is the foot. At the end of a
+## stance phase it rolls forward over its toe, the ankle comes up, and everything
+## standing on it comes up with it — which is a push against the ground, taken by
+## an animal that never bent a leg to do it.
+##
+## Priced off the foot's own radius, because that is how much toe there is.
+## `flex` gates it for the same reason it gates the height of a step: rolling
+## onto a toe is something a joint does, and a limb with nothing working below
+## the socket scuffs along flat.
+func toe_rise() -> float:
+	return foot_size * push * toe * flex
 
 
 ## Screen offset from where the foot *is* to where it is drawn. Height, and
@@ -327,10 +463,15 @@ func rise() -> Vector2:
 ## follows its feet up exactly as it already follows them down over a stride, and
 ## the bands, the silhouette and the picture all come with it because every one of
 ## them is read off this height.
+## `toe_rise` is added on top, and it is the one term here that is not
+## Pythagoras: the leg is standing on a foot that has rolled forward onto its
+## toe, so its lower end starts that much off the floor and everything above it
+## is carried up with it. On a flat-footed animal it is zero and this is the
+## function it always was.
 func support_height(reach_share: float) -> float:
 	var span: float = (lengths[0] + lengths[1]) * reach_share
 	var out: float = planted.distance_to(plan[0])
-	return surface + sqrt(maxf(span * span - out * out, 0.0))
+	return surface + toe_rise() + sqrt(maxf(span * span - out * out, 0.0))
 
 
 ## Highest this limb could hold its socket with its foot exactly where it is right
@@ -364,7 +505,7 @@ func carry_ceiling(reach_share: float) -> float:
 ## pointing at the ground. Hung instead, it is simply a short arm held against the
 ## chest, which is what it is.
 func hang_height(share: float) -> float:
-	var span: float = (lengths[0] + lengths[1]) * clampf(share, REACH_MIN, 1.0)
+	var span: float = (lengths[0] + lengths[1]) * clampf(share, fold, 1.0)
 	var out: float = planted.distance_to(plan[0])
 	return maxf(socket_height - sqrt(maxf(span * span - out * out, 0.0)), surface)
 
@@ -467,9 +608,28 @@ func clamp_to_envelope(a: Spine.Frame, target: Vector2, swing: float = -1.0) -> 
 	var v: Vector2 = target - a.pos
 	var here: Vector2 = local(a, v)
 	var hi: float = maxf(plan_limit, 0.001)
-	var fore_limit: float = sweep_limit if swing < 0.0 else maxf(hi * sin(minf(swing, PI * 0.5)), 0.001)
+	# The joint's own fan, when one is passed, and it is an arc of the *limb* about
+	# its socket rather than an arc of the plan-view disc. The two are the same
+	# thing on a sprawled animal, whose leg lies in the ground plane and whose disc
+	# therefore is its leg — and they are wildly different on a columnar one, whose
+	# leg is nearly vertical and whose disc is under a third of it. Read off the
+	# disc, a heavy build's shoulder was granted a fan narrower than the walking
+	# corridor the same fan had already been used to size, so its front feet were
+	# clamped short of the stride they had been given, sat permanently a fraction
+	# under the step trigger and were towed. It is the same arc `Locomotion.
+	# excursion` measures, which is exactly why they now agree.
+	var fore_limit: float = sweep_limit if swing < 0.0 \
+		else maxf(anatomical_length * stand * sin(minf(swing, PI * 0.5)), 0.001)
 
+	# Outward only while this is a question about where to *put* a foot. Asked
+	# where a foot may legally be — the fan given, the contact router pushing a leg
+	# round something — the joint has no such limit and neither has this: a foot
+	# shoved wide by an obstacle is somewhere the animal can perfectly well stand,
+	# and hauling it back into the walking corridor every tick while the router
+	# pushes it out again is a leg that buzzes between the two forever.
 	var lat: float = maxf(here.x, -inboard_limit)
+	if swing < 0.0:
+		lat = minf(lat, lat_limit)
 	var fore: float = clampf(here.y, rest_fore - fore_limit, rest_fore + fore_limit)
 
 	# The reach limit last, and through the air rather than across the floor: what
@@ -485,9 +645,14 @@ func clamp_to_envelope(a: Spine.Frame, target: Vector2, swing: float = -1.0) -> 
 	# own bob, and a clamp quoting the reach it has at the top cuts every foot
 	# short of the stride it was given and skids it back along the boundary while
 	# the body catches up.
+	# The inner boundary is this limb's own fold, not a number shared by every
+	# animal in the game. A leg that cannot close past a hundred and thirty degrees
+	# has a large hole in the middle of its envelope that its foot may not be
+	# placed inside, and that hole is exactly why such a creature walks by swinging
+	# rather than by drawing its feet in under itself.
 	var drop: float = socket_height - foot_height
 	var span: float = lengths[0] + lengths[1]
-	var near: float = _flat_span(span * REACH_MIN, drop)
+	var near: float = _flat_span(span * fold, drop)
 	var out: Vector2 = Vector2(lat, fore)
 	var r: float = out.length()
 	if r > hi:

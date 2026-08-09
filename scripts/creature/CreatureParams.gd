@@ -81,25 +81,62 @@ extends Resource
 
 # ---------------------------------------------------------------- limbs ----
 @export_group("Limbs")
-## Total reach of a two-bone chain (split 52% upper / 48% lower).
+## Total length of a two-bone chain. How it divides between the two bones, how
+## far it is extended standing, and how far it may extend or fold at all are
+## articulation rather than length — see the group below.
 @export_range(8.0, 120.0, 1.0) var arm_length: float = 34.0
 @export_range(8.0, 120.0, 1.0) var leg_length: float = 40.0
-## Rest foot distance from its anchor, as a fraction of total limb length.
-## Keep below 1.0 so the IK chain is never locked straight.
-@export_range(0.3, 0.98, 0.01) var stance_reach: float = 0.78
 ## How far out to the side the rest stance sits (relative to fore/aft bias).
 @export_range(0.2, 2.0, 0.01) var stance_width: float = 1.0
-## Furthest a foot may get from its socket, as a fraction of total limb length.
-## This is a hard limit on the working envelope, not a target: a foot the body
-## has outrun skids along it instead of pulling the leg straight. Keep it under
-## 1.0 or a dragged limb stops reading as a limb.
-@export_range(0.5, 1.0, 0.01) var limb_max_reach: float = 0.94
-## Half-angle of the fan a foot may swing through, measured from its rest
-## stance. Stops a limb the body has walked past from folding forward under the
-## chin or trailing back alongside the tail.
-@export_range(20.0, 110.0, 1.0) var limb_swing_deg: float = 62.0
 ## FABRIK relaxation passes per limb per tick.
 @export_range(1, 12, 1) var fabrik_iterations: int = 6
+
+# --------------------------------------------------------- articulation ----
+# What each girdle does with the limbs hanging off it — see Articulation. Three
+# numbers used to live in the group above and none of them could be one: how
+# extended a leg stands, how far it may extend, and how tightly it folds are all
+# readings of one angle at the elbow or the knee, and quoting them as lengths is
+# what made every animal in the game stand in the same three-quarters-extended
+# crouch. A columnar build could not be given a straight leg, because the reach
+# cap was a long way below straight; a cat could not be given a straight foreleg
+# and a folded hind one, because there was one number for the whole animal.
+#
+# So the trait is the angle, the stance owns the base of it — see Posture — and
+# what a species carries is per *girdle*, because a girdle is the unit a real
+# skeleton varies at.
+@export_group("Articulation")
+## How much more flexed than its stance this girdle carries its joint, in
+## degrees. Negative is straighter. Zero is an animal that articulates exactly
+## the way its posture does, which is the honest default for a build that has
+## said nothing about it.
+@export_range(-70.0, 70.0, 1.0) var fore_flex_deg: float = 0.0
+@export_range(-70.0, 70.0, 1.0) var hind_flex_deg: float = 0.0
+## How far the joint folds, against how far its stance folds. Under one is a
+## joint that cannot be drawn up — a graviportal leg, which is why a heavy
+## columnar animal can neither crouch to the floor nor gather itself to jump, and
+## why nothing had to forbid either. Over one is a limb that folds tighter than
+## its stance normally would, which is where a spring comes from.
+@export_range(0.1, 1.6, 0.01) var fore_fold_range: float = 1.0
+@export_range(0.1, 1.6, 0.01) var hind_fold_range: float = 1.0
+## Share of the limb in the upper bone. Over a half is weight carried high and
+## close to the body — a heavy animal's proportions; under it is a long light
+## segment left out at the bottom to swing, which is a runner's.
+@export_range(0.34, 0.66, 0.01) var fore_upper_share: float = 0.52
+@export_range(0.34, 0.66, 0.01) var hind_upper_share: float = 0.52
+## Half-angle of the fan the socket swings the whole limb through, measured from
+## its rest stance. Stops a limb the body has walked past from folding forward
+## under the chin or trailing back alongside the tail. Per girdle because a hip
+## and a shoulder are different joints on the same animal.
+@export_range(20.0, 110.0, 1.0) var fore_swing_deg: float = 62.0
+@export_range(20.0, 110.0, 1.0) var hind_swing_deg: float = 62.0
+## How much of the foot is a toe to push off from.
+##
+## The only propulsion a straight-legged animal has, and the reason it is a
+## parameter at all: a limb held near vertical cannot lengthen its stride by
+## bending, so what carries the body over a planted foot at the end of its stance
+## is the foot rolling forward onto its toe. Zero is a flat-footed animal that
+## simply swings its legs.
+@export_range(0.0, 1.0, 0.01) var toe_push: float = 0.15
 
 # ----------------------------------------------------------------- gait ----
 @export_group("Gait")
@@ -266,11 +303,19 @@ const SCHEMA: Array = [
 	{"group": "Limbs"},
 	{"prop": "arm_length", "label": "Arm length", "min": 8.0, "max": 120.0, "step": 1.0},
 	{"prop": "leg_length", "label": "Leg length", "min": 8.0, "max": 120.0, "step": 1.0},
-	{"prop": "stance_reach", "label": "Stance reach", "min": 0.3, "max": 0.98, "step": 0.01},
 	{"prop": "stance_width", "label": "Stance width", "min": 0.2, "max": 2.0, "step": 0.01},
-	{"prop": "limb_max_reach", "label": "Max reach", "min": 0.5, "max": 1.0, "step": 0.01},
-	{"prop": "limb_swing_deg", "label": "Swing fan (deg)", "min": 20.0, "max": 110.0, "step": 1.0},
 	{"prop": "fabrik_iterations", "label": "FABRIK iters", "min": 1.0, "max": 12.0, "step": 1.0},
+
+	{"group": "Articulation"},
+	{"prop": "fore_flex_deg", "label": "Fore flex (deg)", "min": -70.0, "max": 70.0, "step": 1.0},
+	{"prop": "hind_flex_deg", "label": "Hind flex (deg)", "min": -70.0, "max": 70.0, "step": 1.0},
+	{"prop": "fore_fold_range", "label": "Fore fold range", "min": 0.1, "max": 1.6, "step": 0.01},
+	{"prop": "hind_fold_range", "label": "Hind fold range", "min": 0.1, "max": 1.6, "step": 0.01},
+	{"prop": "fore_upper_share", "label": "Fore upper bone", "min": 0.34, "max": 0.66, "step": 0.01},
+	{"prop": "hind_upper_share", "label": "Hind upper bone", "min": 0.34, "max": 0.66, "step": 0.01},
+	{"prop": "fore_swing_deg", "label": "Fore swing (deg)", "min": 20.0, "max": 110.0, "step": 1.0},
+	{"prop": "hind_swing_deg", "label": "Hind swing (deg)", "min": 20.0, "max": 110.0, "step": 1.0},
+	{"prop": "toe_push", "label": "Toe push-off", "min": 0.0, "max": 1.0, "step": 0.01},
 
 	{"group": "Gait"},
 	{"prop": "foot_lead", "label": "Foot lead", "min": 0.0, "max": 1.5, "step": 0.01},
@@ -347,7 +392,36 @@ const PRESETS: Dictionary = {
 		"head_width": 11.0, "chest_width": 15.0, "waist_width": 12.0,
 		"hip_width": 14.0, "tail_tip_width": 1.2,
 		"front_limb_t": 0.17, "rear_limb_t": 0.50,
-		"arm_length": 40.0, "leg_length": 46.0, "stance_width": 0.85, "stance_reach": 0.80,
+		"arm_length": 40.0, "leg_length": 46.0, "stance_width": 0.85,
+		# The two ends of this animal are not the same limb, and that is the whole
+		# of what separates it from a scaled lizard standing further up.
+		#
+		# In front: a strut. The elbow is carried at a hundred and fifty degrees —
+		# the two bones close to in line — because a cat's forelimb is there to hold
+		# the front of it up and to land on, and a column does both better than a
+		# spring. Behind: an engine. The knee stands at a hundred and fourteen,
+		# folds tighter than its stance normally would, swings through a wider fan
+		# and carries the longer, lighter distal bone, which between them are the
+		# crouch, the gather and the leap.
+		#
+		# The two clear the ground by within a pixel of each other all the same,
+		# and nothing arranges that: a longer hind leg folded further and a shorter
+		# foreleg held straight arrive at the same height, which is why a cat's back
+		# is level over legs that are doing opposite jobs.
+		#
+		# How far apart they may be pushed is bounded by something real rather than
+		# by taste. A straighter limb has less of itself left in the ground plane to
+		# swing — that is the whole trade the stance is making — so it takes shorter
+		# steps, and a girdle taking steps less than about half the length of the
+		# other's is a girdle stepping twice for every one of its partner's. Which is
+		# not a gait. Past that the animal would need a shoulder blade that slides
+		# along its ribs to make up the difference, and it has not got one.
+		"fore_flex_deg": -18.0, "hind_flex_deg": 18.0,
+		"fore_fold_range": 0.95, "hind_fold_range": 1.20,
+		"fore_upper_share": 0.50, "hind_upper_share": 0.45,
+		"fore_swing_deg": 56.0, "hind_swing_deg": 74.0,
+		# Digitigrade: it stands on its toes already, so there is a real push there.
+		"toe_push": 0.45,
 		# No acceleration or turn rate of its own: this animal is light and it is
 		# strong for its size, and those two facts are already written below as
 		# `density` and `muscle_power`. Quoting a number here as well would be
@@ -397,12 +471,34 @@ const PRESETS: Dictionary = {
 		# legs, not perched on them — and at 82 px under a 67 px-deep chest this one
 		# now is. Nothing else in the file had to move: the height, the bands, what
 		# can walk under it and what its trunk can reach are all read off the legs.
-		"arm_length": 86.0, "leg_length": 90.0,
-		# ...and not locked out. `stance_reach` at 0.95 was a leg standing at the
-		# very limit of its own envelope, which is a leg with nothing left to walk
-		# with — see Locomotion.EXTENSION_MARGIN, which was quietly capping it
-		# anyway. A standing animal's legs are bent.
-		"stance_width": 0.75, "stance_reach": 0.86,
+		# ...and the forelimbs the longer pair, which is why the back slopes down
+		# from the shoulder. It is an ordinary length rather than a drawn attitude:
+		# the front of the animal is held higher because the bones holding it are
+		# longer, and the pitch falls out in the gait.
+		"arm_length": 92.0, "leg_length": 88.0,
+		"stance_width": 0.75,
+		# Columns, and this is the correction the whole build turned on. The stance
+		# already stands its joints at a hundred and seventy degrees; this leans a
+		# few degrees either side of that — the elbow straighter than the knee,
+		# which is a real elephant — and takes the fold almost entirely away.
+		#
+		# What that last number does is the interesting part, because it is not a
+		# pose: a joint that cannot close is an animal that cannot crouch, cannot
+		# gather, cannot spring, and cannot lengthen its stride by sinking into its
+		# own legs. Every one of those was previously either absent or written down
+		# somewhere as a special case for heavy animals. Here they are one number,
+		# and what is left to move the creature along is the swing of the whole limb
+		# from the shoulder and the toe at the end of it.
+		"fore_flex_deg": -3.0, "hind_flex_deg": 4.0,
+		"fore_fold_range": 0.45, "hind_fold_range": 0.50,
+		# Weight carried high: a long humerus and femur over short, thick distal
+		# bones. Graviportal proportions, and they are what make the leg read as a
+		# pillar rather than as a long shin with a knob at the top.
+		"fore_upper_share": 0.58, "hind_upper_share": 0.56,
+		"fore_swing_deg": 46.0, "hind_swing_deg": 50.0,
+		# It walks on its toes over a fibrous pad, and with the joints doing so
+		# little this is most of what actually pushes the animal along.
+		"toe_push": 0.60,
 		# ...and no acceleration or turn rate here either, for the opposite reason:
 		# nothing needed to say this animal is slow off the mark. It is twenty-three
 		# times the Lizard's weight and its muscle only grew with the square of
@@ -449,10 +545,35 @@ const PRESETS: Dictionary = {
 		"wave_frequency": 0.7, "wave_speed": 1.3,
 		"head_width": 8.0, "chest_width": 17.0, "waist_width": 15.0,
 		"hip_width": 16.0, "tail_tip_width": 1.2,
-		"front_limb_t": 0.26, "rear_limb_t": 0.48,
-		"arm_length": 76.0, "leg_length": 78.0,
-		"stance_width": 0.80, "stance_reach": 0.84,
-		"move_speed": 190.0,
+		# Long legs on a short trunk, and that pairing is the whole preset. A hind
+		# foot swinging forward arrives where the forefoot on the same side is
+		# standing, because the two girdles are closer together than the two legs can
+		# reach between them — so the way out is to move the pair as one, which is a
+		# pace. Both halves of it are ordinary numbers: the gap is
+		# `rear_limb_t - front_limb_t` against the body, and the reach is the legs.
+		"front_limb_t": 0.28, "rear_limb_t": 0.44,
+		"arm_length": 88.0, "leg_length": 90.0,
+		"stance_width": 0.80,
+		# Long straight legs, near-identical front and back — which is exactly why
+		# the pair on one side arrives at the same place and it paces.
+		"fore_flex_deg": -12.0, "hind_flex_deg": -4.0,
+		"fore_fold_range": 0.70, "hind_fold_range": 0.75,
+		"fore_upper_share": 0.52, "hind_upper_share": 0.48,
+		"fore_swing_deg": 58.0, "hind_swing_deg": 64.0,
+		"toe_push": 0.40,
+		# A pair that lands as one. `beat_coupling` is the only thing in the file that
+		# says *how tightly* limbs sharing a beat keep to it — which foot shares a
+		# beat with which is Footfall's answer, off the interference above — and an
+		# animal that has moved its legs in lateral pairs to stop them fouling each
+		# other has every reason to keep them there.
+		"beat_coupling": 0.75,
+		# Quick for its weight, and it has to be: a pace is a two-beat gait, and a
+		# body that must be statically supported at every instant cannot have one —
+		# it picks its feet up one at a time whatever its proportions say. So this
+		# build has to be going fast enough for its size to be caught briefly on one
+		# pair, and no faster: past a run it starts throwing itself between girdles
+		# instead, which is a different gait again. See Footfall.caution.
+		"move_speed": 215.0,
 		"turn_speed_falloff": 0.60, "turn_responsiveness": 7.0, "turn_pivot": 70.0,
 		"sprint_multiplier": 1.50, "reverse_speed_factor": 0.50,
 		"density": 1.2, "muscle_power": 1.1, "jaw_power": 1.4, "fat_reserve": 2.2,
@@ -478,7 +599,17 @@ const PRESETS: Dictionary = {
 		"hip_width": 13.0, "tail_tip_width": 1.4,
 		"front_limb_t": 0.16, "rear_limb_t": 0.52,
 		"arm_length": 52.0, "leg_length": 58.0,
-		"stance_width": 0.70, "stance_reach": 0.84,
+		"stance_width": 0.70,
+		# The cat's asymmetry taken further: a foreleg that is nearly a strut over a
+		# hind leg that folds tighter than anything else in the file and swings
+		# through half again the fan. That is where the gather comes from, and it is
+		# the same two rows of the same table an elephant fills in the other
+		# direction.
+		"fore_flex_deg": -8.0, "hind_flex_deg": 28.0,
+		"fore_fold_range": 1.05, "hind_fold_range": 1.45,
+		"fore_upper_share": 0.50, "hind_upper_share": 0.44,
+		"fore_swing_deg": 62.0, "hind_swing_deg": 84.0,
+		"toe_push": 0.70,
 		"move_speed": 420.0,
 		"turn_speed_falloff": 0.50, "turn_responsiveness": 13.0, "turn_pivot": 44.0,
 		"sprint_multiplier": 2.00, "reverse_speed_factor": 0.45,
@@ -515,7 +646,16 @@ const PRESETS: Dictionary = {
 		# own centreline and cannot track *through* it: the feet have to stay either
 		# side of the body they are carrying, and a leg this near vertical has very
 		# little fold plane left to keep its knee outboard with.
-		"stance_width": 0.72, "stance_reach": 0.86,
+		"stance_width": 0.72,
+		# A theropod knee stands markedly bent and stays bent — the bird's crouch —
+		# so the hind limb is flexed past its stance rather than straighter than it.
+		# The forelimb's articulation is real and entirely academic: nothing is
+		# standing on it, so it is held folded against the chest whatever it says.
+		"fore_flex_deg": 50.0, "hind_flex_deg": 12.0,
+		"fore_fold_range": 1.0, "hind_fold_range": 1.10,
+		"fore_upper_share": 0.52, "hind_upper_share": 0.48,
+		"fore_swing_deg": 50.0, "hind_swing_deg": 70.0,
+		"toe_push": 0.60,
 		"move_speed": 210.0,
 		"turn_speed_falloff": 0.60, "turn_responsiveness": 7.0, "turn_pivot": 90.0,
 		"sprint_multiplier": 1.35, "reverse_speed_factor": 0.45,
@@ -546,7 +686,14 @@ const PRESETS: Dictionary = {
 		"hip_width": 16.0, "tail_tip_width": 2.5,
 		"front_limb_t": 0.20, "rear_limb_t": 0.44,
 		"arm_length": 22.0, "leg_length": 62.0,
-		"stance_width": 0.50, "stance_reach": 0.80,
+		"stance_width": 0.50,
+		# Folded to a Z and built to open: the deepest crouch and the longest foot
+		# in the file, which between them are a hop.
+		"fore_flex_deg": 46.0, "hind_flex_deg": 30.0,
+		"fore_fold_range": 1.0, "hind_fold_range": 1.50,
+		"fore_upper_share": 0.52, "hind_upper_share": 0.42,
+		"fore_swing_deg": 50.0, "hind_swing_deg": 78.0,
+		"toe_push": 0.85,
 		"move_speed": 300.0,
 		"turn_speed_falloff": 0.55, "turn_responsiveness": 9.0, "turn_pivot": 60.0,
 		"sprint_multiplier": 1.60, "reverse_speed_factor": 0.40,

@@ -12,6 +12,18 @@ extends RefCounted
 
 const CAP_SEGMENTS: int = 10
 
+## How far out along the flank a limb socket sits, as a fraction of the body's
+## half-width there before the posture draws it inboard.
+##
+## Well short of the surface, because a joint is inside an animal rather than on
+## the outside of one — and the cost of pretending otherwise is paid in a place
+## that is not obvious: the body's cross-section is an ellipse, so the further out
+## a socket sits the less depth there is under it, and the further the belly has to
+## hang below the shoulders holding it up (see Stature.socket_hang). Out at the
+## surface the flesh under a socket is nothing at all and a low-slung animal's
+## belly is on the floor.
+const SOCKET_OUT: float = 0.75
+
 ## Cross-section widths, one per spine point.
 var widths: PackedFloat32Array = PackedFloat32Array()
 ## Closed silhouette, counter-clockwise from the right side of the snout.
@@ -46,6 +58,12 @@ var anchors: Dictionary = {}
 ## "under the body" is measured against: a foot brought this far inboard of its
 ## own shoulder is a foot on the animal's midline.
 var socket_out: Dictionary = {}
+## ...and the body's own half-width at that station, so the two together say
+## where on the cross-section the joint sits. A socket is a point on a round
+## body, not a point in the air beside one: the pair is what lets Stature put the
+## belly where a belly goes, which is below the shoulder rather than level with
+## it — see Stature.socket_hang.
+var socket_half: Dictionary = {}
 ## Index of the last spine point included in the silhouette (tail clipping).
 var last_index: int = 0
 var tail_tip: Vector2 = Vector2.ZERO
@@ -153,10 +171,11 @@ func _set_anchor(spine: Spine, p: CreatureParams, key: String, t: float, side: f
 	var f: Spine.Frame = spine.sample(t)
 	var n: int = spine.points.size()
 	var idx: int = clampi(int(round(t * float(n - 1))), 0, n - 1)
-	var out: float = widths[idx] * 0.85 * inset
+	var out: float = widths[idx] * SOCKET_OUT * inset
 	f.pos = f.pos + f.perp * (side * out)
 	anchors[key] = f
 	socket_out[key] = out
+	socket_half[key] = widths[idx]
 
 
 ## Uniform Catmull-Rom through `knots`, clamped at both ends.
