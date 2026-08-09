@@ -366,6 +366,32 @@ func stamp(origin: Vector2, forward: Vector2, perp: Vector2,
 	return mark
 
 
+## How far from the centre of the mouthful the flesh these jaws have closed on
+## actually sits, for a mouth of these two radii.
+##
+## The arch is a ring around what it holds rather than a row in front of it — see
+## the arc above — so this is the mean distance from the mouthful's centre out to
+## the contact patches, less the crowns the teeth are buried to. A hold at exactly
+## this distance is a hold with the teeth in the flesh, which is the only distance
+## a latched bite has any business being at: nearer and the snout is inside the
+## victim, further and the mouth is off it and there is a gap where the teeth
+## should be.
+##
+## It is a property of the mouth and of nothing else, which is what makes it the
+## rest length a grip is entitled to. A long-snouted animal holds its victim
+## further from its face than a blunt one does, and a mouthful of needles closes
+## further onto the flesh than a mouthful of cusps, because the crowns are longer.
+func hold_radius(reach: float, width: float) -> float:
+	if teeth.is_empty():
+		return 0.0
+	var centre: float = centroid * reach
+	var total: float = 0.0
+	for tooth in teeth:
+		total += Vector2(cos(tooth.angle) * tooth.patch_seat * reach - centre,
+			sin(tooth.angle) * tooth.patch_seat * width).length()
+	return maxf(total / float(teeth.size()) - mean_crown * arc_scale(reach, width), 0.0)
+
+
 ## How many teeth of one type are set in these jaws. Reporting only; nothing in
 ## the simulation asks a dentition what it is made of.
 func count_of(kind: int) -> int:

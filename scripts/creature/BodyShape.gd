@@ -52,6 +52,36 @@ var swallow_size: float = 0.0
 ## Narrow, because what is passing is a discrete object rather than a wave.
 const SWALLOW_SPREAD: float = 0.11
 
+## A set of jaws with hold of this body: where along it they have hold, what
+## they are pulling toward, and how far the flesh there will come.
+##
+## Written by the creature before the shape is built, exactly as the swallow
+## above is and for the same reason — what a bite does to an animal is the animal
+## being a different shape, not a mark drawn over one. The displacement is
+## carried per station in `pull` below, so the tissue lattice tessellates the
+## flesh where it has actually been drawn to and the silhouette agrees with it.
+var held_at: float = 0.0
+var held_to: Vector2 = Vector2.ZERO
+var held_by: float = 0.0
+## Which side of itself the body is held on, -1..1 across the width. The flank
+## the jaws are on comes with them; the far one follows much less.
+var held_side: float = 0.0
+## How far along the body a hold drags the flesh either side of itself. Wider
+## than a swallow's spread, because skin and fat are continuous sheets: what is
+## pulled at one station tows what is next to it, which is what stops a tented
+## flank being a dent with corners.
+const HELD_SPREAD: float = 0.16
+
+## How far the flesh at each station has been drawn off its own skeleton, one
+## per spine point.
+##
+## Zero at every station on a body nothing has hold of, which is the property
+## that matters: a creature nobody is biting is the shape it has always been,
+## down to the vertex. The spine itself is never moved by this — bone does not
+## slide — so what the array describes is exactly what it should, soft tissue
+## displaced over the frame it hangs on.
+var pull: PackedVector2Array = PackedVector2Array()
+
 ## "FL" / "FR" / "RL" / "RR" -> Spine.Frame positioned at the limb socket.
 var anchors: Dictionary = {}
 ## The same keys -> how far that socket sits off the spine, in world pixels. What
@@ -97,9 +127,17 @@ func build(spine: Spine, p: CreatureParams, scale: float, posture: Posture = nul
 	last_index = n - 1
 	if not p.tail_enabled:
 		last_index = clampi(int(round(p.rear_limb_t * float(n - 1))) + 2, 3, n - 1)
-	tail_tip = pts[last_index]
 
-	head.pos = pts[0]
+	# --- flesh drawn out by whatever has hold of it -------------------------
+	# Before every point below is placed, because all of them are placed off it:
+	# the flanks, the silhouette, the snout, and — through the same array — the
+	# tissue lattice. A hold is a real displacement of the animal, so there is
+	# nowhere else it could go without one of those disagreeing with the others.
+	_solve_pull(spine, n)
+
+	tail_tip = pts[last_index] + pull[last_index]
+
+	head.pos = pts[0] + pull[0]
 	head.fwd = spine.forwards[0]
 	head.perp = spine.perps[0]
 	head_radius = widths[0]
@@ -108,8 +146,8 @@ func build(spine: Spine, p: CreatureParams, scale: float, posture: Posture = nul
 	flank_left.resize(last_index + 1)
 	flank_right.resize(last_index + 1)
 	for i in range(last_index + 1):
-		flank_left[i] = pts[i] + spine.perps[i] * widths[i]
-		flank_right[i] = pts[i] - spine.perps[i] * widths[i]
+		flank_left[i] = pts[i] + pull[i] + spine.perps[i] * widths[i]
+		flank_right[i] = pts[i] + pull[i] - spine.perps[i] * widths[i]
 
 	# --- closed outline ----------------------------------------------------
 	# Round snout cap -> left flank -> round tail cap -> right flank back.
@@ -119,7 +157,7 @@ func build(spine: Spine, p: CreatureParams, scale: float, posture: Posture = nul
 	var head_angle: float = spine.forwards[0].angle()
 	for k in range(CAP_SEGMENTS + 1):
 		var a: float = head_angle - PI * 0.5 + PI * (float(k) / float(CAP_SEGMENTS))
-		outline.append(pts[0] + Vector2.RIGHT.rotated(a) * widths[0])
+		outline.append(pts[0] + pull[0] + Vector2.RIGHT.rotated(a) * widths[0])
 
 	for i in range(1, last_index + 1):
 		outline.append(flank_left[i])
@@ -127,7 +165,8 @@ func build(spine: Spine, p: CreatureParams, scale: float, posture: Posture = nul
 	var tail_angle: float = spine.forwards[last_index].angle()
 	for k in range(1, CAP_SEGMENTS):
 		var a2: float = tail_angle + PI * 0.5 + PI * (float(k) / float(CAP_SEGMENTS))
-		outline.append(pts[last_index] + Vector2.RIGHT.rotated(a2) * widths[last_index])
+		outline.append(pts[last_index] + pull[last_index]
+			+ Vector2.RIGHT.rotated(a2) * widths[last_index])
 
 	for i in range(last_index, 0, -1):
 		outline.append(flank_right[i])
@@ -151,6 +190,58 @@ func build(spine: Spine, p: CreatureParams, scale: float, posture: Posture = nul
 	_set_anchor(spine, p, "FR", p.front_limb_t, -1.0, inset)
 	_set_anchor(spine, p, "RL", p.rear_limb_t, 1.0, inset)
 	_set_anchor(spine, p, "RR", p.rear_limb_t, -1.0, inset)
+
+
+## Where the flesh at every station has been drawn to by whatever has hold of the
+## body, in world pixels off the skeleton.
+##
+## One hold, because a body has one set of jaws on it at a time — see
+## `Creature._find_grip_on_self`, which is the same singular answer read from the
+## other end.
+##
+## Three things shape it and each is a sentence about tissue rather than a curve
+## chosen to look right:
+##
+##   * it is **toward the jaws**, and never past them. Flesh follows what is
+##     pulling it and stops when it gets there; a station already at the mouth
+##     has nowhere further to be drawn.
+##   * it **falls off along the body**, because skin and fat are continuous
+##     sheets. What is pulled at one station tows what is beside it, less and
+##     less, which is the difference between a flank tenting up and a dent with
+##     corners in it.
+##   * it **favours the side being held**. Jaws on the left flank draw the left
+##     flank; the far side of the animal comes only as far as the near side drags
+##     it through the body between them.
+func _solve_pull(spine: Spine, n: int) -> void:
+	if pull.size() != n:
+		pull.resize(n)
+	# A body nothing has hold of is left at exactly zero rather than at something
+	# very small, so an animal that is not being bitten is the shape it was.
+	if held_by <= 0.0:
+		for i in n:
+			pull[i] = Vector2.ZERO
+		return
+	var span: float = float(maxi(n - 1, 1))
+	for i in n:
+		var away: float = absf(float(i) / span - held_at) / HELD_SPREAD
+		if away >= 1.0:
+			pull[i] = Vector2.ZERO
+			continue
+		var falloff: float = 1.0 - away * away
+		falloff *= falloff
+		# Which side this station's flesh is being pulled from. The near flank
+		# takes the whole of it and the far one about as much as the body is
+		# thick, which is what dragging a flank across an animal does.
+		var facing: float = spine.perps[i].dot(
+			(held_to - spine.points[i]).normalized())
+		var side: float = 0.5 + 0.5 * clampf(facing * signf(held_side), -1.0, 1.0) \
+			if absf(held_side) > 0.001 else 1.0
+		var toward: Vector2 = held_to - spine.points[i]
+		var distance: float = toward.length()
+		if distance <= 0.0001:
+			pull[i] = Vector2.ZERO
+			continue
+		pull[i] = toward * (minf(held_by * falloff * side, distance) / distance)
 
 
 ## How much a mouthful going down adds to the width at one station. A smooth hump

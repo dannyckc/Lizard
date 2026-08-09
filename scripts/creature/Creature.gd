@@ -693,6 +693,10 @@ func _physics_process(delta: float) -> void:
 	# the body it is going down: it is a term in the width profile and not a lump
 	# drawn over the top of one.
 	_read_swallow()
+	# And beside it for exactly the same reason: flesh with a set of jaws in it is
+	# flesh that has been pulled somewhere, so it is a term in the shape rather
+	# than a mark laid over one.
+	_read_hold()
 	body.build(spine, params, size_scale, posture)
 	# `move_dir` is the body's facing and intentionally never flips in reverse.
 	# The gait only needs a signed fallback for the instant a socket is moving
@@ -2395,6 +2399,17 @@ func gape_radius() -> float:
 	return Dentition.arc_scale(axes.x, axes.y)
 
 
+## Where these jaws hold flesh: how far from the centre of its own mouthful this
+## mouth's teeth actually close on something. The rest length of any grip it
+## takes — see Dentition.hold_radius, which reads it off the arch and the crowns
+## rather than off whatever gap a strike happened to land at.
+func jaw_hold() -> float:
+	if dentition == null:
+		dentition = Dentition.grow(params)
+	var axes: Vector2 = jaw_axes()
+	return dentition.hold_radius(axes.x, axes.y)
+
+
 ## The mouth, in world space — where a bite lands, and where a grip holds from.
 ##
 ## This is the centre of the mouthful the teeth take, not a point projected
@@ -2784,6 +2799,18 @@ func _advance_grip(delta: float) -> void:
 		_release_grip(true)
 		return
 
+	# Contact, asked every tick and by exactly the line that decided there was a
+	# hold in the first place. The tether keeps the flesh in the mouth, but it
+	# takes up slack at a bounded rate and splits what it takes by mass, so a
+	# heave sharp enough — or a victim heavy enough to drag the biter rather than
+	# be drawn in — outruns it. When the flesh gets out of the jaws the latch is
+	# over: nothing was overpowered and nothing tore, the teeth simply came off,
+	# and it is the third way a hold ends because it is the third thing that can
+	# physically happen to one.
+	if not grip.is_holding():
+		_release_grip(true)
+		return
+
 	if grip.load > physique.bite_force:
 		_tear_free()
 		return
@@ -2959,6 +2986,33 @@ func _read_swallow() -> void:
 	body.swallow_size = clampf(girth, 0.0, 1.0) * SWALLOW_SWELL * sin(PI * down)
 
 
+## Hands the body whatever has hold of it, as a place, a direction and a distance.
+##
+## The victim's side of a grip, and it is read here for the same reason the grip
+## itself is read here rather than written by the biter: nothing in this file ever
+## writes into another creature's state. The biter measures the pull, this animal
+## looks up who has hold of it and asks how far its own flesh will come.
+##
+## What is handed over is the mouth's position rather than the bind's, because
+## flesh is drawn *toward the jaws* — the bind is where the jaws have hold, which
+## is the flesh that is doing the moving, not the place it is moving to.
+func _read_hold() -> void:
+	if body == null:
+		return
+	body.held_by = 0.0
+	if _held_by == null or not _held_by.is_alive():
+		return
+	# A hold on a limb pulls the limb, and a limb is placed by the gait and the
+	# ragdoll rather than by the silhouette — see `_drag_grip`, which articulates
+	# it there. Only a hold on the trunk deforms the trunk.
+	if _held_by.holds_limb():
+		return
+	body.held_at = clampf(_held_by.bind.x, 0.0, 1.0)
+	body.held_side = clampf(_held_by.bind.y, -1.0, 1.0)
+	body.held_to = _held_by.biter.jaw_point()
+	body.held_by = _held_by.drawn()
+
+
 ## How hard one closing of these jaws drives, in the tissue lattice's hit points.
 ##
 ## Full `bite_damage` for a free strike, which is what every bite in the game was
@@ -3043,14 +3097,13 @@ func _regrip() -> bool:
 	if best_hold <= 0.0 or best_distance > reach:
 		return false
 	grip.bind_body(best)
-	# The tether's rest length is the jaws, not the search. A fresh grip records
-	# the gap it actually closed at because there is nothing else it could mean;
-	# a re-seat cannot, because the flesh it reached for may be most of a gape
-	# out and recording *that* would leave the hold a leash — one the next
-	# mouthful would then be taken at the far end of, and the one after that
-	# further out again. Jaws hold what is in them, so anything further away is
-	# hauled in rather than accepted where it lies.
-	grip.rest_length = minf(best_distance, gape_radius()) + GRIP_SLACK
+	# The tether's rest length is the jaws, not the search — the same number a
+	# fresh grip takes, because it is the same mouth closing on the same kind of
+	# flesh. Anything the search had to reach for is hauled in rather than
+	# accepted where it lies; recording the distance instead would leave the hold
+	# a leash, one the next mouthful would be taken at the far end of and the one
+	# after that further out again.
+	grip.rest_length = jaw_hold() + GRIP_SLACK
 	return true
 
 
@@ -3202,6 +3255,18 @@ func resolve_bite(connected: bool, target: Creature = null, hit: AnatomyState.Hi
 		bite_latched = false
 		return
 	_form_grip(target, hit)
+	# ...and then whether that is a hold at all, which is the two anatomies'
+	# business rather than the resolver's — see Grip.is_holding, and note that it
+	# is the same line asked of the same grip every tick afterwards. Jaws that
+	# closed on a place they cannot get teeth into have still done their damage on
+	# the way through; what they do not get is a latch.
+	#
+	# Asked here rather than inside `_form_grip` because the two are different
+	# jobs: forming is recording which structure the jaws shut on, and that is
+	# also what a carcass's limb needs done to it from outside. Whether the mouth
+	# has anything is a question about this strike.
+	if grip != null and not grip.is_holding():
+		_release_grip()
 
 
 ## Closes the jaws on a specific creature and records where.
@@ -3221,12 +3286,20 @@ func _form_grip(target: Creature, hit: AnatomyState.Hit) -> void:
 		held.bind_limb(hit.limb_key, hit.limb_segment, hit.limb_u)
 	else:
 		held.bind_body(target.body_bind(hit.world_point if hit != null else jaw))
-	# Rest length is the gap the jaws actually closed at, plus their own play. A
-	# fresh grip is therefore already satisfied and pulls nothing: it exists to
-	# take up slack that appears *after* it, which is what stops it wrestling the
-	# contact pass holding the two bodies apart at that same point, and what keeps
-	# a biter's own spine settling under a clamped head from towing it forward.
-	held.rest_length = jaw.distance_to(held.anchor()) + GRIP_SLACK
+	# Rest length is where these jaws hold flesh, and that is a fact about the
+	# mouth rather than about the moment — see Dentition.hold_radius. It used to
+	# be the gap the strike happened to close at, which is the whole of the hole
+	# it left: the bite query reaches a full gape, so a hit found at arm's length
+	# froze that arm's length in as the distance the tether would then defend, and
+	# the teeth hung off the wound by most of a mouth for as long as the hold
+	# lasted. Set to the mouth's own hold radius the tether does the opposite —
+	# it draws the flesh into the jaws over the next tick or two and keeps it
+	# there, which is what closing on something means.
+	#
+	# It cannot tow the biter into its victim, because a tether is a rope: it
+	# takes up slack and never pushes. Two bodies already closer than this are
+	# left exactly where they are.
+	held.rest_length = jaw_hold() + GRIP_SLACK
 	grip = held
 	bite_latched = true
 	# The strike that took hold was itself one closing of these jaws, so the next

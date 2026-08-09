@@ -244,7 +244,10 @@ func _draw_body_fill(body: BodyShape, col_head: Color, col_tail: Color, offset: 
 		draw_colored_polygon(quad, col_head.lerp(col_tail, t))
 	# Round caps close off the snout and the tail tip.
 	draw_circle(body.head.pos + offset, body.head_radius, col_head)
-	draw_circle(creature.spine.points[last] + offset, body.widths[last], col_tail)
+	# The body's own tail point rather than the spine's, so the cap goes where the
+	# flesh is — see BodyShape.pull. The two are the same on anything nobody has
+	# hold of, which is nearly always.
+	draw_circle(body.tail_tip + offset, body.widths[last], col_tail)
 
 
 ## Two paper pinpricks give the otherwise abstract ink silhouette its life —

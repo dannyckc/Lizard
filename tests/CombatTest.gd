@@ -93,6 +93,7 @@ func _run_checks() -> void:
 
 	_check_physique(player, target)
 	_check_grip(player, target)
+	_check_teeth_stay_on_the_flesh(player, target)
 
 	main.queue_free()
 	_finish()
@@ -516,8 +517,21 @@ func _check_bite_contract(player: Creature, target: Creature) -> void:
 		"the head was never thrown appreciably forward (%.1f px)" % extension)
 	_check(main.bite_cue.is_showing(),
 		"the bite impact did not show its world-space Bite cue")
-	_check(player.head_pos.is_equal_approx(stand),
-		"lunging displaced the creature itself")
+	# The strike still never accumulates into the animal's position — that is what
+	# stops a bite teleporting it forward by its own reach, and it is the claim
+	# this line has always been making. What may move it now is the *hold*: jaws
+	# shut on something are joined to it, and the tether draws the two together
+	# until the teeth are on the flesh instead of leaving them hanging off it at
+	# whatever range the strike happened to connect at. So the creature is allowed
+	# to have been drawn toward its victim and not to have been thrown there, and
+	# the two are told apart by how far: the draw cannot exceed the depth of the
+	# mouth doing it, while a lunge that leaked would be worth its whole reach.
+	var drawn: float = player.head_pos.distance_to(stand)
+	_check(drawn <= player.gape_radius(),
+		"the creature moved further than its own jaws could draw it (%.1f px of a %.1f px mouth)"
+			% [drawn, player.gape_radius()])
+	_check(drawn < player.params.bite_reach * 0.5,
+		"lunging displaced the creature itself (%.1f px)" % drawn)
 	_check(player.bite_connected, "landed held bite was reported as a miss")
 	_check(player.is_bite_latched(), "holding a connected bite did not latch it")
 	_check(is_equal_approx(player.bite_time, APEX),
@@ -1247,6 +1261,128 @@ func _nearest_cell(patch: TissueGrid.Patch, at: Vector2) -> int:
 			best_distance = d
 			best = cell
 	return best
+
+
+## What a latch actually is: teeth in tissue, held there, with the tissue giving.
+##
+## Three claims, and each of them is a thing the hold used to get wrong.
+##
+##   * **Where the flesh is held** is a property of the mouth, not of the moment.
+##     The bite query reaches a whole gape, so a strike can connect with the flesh
+##     most of a mouth away — and that distance used to become the length the
+##     tether then defended, leaving the teeth hanging off the wound for as long
+##     as the animal held on. It is now the mouth's own hold radius, so the jaws
+##     draw what they have closed on into themselves.
+##   * **The flesh comes with them.** A tether between two moving bodies lags by
+##     about what the far one covered in a tick; skin and fat are what take that
+##     up on a real animal, so the daylight is closed by the victim deforming
+##     rather than by nobody. And it is deformation of the *body* — the lattice
+##     tessellates the drawn flesh — rather than a mark laid over one.
+##   * **A hold is a hold while there is contact and not after.** Being pulled
+##     off and having the meat tear out were the only two ways a grip could end;
+##     the third is that the flesh simply leaves the mouth, which is what happens
+##     to jaws that cannot keep up with what they have hold of.
+func _check_teeth_stay_on_the_flesh(player: Creature, target: Creature) -> void:
+	player.set_bite_held(false)
+	player.params.apply_preset("Cat")
+	target.params.apply_preset("Cat")
+	target.alive = true
+	target.reset(Vector2.ZERO, PI * 0.5)
+	for _i in 30:
+		target._physics_process(TICK)
+	# Nose to the middle of the trunk, which is where an animal's padding is. A
+	# hold on a leg is a hold on a bone with very little over it, and the flesh
+	# there is articulated by the limb rather than by the silhouette.
+	var flank: Vector2 = target.spine.points[target.spine.size() / 2] \
+		+ Vector2(target.body.head_radius * 2.2, 0.0)
+	player.reset(flank, PI)
+	player.head_look_dir = Vector2.LEFT
+	for _i in 30:
+		player._physics_process(TICK)
+		target._physics_process(TICK)
+
+	# Nothing has hold of this body yet, so it is exactly the shape it has always
+	# been — down to the vertex, which is the property that makes the deformation
+	# safe to have at all.
+	var undisturbed: bool = true
+	for offset in target.body.pull:
+		undisturbed = undisturbed and offset == Vector2.ZERO
+	_check(undisturbed, "a creature nobody was holding had its flesh displaced")
+
+	player.set_bite_held(true)
+	player.request_bite(target.head_pos)
+	var latched: bool = false
+	var settled_gap: float = 0.0
+	for _i in 90:
+		player._physics_process(TICK)
+		target._physics_process(TICK)
+		if player.is_bite_latched():
+			latched = true
+			settled_gap = player.jaw_point().distance_to(player.grip.anchor())
+	_check(latched, "a Cat biting a Cat's flank never took hold of it")
+	if not latched or player.grip == null:
+		player.set_bite_held(false)
+		return
+
+	# The tether defends the mouth rather than the range the strike connected at.
+	_check(is_equal_approx(player.grip.rest_length,
+			player.jaw_hold() + Creature.GRIP_SLACK),
+		"a hold was kept at the distance the strike happened to land at (%.1f px) rather than at the mouth's own (%.1f px)"
+			% [player.grip.rest_length, player.jaw_hold() + Creature.GRIP_SLACK])
+	# ...and with neither animal pulling, what daylight is left is inside the
+	# mouth: the teeth are on the flesh rather than a tooth's length off it.
+	var drawn: float = player.grip.drawn()
+	_check(settled_gap - drawn <= player.jaw_hold() + Creature.GRIP_SLACK,
+		"a settled hold left %.1f px between the jaws and the flesh, and the flesh only came %.1f px"
+			% [settled_gap, drawn])
+
+	# The victim fights, which is the only thing that puts any load on the jaws —
+	# and the loaded flesh is what has to visibly give.
+	var flee := MovementInput.Command.new()
+	flee.throttle = 1.0
+	var most_pull: float = 0.0
+	var worst_overrun: float = -INF
+	for _i in 40:
+		target.command = flee
+		target.head_look_dir = Vector2.UP
+		player._physics_process(TICK)
+		target._physics_process(TICK)
+		if not player.is_bite_latched():
+			break
+		worst_overrun = maxf(worst_overrun, player.grip.contact_gap())
+		for offset in target.body.pull:
+			most_pull = maxf(most_pull, offset.length())
+	target.command = MovementInput.Command.new()
+	_check(most_pull > 0.5,
+		"a creature being hauled about by the flank never deformed (%.2f px)" % most_pull)
+	_check(worst_overrun <= 0.0,
+		"the jaws kept a hold whose flesh had left the mouth by %.1f px" % worst_overrun)
+
+	# And the third ending, asked of the rule rather than of a scenario. `is_holding`
+	# is the one line that decides both whether jaws take hold and whether they
+	# still have it a second later, so it is worth pinning in both directions: the
+	# flesh is in the mouth, or it is not and there is nothing to hold.
+	#
+	# It is deliberately not asserted that this is *how* a hold on a bolting animal
+	# ends. It is not, usually — anything that carries flesh out of a mouth that
+	# fast loads the jaws enormously on the way, and they are pulled off first.
+	# That is the older contest and it still wins, which is right. This is the
+	# backstop underneath it, for the flesh that leaves without a fight: something
+	# that jumps, something the tether cannot follow for its mass, a body moved out
+	# from under the teeth.
+	if player.grip != null:
+		_check(player.grip.is_holding(),
+			"a settled hold did not report itself as holding anything")
+		var stood: Vector2 = target.head_pos
+		target.reset(stood + Vector2(0.0, player.grip.contact_span() * 2.0),
+			target.heading)
+		_check(not player.grip.is_holding(),
+			"jaws reported a hold on flesh that had left the mouth entirely")
+		player._physics_process(TICK)
+		_check(player.grip == null and not player.is_bite_latched(),
+			"jaws kept a hold on flesh that was no longer in them")
+	player.set_bite_held(false)
+	target.reset(target.spawn_position, target.spawn_heading)
 
 
 ## A plain disc of damage, for the checks below that are about the lattice

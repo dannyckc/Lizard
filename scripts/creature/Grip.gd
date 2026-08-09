@@ -33,7 +33,14 @@ const FLESH_REFERENCE_HP: float = TissueGrid.SKIN_HP + TissueGrid.FAT_HP \
 ## How far, in pixels, flesh at the point of parting has drawn out of the body.
 ## The tether lengthens by this much as it yields, so the two creatures visibly
 ## come apart before anything tears rather than snapping at a fixed distance.
+## Quoted for tissue that is all skin over fat — see `softness`, which is what a
+## given animal's flank actually manages against it.
 const MAX_STRETCH: float = 7.0
+## Skin over fat in an intact cell — what `softness` is measured against, and
+## deliberately only the two layers that move. Muscle is anchored to bone and
+## does not draw out, which is why it is in the tensile reference above and not
+## in this one.
+const SOFT_REFERENCE_HP: float = TissueGrid.SKIN_HP + TissueGrid.FAT_HP
 
 var biter: Creature
 var victim: Creature
@@ -110,8 +117,60 @@ func slack() -> Vector2:
 ## tissue is the only elasticity in the whole join — the tether itself stays
 ## inextensible — so the give a heavy pull shows is the victim stretching, which
 ## is what it should look like right up until it parts.
+##
+## Two things draw it out and they are different in kind. Any load at all tents
+## the skin and fat up into the jaws: that is elastic, it comes back the moment
+## the pull does, and it is most of what a bite actually looks like. Past the
+## tissue's yield point the fibres begin to part instead and the draw stops
+## coming back, which is what `stress` measures on its way to a tear. The larger
+## of the two, because they are the same tissue giving and it cannot be drawn out
+## twice — and both are scaled by how much of it there is to draw.
 func stretch() -> float:
-	return MAX_STRETCH * stress
+	return MAX_STRETCH * softness() * maxf(taut(), stress)
+
+
+## What the tissue in these jaws is carrying, against what it can carry. Zero on
+## a hold nothing is pulling against, one at the point the fibres start to go.
+func taut() -> float:
+	return clampf(load / maxf(tissue_strength(), 0.0001), 0.0, 1.0)
+
+
+## How far the held flesh has actually been drawn out of the body, as against how
+## far it is *allowed* to be by `stretch` above.
+##
+## The whole of the daylight between where the jaws hold flesh and where the
+## flesh currently is, capped by what this much soft tissue will give. The two
+## are different jobs and both are needed: the allowance is what the tether
+## defends, this is what the body has to be drawn into to look like the animal it
+## is. A tether between two moving bodies always lags the one that is running by
+## about the distance it covered in a tick — nothing discrete can do better — and
+## skin over fat is exactly the thing that takes that up on a real animal. So the
+## teeth stay buried in a flank that is visibly stretched toward them, instead of
+## hanging off one at a polite and unexplained distance.
+##
+## Past the cap the tissue is at its limit and the daylight is real, which is
+## also correct: that is a hold in the last moments before something gives, and
+## what gives is decided by the load rather than by this.
+func drawn() -> float:
+	return clampf(biter.jaw_point().distance_to(anchor()) - biter.jaw_hold(),
+		0.0, MAX_STRETCH * softness())
+
+
+## How much of what these jaws are holding is the kind of tissue that moves.
+##
+## Skin and fat slide over the muscle beneath them; muscle is anchored to bone
+## and does not. So the same pull draws a padded flank a long way out and a lean
+## one barely at all, and flesh already eaten down past the fat stops stretching
+## because what stretched is no longer there. It is the second half of what makes
+## a hold a conversation between two anatomies rather than a constant: the mouth
+## decides how much of the victim it has, and this decides what that much gives.
+##
+## Measured over the jaws' own footprint, exactly as `tissue_strength` is and for
+## the same reason — the cell at the bind is the one the teeth have just gone
+## through, so asking it alone would report that a fresh bite is holding nothing.
+func softness() -> float:
+	return clampf(victim.anatomy.tissue.soft_within(anchor(), biter.gape_radius())
+		/ SOFT_REFERENCE_HP, 0.0, 1.0)
 
 
 ## Load as a fraction of what these jaws can hold. At 1.0 they are pulled off.
@@ -135,6 +194,44 @@ func tissue_strength() -> float:
 		anchor(), biter.gape_radius())
 	return FLESH_TENSILE * (footprint / FLESH_REFERENCE_HP) \
 		* pow(maxf(victim.physique.mass, 0.0001), Physique.AREA_EXPONENT)
+
+
+## How far the flesh may sit from the middle of the mouthful and still be
+## between the teeth: the span of the mouth itself, plus however far the tissue
+## has already drawn out of the body under the load on it.
+##
+## Both terms belong to a different animal, which is the point. The mouth says
+## how much of anything it can have hold of at once; the victim's own soft tissue
+## says how far it will follow the jaws before the two part company.
+func contact_span() -> float:
+	return biter.gape_radius() + stretch()
+
+
+## How far past that the flesh has got. Zero or less is teeth in tissue.
+func contact_gap() -> float:
+	return biter.jaw_point().distance_to(anchor()) - contact_span()
+
+
+## What these jaws have hold of, in the lattice's own hit points — the tissue
+## actually standing inside the arch, averaged over the footprint the teeth cover.
+## Zero is a mouth closed on a hole.
+func purchase() -> float:
+	return victim.anatomy.tissue.flesh_within(anchor(), biter.gape_radius())
+
+
+## Whether this is a hold at all, asked of the two bodies rather than of a flag.
+##
+## A latch is teeth in tissue and it is nothing else, so both halves have to be
+## true at the same instant: the flesh has to be inside the mouth, and there has
+## to be flesh there for the teeth to be in. Neither is a rule about biting —
+## the first is the biter's own arch against where the victim's body currently
+## is, the second is the victim's own remaining tissue — and because it is a
+## reading rather than a state, the same line decides whether jaws take hold on
+## the frame they shut and whether they still have hold two seconds later. Jaws
+## that lose contact have not been beaten by anything; they have simply come off,
+## which is the one way a hold could previously never end.
+func is_holding() -> bool:
+	return contact_gap() <= 0.0 and purchase() > 0.0
 
 
 ## True once there is nothing left for the jaws to be holding. Jaws clamped on a

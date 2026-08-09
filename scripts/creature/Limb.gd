@@ -175,6 +175,15 @@ var foot_height: float = 0.0
 ## held reads this one, because a leg standing on a ledge holds its shoulder a
 ## ledge higher and that is not a step, it is where the animal is standing.
 var surface: float = 0.0
+## How much room the foot has on that surface: how far its own footprint is from
+## the nearest edge, negative when it is hanging off one and `INF` on the open
+## floor, which has no edge to hang off.
+##
+## The other half of the same answer, and the half that used to be thrown away.
+## Where a surface *is* decides how high the leg holds the body; whether there is
+## any room on it decides whether the foot should be put there at all — see
+## `Gait._footing`, which is what a foot does about a foothold it cannot stand on.
+var foothold: float = INF
 ## The surfaces a step is leaving and arriving at. Sampled when the foot lifts and
 ## re-sampled while it is in the air, because the spot it is aimed at keeps moving.
 var step_from_surface: float = 0.0

@@ -728,6 +728,14 @@ func _update_body(body: BodyShape, spine: Spine, stature: Stature,
 		var perp: Vector2 = spine.perps[i].lerp(spine.perps[i + 1], f)
 		perp = perp.normalized() if perp.length_squared() > 0.000001 else spine.perps[i]
 		var half: float = lerpf(body.widths[i], body.widths[i + 1], f)
+		# Off the skeleton by however far something has hold of the flesh here —
+		# see BodyShape.pull, and note that it is the flesh that moves and not the
+		# spine. This is what keeps a set of jaws biting the tissue it is visibly
+		# tenting up rather than the tissue that would have been there if nothing
+		# were pulling on it. Zero on every station of a body nobody is holding,
+		# so an animal that is not being bitten tessellates exactly as it did.
+		var drawn: Vector2 = body.pull[i].lerp(body.pull[i + 1], f) \
+			if body.pull.size() > i + 1 else Vector2.ZERO
 		# Down off the head onto the back over the length of the neck, and level
 		# from there. Smoothstepped rather than linear so the shoulder is a
 		# shoulder: a straight ramp puts a crease at the end of the neck that
@@ -735,18 +743,19 @@ func _update_body(body: BodyShape, spine: Spine, stature: Stature,
 		var mid: float = lerpf(crown, back,
 			smoothstep(0.0, NECK_SHARE, float(k) / float(TORSO_COLS)))
 		p.set_station(station,
-			spine.points[i].lerp(spine.points[i + 1], f),
+			spine.points[i].lerp(spine.points[i + 1], f) + drawn,
 			perp, half, mid, half * depth_ratio)
 		station += 1
 
 	# Tail cap: the snout cap mirrored around the last cross-section.
 	var behind: Vector2 = -spine.forwards[last]
 	var tip_r: float = body.widths[last]
+	var tail_pull: Vector2 = body.pull[last] if body.pull.size() > last else Vector2.ZERO
 	for k in range(1, TAIL_COLS + 1):
 		var a2: float = PI * 0.5 * (float(k) / float(TAIL_COLS))
 		var tail_half: float = tip_r * cos(a2)
 		p.set_station(station,
-			spine.points[last] + behind * (tip_r * sin(a2)),
+			spine.points[last] + tail_pull + behind * (tip_r * sin(a2)),
 			spine.perps[last],
 			tail_half, back, tail_half * depth_ratio)
 		station += 1
@@ -1481,8 +1490,12 @@ func head_hp(lateral: float) -> float:
 
 
 func _cell_hp(p: Patch, col: int, lateral: float) -> float:
+	return _stack_hp(p, _cell_base(p, col, lateral))
+
+
+func _cell_base(p: Patch, col: int, lateral: float) -> int:
 	var row: int = clampi(int((lateral + 1.0) * 0.5 * float(p.rows)), 0, p.rows - 1)
-	return _stack_hp(p, (clampi(col, 0, p.cols - 1) * p.rows + row) * LAYERS)
+	return (clampi(col, 0, p.cols - 1) * p.rows + row) * LAYERS
 
 
 ## Everything still standing in one cell. Fat counts: it is tissue, and jaws
@@ -1508,6 +1521,29 @@ func _stack_hp(p: Patch, base: int) -> float:
 ## but unlike a bite it runs every tick, and so is only ever called for a set of
 ## jaws that is actually holding something.
 func flesh_within(center: Vector2, radius: float) -> float:
+	return _within(center, radius, false)
+
+
+## The soft half of the same footprint: skin over fat, and nothing beneath them.
+##
+## A different question from the one above, asked by the one thing that cares
+## which layer it has hold of. What a pull has to *part* is the whole stack —
+## that is `flesh_within`, and it decides whether a mouthful comes away. What
+## *gives*, long before anything parts, is only the skin and the fat: they are
+## loose over the muscle and slide on it. So a set of jaws tents a well-padded
+## flank a long way up and barely marks a lean one, and a body eaten down past
+## its fat stops stretching, because what stretched is gone.
+##
+## Over the footprint rather than the one cell under the anchor, for exactly the
+## reason given above: the jaws have just bitten through the skin they are
+## holding, so the single cell at the bind reads as almost nothing while the
+## mouthful around it is intact. What is being drawn out is the flesh in the
+## mouth, not the puncture in the middle of it.
+func soft_within(center: Vector2, radius: float) -> float:
+	return _within(center, radius, true)
+
+
+func _within(center: Vector2, radius: float, soft_only: bool) -> float:
 	var r2: float = radius * radius
 	if r2 <= 0.0:
 		return 0.0
@@ -1526,7 +1562,9 @@ func flesh_within(center: Vector2, radius: float) -> float:
 			count += 1
 			if p.gone[cell] != 0:
 				continue
-			total += _stack_hp(p, cell * LAYERS)
+			var base: int = cell * LAYERS
+			total += p.hp[base + SKIN] + p.hp[base + FAT] if soft_only \
+				else _stack_hp(p, base)
 	return total / float(count) if count > 0 else 0.0
 
 

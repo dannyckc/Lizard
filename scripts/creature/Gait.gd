@@ -33,6 +33,33 @@ const LIMB_CONTACT_SLOP: float = 0.35
 const STEP_RETARGET_RESPONSE: float = 14.0
 const LANDING_PREDICTION_STRIDES: float = 0.65
 
+# --- broken ground ------------------------------------------------------------
+# Three numbers, and between them they are the difference between a body walking
+# over rubble and a body having a fit on it. Every one of them exists because the
+# solver above was written against a floor at height zero everywhere, where the
+# quantities they bound are all identically nothing.
+
+## How far a foot will look for somewhere better to stand, in footprints, and in
+## how many steps out. Short: this is a foot being placed a little more carefully,
+## not a leg going hunting — anything further and the animal would be reaching
+## across the ground for footholds rather than walking over it.
+const FOOTING_STEPS: int = 3
+const FOOTING_REACH: float = 0.9
+
+## How fast a body may be carried up or down, as a multiple of the vertical speed
+## one of its own steps moves a foot at.
+##
+## An ease is not a speed, and on broken ground the difference is the whole bug.
+## Easing moves the body by a fraction of what is *left*, so a corner target that
+## jumps by the height of a rock — which is exactly what a foot landing on one
+## does to it — moves the body furthest on the very first tick and decays from
+## there. On a leg standing anywhere near its own lock-out that is a few pixels of
+## socket arriving as tens of degrees of knee, once per foot per obstacle, which
+## is what the spasm was. A body has mass and legs have a rate: this is the rate,
+## and it is quoted against the animal's own step because that is the only speed
+## it has any business rising at.
+const CARRY_RATE: float = 2.5
+
 # --- what a failing limb does -------------------------------------------------
 # Every constant below shapes how one number from BodyState turns into movement.
 # None of them names a behaviour: there is no limp here, no drag, no collapse.
@@ -547,7 +574,27 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		# to be there is the reach down to whatever is under it. Which is no longer
 		# always the floor — it is the top of whatever this foot is standing on, and
 		# on the open plain that is the same number it always was.
-		limb.surface = _surface_under(limb, limb.planted, scale, surface_query)
+		var under: Vector2 = _surface_under(limb, limb.planted, scale, surface_query)
+		limb.foothold = under.y
+		# A planted foot is standing on something, and what it is standing on does
+		# not change under it from one sixtieth of a second to the next. The query
+		# answers about a *place*, and the place a planted foot occupies moves — it
+		# is dragged along its envelope, shoved by contacts, and its own reach
+		# ceiling rises and falls with the body's walking bob. Any of those can
+		# carry the answer across the rim of something the foot is near, and taking
+		# the new answer whole teleports the foot to it: that is the snap, and on an
+		# obstacle near the limit of what the leg can be lifted onto it fires every
+		# time the animal breathes.
+		#
+		# So the foot settles to what is under it at the speed that foot moves
+		# vertically in its own step, which is the fastest this animal moves that
+		# foot at all. A real change — something eaten out from under it, a foot
+		# genuinely dragged off a ledge — still arrives, and arrives as a foot
+		# coming down rather than as a foot somewhere else.
+		if limb.stepping or not limb.initialised:
+			limb.surface = under.x
+		else:
+			limb.surface = move_toward(limb.surface, under.x, _foot_speed(limb) * delta)
 		_read_toe(limb, a)
 		limb.foot_height = _hold(limb, airborne)
 		# Against what the joint can do rather than against the stride, and the two
@@ -586,14 +633,24 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		# it is now — see _landing_spot().
 		var remaining: float = (1.0 - limb.step_t) * limb.step_duration
 		var retarget: float = 1.0 - exp(-STEP_RETARGET_RESPONSE * delta)
+		var anchor: Spine.Frame = body.anchors[limb.key]
 		var aim: Vector2 = limb.clamp_to_envelope(
-			body.anchors[limb.key], _landing_spot(limb, remaining))
-		limb.step_to = limb.step_to.lerp(aim, retarget)
+			anchor, _landing_spot(limb, remaining))
+		# Still re-aimed at the moving ideal, and then asked whether there is
+		# anywhere to stand where it has ended up — a foot in the air has the whole
+		# of its flight to find out, and this is the last chance it gets. After the
+		# ease rather than before it, because the ease is what decides where the
+		# foot is actually going: searching from the aim and then easing toward the
+		# answer lands the foot somewhere between the two, which on broken ground is
+		# reliably the edge between them.
+		limb.step_to = _footing(limb, anchor, limb.step_to.lerp(aim, retarget),
+			scale, surface_query)
 		# The spot keeps moving, so what is under it keeps changing: a foot aimed
 		# past the edge of a ledge while it is in the air is a foot that is about to
 		# be put down on the floor instead, and it has to arrive at the right height
 		# or the leg lands inside the ground.
-		limb.step_to_surface = _surface_under(limb, limb.step_to, scale, surface_query)
+		var arriving: Vector2 = _surface_under(limb, limb.step_to, scale, surface_query)
+		limb.step_to_surface = arriving.x
 
 		limb.step_t += delta / maxf(limb.step_duration, 0.001)
 		if limb.step_t >= 1.0:
@@ -601,6 +658,7 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 			limb.stepping = false
 			limb.planted = limb.step_to
 			limb.surface = limb.step_to_surface
+			limb.foothold = arriving.y
 			landed.append(limb.planted)
 
 		# Smoothstep along the ground path (ease out of and into the plant) with
@@ -949,6 +1007,14 @@ func _carry_body(delta: float, wants: Vector2) -> void:
 	# the line it always was.
 	var response: float = 1.0 - exp(-maxf(loco.settle(_body_cycle()), _drive) * delta) \
 		if measured else 1.0
+	# A body being solved for the first time is not climbing anything — it is
+	# already standing where it stands, and the same sentence the response makes
+	# above applies word for word to the rate below it. Left capped, a creature
+	# just placed would rise onto its own legs over the next second instead of
+	# being on them, and everything read off its height for that second — what its
+	# jaws can reach, where its sockets are, which bands its parts occupy — would
+	# be answered about an animal in the middle of standing up.
+	var climb: float = _carry_speed() * delta if measured else INF
 	measured = true
 	# Eased toward what the legs are offering, and then cut off hard at what they
 	# can physically reach. The two are different claims and only the second is a
@@ -957,10 +1023,19 @@ func _carry_body(delta: float, wants: Vector2) -> void:
 	# leaves it a fraction of a second above its own feet after every fast
 	# placement, and a body above its feet is a body floating — which is the whole
 	# thing the vertical limb solve exists to prevent.
-	shoulder_height = minf(lerpf(shoulder_height, front, response), _pair_ceiling(Limb.FRONT))
-	hip_height = minf(lerpf(hip_height, rear, response), _pair_ceiling(Limb.REAR))
+	# Eased, then held to the speed a leg can actually raise a body at, and only
+	# then cut off at what it can reach. The order is the same three-step it has
+	# always been with one term inserted in the middle, and the middle is where it
+	# belongs: a rate is a statement about how the body gets there, so it applies
+	# to the easing; the ceiling is a statement about where it may be at all, so
+	# nothing may come after it. See CARRY_RATE — on flat ground the target never
+	# moves faster than this and the clamp is never the binding term.
+	shoulder_height = minf(_toward(shoulder_height, front, response, climb),
+		_pair_ceiling(Limb.FRONT))
+	hip_height = minf(_toward(hip_height, rear, response, climb),
+		_pair_ceiling(Limb.REAR))
 	support = (shoulder_height + hip_height) * 0.5
-	_carry_corners(response)
+	_carry_corners(response, climb)
 
 
 ## The same measurement again, one leg at a time, and the whole of the creature's
@@ -991,7 +1066,7 @@ func _carry_body(delta: float, wants: Vector2) -> void:
 ## A limb in the air holds nothing, so its corner eases toward the *pair's* height
 ## rather than toward the floor — the body over an unsupported corner is held by
 ## the girdle and the back, not dropped.
-func _carry_corners(response: float) -> void:
+func _carry_corners(response: float, climb: float) -> void:
 	for limb in limbs:
 		var held: float = shoulder_height if limb.pair == Limb.FRONT else hip_height
 		if not _skip(limb) and limb.bearing and not limb.stepping \
@@ -1012,7 +1087,7 @@ func _carry_corners(response: float) -> void:
 		# socket above what its own leg can reach is a body floating on that leg.
 		# It applies to a corner with a foot in the air too — that limb is carrying
 		# nothing, but it is still attached, and the body may not ride away from it.
-		var settled: float = lerpf(float(corner[limb.key]), held, response)
+		var settled: float = _toward(float(corner[limb.key]), held, response, climb)
 		if not _skip(limb) and limb.bearing and limb.carry >= SUPPORT_MIN:
 			settled = minf(settled, limb.carry_ceiling(_max_reach(limb)))
 		corner[limb.key] = settled
@@ -1027,6 +1102,55 @@ func _carry_corners(response: float) -> void:
 	pitch = (shoulder_height - hip_height) / along
 	roll = ((float(corner["FL"]) + float(corner["RL"]))
 		- (float(corner["FR"]) + float(corner["RR"]))) * 0.5 / across
+
+
+## Eases a height toward what the legs are offering, and then holds the move to
+## what a leg could have made in the time available.
+##
+## Two claims and they are different in kind, which is why they are two lines. The
+## ease says the body follows its feet rather than snapping to them; the limit
+## says there is a speed at which it can follow, and no ease expresses a speed. On
+## level ground the target creeps and the limit never binds — every animal in the
+## game moves exactly as it did. On a kerb the target steps by the height of the
+## kerb and the limit is the only thing in the solver with an opinion about how
+## fast a body may climb one.
+static func _toward(from: float, to: float, response: float, limit: float) -> float:
+	return from + clampf(lerpf(from, to, response) - from, -limit, limit)
+
+
+## How fast this body may be carried up or down, in pixels per second.
+##
+## Read off the animal's own step rather than chosen: a foot is lifted a certain
+## height in a certain time, and that vertical speed is the fastest anything on
+## this creature moves a limb through. A body climbing onto something is doing the
+## same work with the same legs, so it is the same rate, and an Elephant therefore
+## rises onto a ledge at an Elephant's pace without a word of it being written.
+##
+## The binding limb, like every other whole-body figure here: a body climbs at the
+## speed of the leg with least to give.
+func _carry_speed() -> float:
+	# ...unless something has hold of the legs, in which case it is not a walk and
+	# this is not the rate. A body being thrown upward by its own joints is moving
+	# at whatever is driving them — that is the whole of what a push-off is — and
+	# only the thing driving them knows what that pace is, which is exactly the
+	# argument `_carry_body` already makes about the response beside this. A cap
+	# quoted off the walking step would hold a jumping animal down to a walk.
+	if _drive > 0.0:
+		return INF
+	var slowest: float = INF
+	for limb in limbs:
+		if _skip(limb) or not limb.bearing:
+			continue
+		slowest = minf(slowest, _foot_speed(limb))
+	return INF if is_inf(slowest) else slowest * CARRY_RATE
+
+
+## How fast this limb moves its own foot vertically, in pixels per second: the
+## height one of its steps lifts the foot, over how long that step takes. The
+## fastest anything moves this foot, and therefore the ceiling on every other way
+## it is allowed to change height.
+func _foot_speed(limb: Limb) -> float:
+	return _step_clearance(limb) / maxf(_step_duration(limb), 0.001)
 
 
 ## The line the body tips about: the midpoint of the four sockets, and the
@@ -1281,9 +1405,14 @@ func _start_step(limb: Limb, body: BodyShape, p: CreatureParams, scale: float,
 	limb.step_from_surface = limb.surface
 	limb.step_index += 1
 	limb.step_duration = _step_duration(limb)
-	limb.step_to = limb.clamp_to_envelope(
-		body.anchors[limb.key], _landing_spot(limb, limb.step_duration))
-	limb.step_to_surface = _surface_under(limb, limb.step_to, scale, surface_query)
+	var anchor: Spine.Frame = body.anchors[limb.key]
+	# Where the stride says, and then somewhere it can actually stand — see
+	# `_footing`. On level ground the second is the first and this is one extra
+	# query; on broken ground it is the difference between a foot placed on a
+	# ledge and a foot placed on the lip of one.
+	limb.step_to = _footing(limb, anchor, limb.clamp_to_envelope(
+		anchor, _landing_spot(limb, limb.step_duration)), scale, surface_query)
+	limb.step_to_surface = _surface_under(limb, limb.step_to, scale, surface_query).x
 	limb.step_t = 0.0
 	limb.stepping = true
 
@@ -1301,12 +1430,66 @@ func _start_step(limb: Limb, body: BodyShape, p: CreatureParams, scale: float,
 ##
 ## Zero with no query attached, which is the flat floor this solver was written
 ## against and the behaviour every line of it still has without one.
-func _surface_under(limb: Limb, at: Vector2, scale: float, query: Callable) -> float:
+##
+## Both halves of the answer come back — the height, and how much room a foot of
+## this size has on it. The second used to be discarded here, which is the whole
+## reason a foot could be set down on the very rim of a rock and the gait would
+## report it as standing: what a surface *is* and whether it can be stood on are
+## two questions, and only the first was ever being asked.
+func _surface_under(limb: Limb, at: Vector2, scale: float, query: Callable) -> Vector2:
 	if not query.is_valid():
-		return 0.0
+		return Vector2(0.0, INF)
 	var foot: float = limb.foot_radius(scale)
 	var answer: Variant = query.call(at, foot, limb.socket_height + foot)
-	return (answer as Vector2).x if answer is Vector2 else 0.0
+	return answer as Vector2 if answer is Vector2 else Vector2(0.0, INF)
+
+
+## Where this foot should actually be put down, given where the step was aimed.
+##
+## A foothold is a place with room on it. The aim comes from the stride and knows
+## nothing about what is underfoot, so it lands wherever it lands — and on broken
+## ground that is regularly the lip of something, where the foot is over a surface
+## it has almost none of its own footprint on. Standing there is what a body does
+## immediately before it slips off, and in a solver with no slipping in it what it
+## produces instead is worse: the leg is held out at a height it is barely
+## entitled to, the corner it carries is dragged up to match, and the knee over it
+## swings through tens of degrees for a couple of pixels of socket.
+##
+## So the foot looks around. Candidates are offsets of its own footprint, tried
+## nearest-first and taken as soon as one has room — inward toward the socket
+## first, because that is the way an animal shifts its weight when a foothold is
+## poor, then along and across its own travel. Every one of them is clamped into
+## the same envelope the aim was, so nothing here can place a foot somewhere the
+## leg could not have reached anyway.
+##
+## Nothing is repositioned when the aim is already sound, which is nearly always
+## and is the whole of the flat-ground behaviour: one query, no search.
+func _footing(limb: Limb, a: Spine.Frame, aim: Vector2, scale: float,
+		query: Callable) -> Vector2:
+	var surface: Vector2 = _surface_under(limb, aim, scale, query)
+	if surface.y >= 0.0:
+		return aim
+	var foot: float = limb.foot_radius(scale)
+	var inward: Vector2 = a.pos - aim
+	inward = inward.normalized() if inward.length_squared() > 0.000001 else limb.travel
+	var across := Vector2(-limb.travel.y, limb.travel.x)
+	var best: Vector2 = aim
+	var best_room: float = surface.y
+	for step in FOOTING_STEPS:
+		var span: float = foot * float(step + 1) * FOOTING_REACH
+		for direction in [inward, -limb.travel, limb.travel, across, -across]:
+			var candidate: Vector2 = limb.clamp_to_envelope(a, aim + direction * span,
+				_swing_fan(limb))
+			var room: float = _surface_under(limb, candidate, scale, query).y
+			if room >= 0.0:
+				return candidate
+			if room > best_room:
+				best_room = room
+				best = candidate
+	# Nowhere within reach has room for the whole foot, so the least bad place is
+	# where it goes. An animal crossing a field of rubble is picking its way over
+	# footholds that are all poor, and it still has to put its feet somewhere.
+	return best
 
 
 ## How extended the legs stand this tick: what the animal's locomotion asks for,

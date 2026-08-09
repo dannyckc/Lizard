@@ -615,6 +615,33 @@ already reading a height:
 - and the picture rises with the bands, because the drawn foot has always been the
   real one projected through `Posture.drop`.
 
+**A query has two halves, and the second is where a foot may stand.** `Terrain`
+answers with a height *and* how much room a foot of that size has there, negative
+where it is hanging off an edge. Only the height was ever read, and the cost of
+throwing the rest away shows up on broken ground rather than on one ledge: the
+stride aims a step and knows nothing about what is underfoot, so it lands on rims
+as readily as on tops, and a foot with almost none of its own footprint on a
+surface is standing on the thing it is about to come off. A step now looks for
+somewhere with room before it commits — inward toward the socket first, which is
+the way an animal shifts its weight off a poor foothold — and everything it tries
+is clamped into the same envelope the aim was, so nothing is placed anywhere the
+leg could not already reach. On level ground the first answer is always sound and
+this is one extra query.
+
+**And what a planted foot is standing on does not change under it.** The query
+answers about a *place*, and the place a planted foot occupies moves: it is
+dragged along its envelope, shoved by contacts, and the height it may be lifted to
+rises and falls with the body's own walking bob. Near the rim of anything — most
+of all near the top of what the leg can be raised to at all — that carries the
+answer back and forth across an edge, and taking each new answer whole teleports
+the foot to it. A leg standing anywhere near its own lock-out then turns a few
+pixels of that into a joint swinging through tens of degrees, which is what the
+judder was. So a planted foot follows a change at the speed that foot moves
+vertically in its own step, and the body follows its feet at the same rate: an
+ease is not a speed, and on a target that steps by the height of a rock the
+difference is the whole of it. A body being driven by its own jump is exempt,
+because that is not a walk and the thing driving the legs owns the pace.
+
 **Adaptation only where it is possible.** The contact pass pushes a body out of
 what it *cannot* get past and leaves everything else alone; the limb router does
 the same. So a crossable obstacle is never a wall and an uncrossable one is never
@@ -1996,9 +2023,10 @@ under different numbers:
 | **being dragged** | the same tether, seen from the other end |
 | **struggling** | both creatures pulling; the tether's slack is the measured disagreement |
 | **losing your grip** | that disagreement, as a force, exceeding the jaws' bite force |
-| **stretching** | that same force past the *tissue's* yield point; the tether lengthens as the flesh draws out of the body |
+| **stretching** | the flesh drawing out of the body toward the jaws — elastic under any load at all, permanent past the tissue's yield point, and in both cases scaled by how much skin and fat is in the mouth |
 | **tearing meat off** | it staying there long enough for the flesh to part — the mouthful comes away and the jaws re-seat |
 | **chewing** | the player working the button; the jaws shut on their bind again, at whatever depth their force has left over |
+| **coming off** | the flesh leaving the mouth altogether — nothing was overpowered and nothing tore, so there is nothing left to hold |
 
 The bind is stored in body space for the same reason tissue damage is: the pose
 is rebuilt from scratch every tick and a hold recorded in world coordinates would
@@ -2010,6 +2038,16 @@ Four details carry the rest of it:
 
 - **The tether only pulls.** Pushing is the contact pass's job. A rope that could
   also push would spend its life fighting it.
+- **Its rest length is the mouth, not the moment.** The bite query reaches a whole
+  gape, so a strike can connect with the flesh most of a mouth away — and taking
+  *that* as the length to defend left the teeth hanging off the wound for as long
+  as the animal held on. It is the arch's own hold radius: how far from the centre
+  of its mouthful this dentition's teeth stand, less the crowns they are buried
+  to, which is read off the teeth rather than chosen. So the jaws draw what they
+  have closed on into themselves, and what daylight the tether cannot close in a
+  tick the victim's skin and fat close by stretching toward it — written into the
+  body's own shape, so the lattice tessellates the drawn flesh and the jaws bite
+  the tissue they are visibly tenting up.
 - **A gripping pair does not collide.** Two constraints acting on the same pair,
   at the same point, in opposite directions is not a tuning problem — jaws that
   have hold of something are *inside* it, which is exactly the state the contact
@@ -2076,14 +2114,14 @@ re-seat a strong bite would lose its grip *faster* than a weak one, since the
 better it works the sooner the cell it was bound to is gone; without the reach
 being tied to the crater it would lose its grip *because* it chewed well.
 
-The new hold is the nearest sound flesh, and the tether's rest length is capped
-at the jaws' own gape rather than at however far the search went. A re-seat that
-recorded the search distance would leave the hold a leash — one the next
-mouthful would then be taken at the far end of, and the one after that further
-out again. Re-seating is what turns a latch into
-chewing *in*: the wound deepens under jaws that stay shut, and the hold ends only
-when the load pulls them off, the jaws are given long enough to open, or there is
-nothing left within them to hold.
+The new hold is the nearest sound flesh, and the tether's rest length is the same
+mouth measurement a fresh grip takes rather than however far the search went — it
+is the same jaws closing on the same kind of flesh. A re-seat that recorded the
+search distance would leave the hold a leash: one the next mouthful would then be
+taken at the far end of, and the one after that further out again. Re-seating is
+what turns a latch into chewing *in*: the wound deepens under jaws that stay shut,
+and the hold ends only when the load pulls them off, the flesh parts, the flesh
+leaves the mouth, or the jaws are given long enough to open.
 
 A bind counts as empty when *either* the body no longer reaches that far or the
 cell the jaws are on has nothing in it. The second condition is the ordinary

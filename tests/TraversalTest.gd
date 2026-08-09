@@ -65,6 +65,7 @@ func _process(_delta: float) -> bool:
 	_check_reaching_down(player)
 	_check_refusing_what_it_cannot_reach(player, target)
 	_check_flat_world_unchanged(player)
+	_check_broken_ground_is_walked_not_juddered(player)
 	_finish()
 	return false
 
@@ -752,6 +753,87 @@ func _nearest_limb(creature: Creature, to: Vector2) -> Limb:
 		if limb.plan[2].distance_to(to) < best.plan[2].distance_to(to):
 			best = limb
 	return best
+
+
+## Crossing broken ground has to look like walking, and the two ways it did not
+## are both measurable on a planted foot.
+##
+## Getting over one ledge was already right; what a field of things to climb adds
+## is that the answers keep changing. Every tick each foot asks what is under it,
+## and the place it is asking about moves — it is dragged along its own envelope,
+## shoved by contacts, and the height it may be lifted to rises and falls with the
+## body's own walking bob. Near the rim of anything, that carries the answer back
+## and forth across an edge.
+##
+## Two claims, and neither is about terrain:
+##
+##   * **A foot that is standing still is standing still.** It may not be
+##     somewhere else next tick because the query changed its mind, so what is
+##     under a planted foot is followed at the speed that foot moves in its own
+##     step. Taken whole, the foot teleports — and a leg near its own lock-out
+##     turns a few pixels of that into a joint swinging through tens of degrees,
+##     which is what the judder was.
+##   * **A foothold is a place with room on it.** The stride aims a step and knows
+##     nothing about what is underfoot, so it lands on rims as readily as on tops;
+##     a foot that has almost none of its own footprint on a surface is standing
+##     on the thing it is about to come off. It looks for somewhere better before
+##     it commits, which is a foot placed more carefully rather than a leg hunting.
+func _check_broken_ground_is_walked_not_juddered(player: Creature) -> void:
+	for preset in ["Lizard", "Cat"]:
+		_apply(player, preset)
+		main.terrain.clear()
+		# Steps right at the top of what this body can lift a foot to, which is
+		# where the per-foot ceiling is the thing being decided, and narrow enough
+		# that a foot regularly comes down near an edge. Sized off the animal, so
+		# both builds are asked the same question.
+		var ceiling: float = player.gait.shoulder_height
+		for i in 20:
+			main.terrain.add(Vector2(180.0 + float(i) * 52.0,
+				(-1.0 if i % 2 == 0 else 1.0) * 14.0), 17.0,
+				ceiling * (0.94 + 0.04 * float(i % 3)), 0.0, "brink")
+
+		player.reset(Vector2.ZERO, 0.0)
+		var drive := MovementInput.Command.new()
+		drive.throttle = 1.0
+		var was_stepping: Dictionary = {}
+		var last_height: Dictionary = {}
+		var worst_snap: float = 0.0
+		var perched: int = 0
+		var stance: int = 0
+		for _tick in 420:
+			player.command = drive
+			player._physics_process(TICK)
+			for limb in player.gait.limbs:
+				# Only a foot planted on this tick and the one before it. A landing
+				# and a lift-off both move a foot for good reasons.
+				var settled: bool = not limb.stepping \
+					and not was_stepping.get(limb.key, true)
+				if settled and last_height.has(limb.key):
+					worst_snap = maxf(worst_snap,
+						absf(limb.foot_height - float(last_height[limb.key])))
+				if settled:
+					stance += 1
+					if limb.surface > 0.5 and limb.foothold < 0.0:
+						perched += 1
+				last_height[limb.key] = limb.foot_height
+				was_stepping[limb.key] = limb.stepping
+		player.command = MovementInput.Command.new()
+
+		# What one step of this animal moves a foot vertically in a tick, which is
+		# the fastest anything on it moves that foot and so the most a planted one
+		# may follow a change by. Doubled, because the measurement spans a tick in
+		# which the foot may also have rolled onto its toe.
+		var reachable: float = maxf(player.gait._foot_speed(player.gait.limbs[0])
+			* TICK * 2.0, 1.0)
+		_check(worst_snap <= reachable,
+			"%s stood still and its foot moved %.1f px in one tick, which is %.1fx what a step of its own moves it"
+				% [preset, worst_snap, worst_snap / reachable])
+		_check(float(perched) <= float(stance) * 0.015,
+			"%s spent %d of %d stance ticks (%.1f%%) on a surface it had no room on"
+				% [preset, perched, stance, 100.0 * float(perched) / maxf(float(stance), 1.0)])
+		summary.append("%s over broken ground: foot moves %.1f px/tick planted, %d/%d ticks perched"
+			% [preset, worst_snap, perched, stance])
+	main.terrain.clear()
 
 
 func _apply(creature: Creature, preset: String) -> void:
