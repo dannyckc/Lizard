@@ -32,6 +32,17 @@ extends RefCounted
 ## a low predator can reach on a tall one — effectively unclickable.
 const SLACK: float = 12.0
 
+## How much of its own reach a marker brought in from beyond it is placed at.
+## Just inside, so the point the player is offered is one the body then agrees it
+## can get to rather than one sitting exactly on the boundary of the test.
+const CLAMP_MARGIN: float = 0.99
+
+## English for the four limb keys, so the readout names a leg the way a person
+## would. Nothing branches on it.
+const SIDES := {"FL": "front left", "FR": "front right",
+	"RL": "rear left", "RR": "rear right"}
+const BONES: Array[String] = ["upper", "lower", "foot"]
+
 
 class Pick extends RefCounted:
 	## "creature", "obstacle", "carrion", "forage" or "ground". Carried for the
@@ -60,6 +71,15 @@ class Pick extends RefCounted:
 	var obstacle: Obstacle = null
 	var part: CarrionField.Part = null
 
+	## What the cursor was actually on, when this marker had to be brought in to
+	## the limit of the animal's reach. Null on a marker sitting on the thing
+	## itself, which is every pick that has not been through `resolve`.
+	##
+	## Kept rather than discarded because the two are different facts and the
+	## player needs both: *this* is as far as you get, and *that* is what you were
+	## pointing at. The drawing joins them with a line.
+	var beyond: Pick = null
+
 	## What was actually picked, in words. "limb:FL:foot" rather than "a creature",
 	## because which part it is, is the point.
 	func region() -> String:
@@ -68,6 +88,31 @@ class Pick extends RefCounted:
 		if obstacle != null:
 			return obstacle.kind
 		return kind
+
+	## The same, for a person: "front left foot" rather than "limb:FL:foot". Read
+	## by the on-screen readout, which is the one place the region is shown to
+	## somebody who has not read the source.
+	func name_of() -> String:
+		if hit == null:
+			return obstacle.kind if obstacle != null else kind
+		match hit.kind:
+			AnatomyState.HEAD:
+				return "head"
+			AnatomyState.LIMB:
+				var bone: String = BONES[clampi(hit.limb_segment, 0, 2)]
+				var leg: String = SIDES.get(hit.limb_key, hit.limb_key)
+				return "%s %s" % [leg, "foot" if bone == "foot" else "%s leg" % bone]
+			_:
+				# Where along the back, rather than which spine interval: the number
+				# means nothing to anyone watching and the third of the animal it
+				# lands in means everything.
+				if hit.spine_t < 0.25:
+					return "neck"
+				return "flank" if hit.spine_t < 0.62 else "hindquarters"
+
+	## What the cursor selected, whether or not the marker had to stop short of it.
+	func selected() -> Pick:
+		return beyond if beyond != null else self
 
 	func describe() -> String:
 		return "%s %s at %s" % [kind, region(), Volume.describe(band)]
@@ -149,6 +194,126 @@ static func pick(tree: SceneTree, cursor: Vector2, radius: float = SLACK,
 			best = found
 
 	return best
+
+
+## The same pick, answered for the animal that is about to act on it.
+##
+## `pick` asks what is *there*, and deliberately knows nothing about who is
+## looking: it is a question about the world. This is the second half of it — what
+## would actually happen if that selection were acted on now — and it is a
+## question about one body, which is why the two are separate calls and why every
+## caller that only wants to know what is under a pointer still gets exactly what
+## it always got.
+##
+## Two things change, and both of them are the marker being moved to somewhere
+## truer than the pixel the cursor is on:
+##
+##   * onto the place the jaws will meet. A cursor lands on a silhouette; a mouth
+##     arrives at a surface, on the near side of the thing, at whatever height in
+##     its band the neck and the fold can bring the teeth to. Those are different
+##     points on a deep-chested animal and the difference is most of a body — see
+##     `_meet`.
+##   * in to arm's length, when the selection is past it. The furthest place along
+##     the aim line the animal can put its mouth, so a click aimed across the
+##     paddock is a lunge in that direction rather than an input that does
+##     nothing — see `_short_of`. What was selected is kept on `beyond`, because
+##     "this is as far as you get" is only legible next to what was wanted.
+##
+## Nothing here refuses anything. A marker that could not be brought onto its
+## target — too high, too low, behind a rock — comes back untouched and out of
+## reach, which the drawing shows and the strike ignores.
+static func resolve(found: Pick, actor: Creature) -> Pick:
+	if found == null or actor == null or actor.body == null or actor.stature == null:
+		return found
+	var mouth: Vector2 = actor.jaw_point()
+	_meet(found, actor, mouth)
+	# Only the horizontal refusal is a distance along the aim line, so only it can
+	# be answered by moving along one. Something directly overhead is not nearer
+	# for being approached, and the honest answer there is the marker staying on
+	# it and reading as unreachable.
+	var reach: Reach = Reach.solve(actor, found.at, found.band, actor.terrain())
+	if reach.possible or reach.refusal != "too far":
+		return found
+	return _short_of(found, actor, mouth)
+
+
+## Moves a marker off the drawn silhouette and onto the place a mouth would
+## actually close.
+##
+## Three corrections, and each of them is a fact the cursor cannot carry:
+##
+##   * the *side*. A pointer past the axis of a body selects the far flank, and a
+##     bite does not arrive there — it arrives on the surface facing the animal
+##     taking it. So the longitudinal station the player picked is kept, exactly
+##     as picked, and only the way round the cross-section is decided here.
+##   * the *height*. Which is what a mouth reaches on a band rather than the
+##     middle of it — `Reach.meeting`, the same reading the reach test uses, so a
+##     ring drawn at the top of a flank means the jaws are meeting the top of the
+##     flank.
+##   * and the *picture*, which follows from the other two through the one
+##     projection everything in the game is drawn with.
+##
+## Things lying on the floor are left alone. A scrap, a pellet and bare earth are
+## already at the height they are drawn at, and nudging them would put the marker
+## somewhere other than under the cursor for no gain.
+static func _meet(found: Pick, actor: Creature, mouth: Vector2) -> void:
+	if found.obstacle != null:
+		# A rock is met on its near side rather than at its middle, and the same
+		# rule reads its height: jaws that clear the top are at the top, and jaws
+		# that do not are on the face of it.
+		found.height = Reach.meeting(actor, found.band)
+		found.at = found.obstacle.at + _toward(mouth, found.obstacle.at) * found.obstacle.girth()
+		found.drawn = found.at + Posture.drop(found.height, 0.0)
+		return
+	var target := found.creature as Creature
+	if target == null or found.hit == null or target.body == null:
+		return
+	found.height = Reach.meeting(actor, found.band)
+	match found.hit.kind:
+		AnatomyState.HEAD:
+			var skull: float = target.body.head_radius * target.anatomy.tissue.head_solid()
+			found.at = target.body.head.pos + _toward(mouth, target.body.head.pos) * skull
+		AnatomyState.LIMB:
+			# Already the truest point on the animal: a leg is thin enough to have
+			# no near side worth speaking of, and `pick` has put this one where the
+			# limb *stands* rather than where it is drawn, which is the whole
+			# correction being made everywhere else here.
+			pass
+		_:
+			# The flank facing the mouth, at the station the cursor chose. `body_point`
+			# is the same body-space reconstruction a grip is held by, so the marker
+			# and the hold land on one surface.
+			var frame: Spine.Frame = target.spine.sample(found.hit.spine_t)
+			var side: float = signf((mouth - frame.pos).dot(frame.perp))
+			found.at = target.body_point(Vector2(found.hit.spine_t,
+				side if not is_zero_approx(side) else found.hit.lateral))
+	found.drawn = found.at + Posture.drop(found.height, target.stature.reference)
+
+
+## The furthest place along the aim line this animal can put its mouth.
+##
+## Not a refusal and not a nudge: it is the honest answer to "you have pointed
+## past what you can reach", which is that the action happens toward the target
+## and lands short of it. The point is on the floor because that is what is out
+## there — the thing selected is somewhere else — and it carries the height of
+## whatever the ground is doing at that distance, so an animal told to strike at
+## a rise strikes at the rise rather than at the plane under it.
+static func _short_of(found: Pick, actor: Creature, mouth: Vector2) -> Pick:
+	var direction: Vector2 = _toward(found.at, mouth)
+	var limit: Pick = _ground(mouth + direction * (Reach.span(actor) * CLAMP_MARGIN))
+	var terrain: Terrain = actor.terrain()
+	if terrain != null:
+		limit.height = terrain.surface(limit.at, 0.0).x
+		limit.band = Volume.lift(Volume.ground(), limit.height)
+		limit.drawn = limit.at + Posture.drop(limit.height, 0.0)
+	limit.beyond = found
+	return limit
+
+
+## The unit vector from `at` to `to`, or a stable fallback when they coincide.
+static func _toward(to: Vector2, at: Vector2) -> Vector2:
+	var delta: Vector2 = to - at
+	return delta.normalized() if delta.length_squared() > 0.0001 else Vector2.RIGHT
 
 
 ## The exact structure of one animal under the cursor, and the band its own cells
@@ -240,8 +405,7 @@ static func _limb_in_front(creature: Creature, cursor: Vector2) -> AnatomyState.
 			if score > 0.0 or (best != null and score >= best.score):
 				continue
 			best = AnatomyState.Hit.new()
-			best.region_id = "limb:%s:%s" % [limb.key,
-				["upper", "lower", "foot"][segment]]
+			best.region_id = "limb:%s:%s" % [limb.key, BONES[segment]]
 			best.kind = AnatomyState.LIMB
 			best.score = score
 			best.world_point = a.lerp(b, u)

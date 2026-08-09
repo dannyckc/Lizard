@@ -124,14 +124,30 @@ const AIR_CONTROL: float = 0.14
 ## wings, so at any real span it is manoeuvring rather than falling.
 const WING_CONTROL: float = 0.55
 
-## The cursor articulates only the head around the solved neck. This angle is
-## deliberately separate from `heading`, which remains the WASD-owned body
-## direction used by locomotion, gait and collision braking.
+## The cursor articulates the head around the solved neck. This angle is
+## deliberately separate from `heading` — the body direction locomotion, gait and
+## collision braking all read — and stays separate: the head is posed here and the
+## body is never rewritten from it. What the two now have between them is one
+## signed demand handed to the ordinary steering, `_head_lead`, so a walking
+## animal comes round to where it is looking at the rate its own legs turn it and
+## a standing one merely watches.
 const HEAD_LOOK_MAX_ANGLE: float = deg_to_rad(82.0)
 const HEAD_LOOK_RESPONSE: float = 14.0
 const HEAD_LOOK_DEADZONE_SQ: float = 36.0
 var head_look_angle: float = 0.0
 var head_look_dir: Vector2 = Vector2.RIGHT
+
+## How far off its own heading the head has to be carried before the body asks
+## for the whole of its turn rate to follow it — see `_head_lead`.
+##
+## An animal walking forward goes where it is looking. The head reaches the
+## direction first because a neck is quicker than four legs, and the body comes
+## round after it; that lag is the entire mechanic and it is why this is a
+## proportional band rather than a switch. Inside it the body eases round, past
+## it the animal is turning as hard as it can — and because the head keeps
+## tracking the cursor throughout, the two converge rather than the head snapping
+## back when the heading arrives.
+const HEAD_LEAD_BAND: float = deg_to_rad(30.0)
 
 # ------------------------------------------------------------------- aim ----
 # What this creature has been pointed at, and what its body is doing about it.
@@ -154,6 +170,20 @@ var crouch: float = 0.0
 ## How quickly it gets there. Fast enough to feel like reaching for something,
 ## slow enough that the settle underneath it is not fighting a step function.
 const CROUCH_RESPONSE: float = 6.0
+
+## What is left of the animal's top speed while it is moving under close control
+## — see `is_stalking`. A share rather than a speed, so a Lizard creeps and an
+## Elephant creeps, each at its own pace.
+##
+## The crouch that goes with it is deliberately *not* a second number. Close
+## control asks for the whole of the fold and gets whatever this particular
+## skeleton has: a sprawled animal is already on the floor and barely moves, a
+## semi-upright one drops most of its clearance, and a column whose knees do not
+## close stays standing and merely slows down. Which is the honest answer — an
+## elephant does not stalk — and it is the same `Stature.fold` a creature reaching
+## for its own feet spends, so nothing here had to decide what is anatomically
+## possible.
+const STALK_SPEED: float = 0.40
 
 ## The world's terrain, found once and kept. Null in a habitat that has none, and
 ## every query against it is guarded, so a scene with no obstacles behaves as a
@@ -945,8 +975,10 @@ func mouth_gape() -> float:
 	return 1.0
 
 
-## Smooth, anatomically bounded cursor look. Only this derived head direction
-## reads `aim_world`; body heading and motion remain exclusively command-driven.
+## Smooth, anatomically bounded cursor look. This is still the only thing that
+## reads `aim_world`, and it still writes nothing but the head: where the body
+## goes is decided one place, in `_integrate_motion`, out of the turn keys and the
+## angle this leaves between the head and the heading.
 func _update_head_look(delta: float) -> void:
 	# The solved neck is the truthful centre of the head's range. It can lag the
 	# logical movement heading during a turn, and clamping against `heading`
@@ -1075,7 +1107,13 @@ func _integrate_motion(delta: float) -> void:
 	# A switched to D, or both keys released — takes the same brake the linear
 	# axis uses: eased only at the spin-up rate, the head kept carrying the old
 	# turn for a beat after the command reversed.
-	var desired_ang_vel: float = command.turn * turn_rate
+	# What the two steering inputs add up to. The hand has the last word — the head
+	# is asked for only as much of the turn as the player is not already taking by
+	# hand — so A and D still mean exactly what they meant, and a creature walking
+	# forward with nothing held goes where it is looking.
+	var demand: float = clampf(command.turn
+		+ _head_lead() * (1.0 - absf(command.turn)), -1.0, 1.0)
+	var desired_ang_vel: float = demand * turn_rate
 	var turn_response: float = p.turn_responsiveness
 	if not is_zero_approx(ang_vel) and signf(desired_ang_vel) != signf(ang_vel):
 		turn_response *= BRAKE_MULTIPLIER
@@ -1109,10 +1147,17 @@ func _integrate_motion(delta: float) -> void:
 	# push a body forward — so it tops out at a fraction of forward speed and
 	# sprint does not apply to it.
 	var sprint: float = p.sprint_multiplier \
-		if command.sprint and command.throttle > 0.0 else 1.0
+		if command.sprint and command.throttle > 0.0 and not is_stalking() else 1.0
 	var top_speed: float = p.move_speed * size_scale * sprint * haul * drive
 	if command.throttle < 0.0:
 		top_speed *= p.reverse_speed_factor
+	# Close control is a ceiling on the speed rather than a brake applied to it:
+	# the animal is placing its feet deliberately, not being held back, so it
+	# still accelerates and stops with all the force it has — it simply has
+	# nowhere fast to get to. Both directions, because creeping backwards away
+	# from something is the same care taken in reverse.
+	if is_stalking():
+		top_speed *= STALK_SPEED
 	var desired_speed: float = command.throttle * top_speed
 	# Force over mass, and it is the physique's force and the physique's mass — so
 	# a heavy animal labours into its speed, a fat one is duller than a lean one of
@@ -1143,6 +1188,50 @@ func _integrate_motion(delta: float) -> void:
 	if speed < 0.0 and spine != null:
 		spine.translate_followers(displacement)
 	speed_norm = clampf(absf(speed) / maxf(p.move_speed * size_scale, 1.0), 0.0, 1.0)
+
+
+## How much of the turn the head is asking for, -1..1 alongside the turn keys.
+##
+## An animal moving forward goes where it is looking, and this is the whole of
+## that: the angle the head is carried off the body, priced as a share of the
+## turn the body could make. Nothing snaps and nothing is teleported — the demand
+## is handed to the same eased angular velocity A and D drive, so the body swings
+## round into the heading its head already has and the neck straightens out
+## underneath it as the two meet.
+##
+## Three gates, and each of them is a claim about what the animal is doing:
+##
+##   * only going forward. A creature backing away from something keeps looking
+##     at it, and steering by that would drive it in a circle round the thing it
+##     is retreating from; a standing one is watching rather than walking, which
+##     is the pose `ControlsTest` pins down.
+##   * only while it is actually being pointed. With no cursor the head settles
+##     onto the neck, the lead is nothing, and every existing caller — the tests,
+##     the ragdoll, whatever drives a creature next — behaves exactly as before.
+##   * scaled by the throttle, because it is a property of the walking. Half a
+##     throttle is half a commitment and turns half as hard for it.
+##
+## Read off last tick's head, because the head is posed after the body has moved
+## and there is no ordering that avoids it — the neck this angle is measured
+## against is itself part of the pose being solved. Sixteen milliseconds of an
+## eased turn, and it is the same deliberate one-tick lag the physique is read
+## with; the body still arrives on the bearing it was walking toward.
+func _head_lead() -> float:
+	if not command.aim_active or command.throttle <= 0.0:
+		return 0.0
+	var off: float = wrapf(head_look_angle - heading, -PI, PI)
+	return clampf(off / HEAD_LEAD_BAND, -1.0, 1.0) * clampf(command.throttle, 0.0, 1.0)
+
+
+## Whether this creature is moving under close control: slowed right down and
+## folded as low as its own legs will take it.
+##
+## Grounded, because both halves of it are things done with legs. In the air the
+## same key still means come down — see `MovementInput.Command.stalk` — and a
+## body with nothing under its feet has neither a stance to lower nor traction to
+## give up.
+func is_stalking() -> bool:
+	return command.stalk and alive and elevation.is_grounded()
 
 
 ## How much of what this creature is doing is backing up, 0..1 of its own reverse
@@ -2296,6 +2385,14 @@ func _update_aim(delta: float) -> void:
 			wanted = aim_reach.crouch
 	else:
 		aim_reach = null
+	# Close control asks for the whole of the fold, and the deeper of the two
+	# demands wins rather than the later one: an animal creeping toward something
+	# on the floor is already down at the height it would have crouched to reach
+	# it, and one creeping toward something at chest height does not stand back up
+	# to look at it. Nothing is added — the same single number is being spent,
+	# which is why the stance, the height and the bands stay in agreement.
+	if is_stalking():
+		wanted = maxf(wanted, 1.0)
 	# A body with nothing under it has nothing to fold against, and one whose legs
 	# are already carrying it as low as they go has nothing left to give.
 	if elevation.is_airborne() or not alive:
@@ -2308,23 +2405,24 @@ func _update_aim(delta: float) -> void:
 ## click always means at most one attack even when cooldown is tuned shorter
 ## than the lunge animation.
 ##
-## A creature that has been pointed at something it cannot physically get its
-## mouth onto does not throw the strike at all, and that refusal is the whole of
-## "no attacks on vertically unreachable targets" — it is one line because the
-## work is all in `Reach`, which has already asked whether the neck, the fold and
-## the lunge between them add up to the height. A ground-level lizard told to bite
-## the top of an elephant simply does not lunge; told to bite the foot standing
-## next to it, it does.
+## Never refused for being out of reach, and that is a deliberate reversal. The
+## body used to decline the strike outright when `Reach` said the target was
+## above it, below it or behind a rock — which is the correct *fact* delivered as
+## the wrong *behaviour*: a click that does nothing at all is indistinguishable
+## from a click the game did not receive, and an animal that has misjudged a
+## lunge is a thing that happens. So the strike is always thrown, and what it
+## then meets is decided where it has always been decided — in the world, by the
+## jaws arriving somewhere and there being nothing in them. A ground-level lizard
+## told to bite the top of an elephant snaps at the air under its belly.
 ##
-## Only ever a refusal about a *selected* target. A bite thrown with nothing
-## pointed at is unconditional, exactly as it always was — which is what keeps
-## every caller that does not aim behaving as it did.
+## The reach is not wasted for that. It is what the reticle draws hollow, what
+## the body crouches toward and what the marker is brought in to — see
+## `Reticle.resolve` — so "you cannot get to that" is said before the button
+## rather than by swallowing it.
 func request_bite(_aim_world: Vector2) -> bool:
 	if not alive:
 		return false
 	if bite_cooldown_remaining > 0.0 or _bite_requested or bite_time >= 0.0:
-		return false
-	if not can_reach_aim():
 		return false
 	_bite_requested = true
 	return true

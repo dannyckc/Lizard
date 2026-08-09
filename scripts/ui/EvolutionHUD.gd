@@ -115,6 +115,17 @@ func update_metrics(
 		_hint_target = 0.0
 
 
+## What the cursor has hold of, already in words — see `Main._target_readout`.
+##
+## Text rather than a pick, because naming the thing is a judgement about the
+## world (which leg of which animal, and why it cannot be reached) and the HUD is
+## not the place that knows. It only has to be legible.
+func update_target(text: String) -> void:
+	if _stats.is_empty():
+		return
+	_stats["TARGET"].text = text
+
+
 func toggle_creator() -> void:
 	set_creator_open(not creator_open())
 
@@ -315,7 +326,7 @@ func _build_identity_and_stats() -> void:
 	_stats_grid.add_theme_constant_override("v_separation", 4)
 	_stats_grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	block.add_child(_stats_grid)
-	for key in ["STATE", "SPEED", "MASS", "HEIGHT", "FEET", "SEGMENTS"]:
+	for key in ["STATE", "SPEED", "MASS", "HEIGHT", "FEET", "SEGMENTS", "TARGET"]:
 		var key_label := _label(key, 10, _mono_tracked, Color(INK, 0.40))
 		key_label.custom_minimum_size.x = 74.0
 		_stats_grid.add_child(key_label)

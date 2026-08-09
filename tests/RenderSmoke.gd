@@ -23,6 +23,11 @@ var specimen_holes: int = 0
 ## Flat, none of those three paths exist, and the run would prove nothing about
 ## them.
 var specimen_turned: bool = false
+## What the cursor had hold of while it was over a body. Empty means the target
+## marker only ever drew its ring on open ground, and the structure highlight
+## underneath it — the traced bone, the span of flank, the ring on a head — never
+## went down at all.
+var marked: String = ""
 
 
 func _initialize() -> void:
@@ -83,6 +88,24 @@ func _physics_process(_delta: float) -> bool:
 		main.hud.set_view(EvolutionHUD.VIEW_FIELD)
 	if ticks == 120:
 		main.get_node("Creature").params.tail_enabled = false  # exercise tail clipping
+	# The half of the target marker that needs something under the pointer.
+	# Headless there is no pointer to move: it sits at a fixed offset from the
+	# camera and is therefore over open floor for the whole run, so the eaten
+	# target is carried under it instead — bodily rather than by a reset, so
+	# everything chewed out of it stays chewed out.
+	if ticks >= 160 and ticks < 220:
+		_carry_target_under_the_cursor(ticks)
+	# ...and one thing in the world that is not an animal, because a rock is
+	# marked out of its own footprint and its own height rather than out of an
+	# anatomy, and that is a fourth draw.
+	if ticks == 220:
+		main.terrain.add(main.get_global_mouse_position(), 54.0, 40.0, 0.0, "boulder")
+	if ticks > 160:
+		var aimed: Reticle.Pick = (main.get_node("Creature") as Creature).aim
+		if aimed != null and (aimed.selected().creature != null
+				or aimed.selected().obstacle != null) \
+				and not marked.contains(aimed.selected().name_of()):
+			marked += ("%s" if marked.is_empty() else "/%s") % aimed.selected().name_of()
 	if ticks >= 240:
 		var c: Creature = main.get_node("Creature")
 		var stepped: bool = false
@@ -94,12 +117,15 @@ func _physics_process(_delta: float) -> bool:
 		var smell: SmellSense = (main.get_node("Creature/Senses") as CreatureSenses).smell
 		var sounds: Array[SoundField.SoundWave] = (main.get_node("SoundField") as SoundField).waves
 		var carrion: CarrionField = main.get_node("CarrionField")
-		print("render smoke OK — %d draws / %d ticks | speed %.0f px/s | travelled %.0f px | outline %d verts | feet moved: %s | gripped: %s | target integrity %.2f | %d scraps | %d parts | %d scent / %d marks | specimen holes %d / turned %s"
+		print("render smoke OK — %d draws / %d ticks | speed %.0f px/s | travelled %.0f px | outline %d verts | feet moved: %s | gripped: %s | target integrity %.2f | %d scraps | %d parts | %d scent / %d marks | specimen holes %d / turned %s | marked %s"
 			% [draws, ticks, c.speed, c.head_pos.length(), c.body.outline.size(),
 				str(stepped), str(gripped), target.anatomy.tissue.integrity(),
 				main.get_node("ScrapField").scraps.size(), carrion.parts.size(),
 				(main.get_node("ScentField") as ScentField).traces.size(), smell.marks.size(),
-				specimen_holes, str(specimen_turned)])
+				specimen_holes, str(specimen_turned), marked])
+		if marked.is_empty():
+			print("RENDER SMOKE FAIL — the cursor never had a body under it")
+			quit(1)
 		if smell.marks.is_empty():
 			print("RENDER SMOKE FAIL — the smell layer drew nothing")
 			quit(1)
@@ -151,6 +177,26 @@ func _turn_anatomy() -> void:
 	var torso: TissueGrid.Patch = view.tissue().patch(TissueGrid.BODY_KEY)
 	var cell: int = torso.cells / 2
 	view._pick(view.project(torso.centre_of(cell), torso.height_of(cell)))
+
+
+## Walks the target under the pointer without resetting it, so the marker has a
+## real animal — chewed, holed and one leg short — to resolve itself against.
+##
+## A different structure of it under the cursor over each stretch of the run,
+## because the three the marker knows about are three separate draws: a ring
+## round a skull, a traced bone, and the width of the body at one station. One of
+## them passing says nothing about the other two.
+func _carry_target_under_the_cursor(tick: int) -> void:
+	var target: Creature = main.get_node("TargetCreature")
+	var on: Vector2 = target.body.head.pos
+	if tick < 180:
+		for limb in target.gait.limbs:
+			if not limb.severed:
+				on = limb.joints[2]
+				break
+	elif tick < 200:
+		on = target.body_point(Vector2(0.55, 0.0))
+	target._translate_contact(main.get_global_mouse_position() - on)
 
 
 ## Puts the player's jaws on the target and holds them there, so the debug

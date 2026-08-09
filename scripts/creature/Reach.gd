@@ -89,9 +89,10 @@ static func solve(creature: Node, at: Vector2, target_band: Vector2,
 	var gape: float = creature.gape_radius()
 	var throw: float = p.bite_reach * creature.size_scale
 	r.lean = clampf((r.distance - gape) / maxf(throw, 0.001), 0.0, 1.0)
-	if r.distance > gape + throw:
+	var arm: float = span(creature)
+	if r.distance > arm:
 		r.refusal = "too far"
-		r.gap = r.distance - gape - throw
+		r.gap = r.distance - arm
 		return r
 
 	# ...and pointing the right way. A head swings on a neck rather than a swivel,
@@ -105,10 +106,7 @@ static func solve(creature: Node, at: Vector2, target_band: Vector2,
 			return r
 
 	# --- vertically: the band, and the three ways of moving it -----------------
-	# The part of the target nearest what the jaws already cover. Aiming at the
-	# middle of it would refuse a tall thing whose lower half is perfectly
-	# reachable, and aiming at the near edge is what a mouth actually does.
-	r.height = clampf(_rest_low(creature), target_band.x, target_band.y)
+	r.height = meeting(creature, target_band)
 	if Volume.overlaps(stature.bite, target_band):
 		r.possible = true
 	else:
@@ -138,6 +136,28 @@ static func solve(creature: Node, at: Vector2, target_band: Vector2,
 			r.possible = false
 			r.refusal = "obstructed by %s" % blocker.kind
 	return r
+
+
+## How far across the ground these jaws get: what the gape already covers, plus
+## the whole of the lunge behind it.
+##
+## Stated once and used twice — the refusal above, and the point a marker aimed
+## past it is brought in to, in `Reticle.resolve`. They have to be the same
+## number or the reticle would offer the player a place the body then declines
+## to reach.
+static func span(creature: Node) -> float:
+	return creature.gape_radius() + creature.params.bite_reach * creature.size_scale
+
+
+## The height on a target's band the jaws will actually meet.
+##
+## The part of it nearest what they already cover. Aiming at the middle would
+## refuse a tall thing whose lower half is perfectly reachable, and aiming at the
+## near edge is what a mouth actually does — so it is also the height the *marker*
+## belongs at, which is why this is named rather than inlined: a bite and the ring
+## drawn where it will land must agree about where that is.
+static func meeting(creature: Node, band: Vector2) -> float:
+	return clampf(_rest_low(creature), band.x, band.y)
 
 
 ## The lowest the jaws get without folding a single joint of leg: the head down

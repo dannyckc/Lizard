@@ -29,14 +29,14 @@ godot --path . --editor   # open the editor
 
 | | |
 |---|---|
-| `W` `S` / up/down arrows | move forward / back up along the creature's orientation — reverse is a slower, deliberate retreat and never sprints |
-| `A` `D` / left/right arrows | turn the body left/right; switching sides sheds the old swing at the brake rate, so the flip answers immediately |
-| move mouse | shift and look the head toward the cursor; the mouse never steers the body. The cursor is also a *target* — it selects a place, a height and the exact body part or object under it, and the creature starts reaching for that before any button is pressed: lowering itself toward something on the floor, holding its height for something at chest level |
-| left click | bite (anatomical hit + cooldown). Refused outright on something the body cannot physically get its mouth onto; the reticle is hollow when that is the case |
+| `W` `S` / up/down arrows | move forward / back up along the creature's orientation — reverse is a slower, deliberate retreat and never sprints. Walking forward, the animal goes where its head is looking: the body swings round into the direction the cursor already put the head, and the neck straightens out onto it as the two meet |
+| `A` `D` / left/right arrows | turn the body left/right; switching sides sheds the old swing at the brake rate, so the flip answers immediately. The hand has the last word — a turn key held overrules whatever the head is asking for |
+| move mouse | shift and look the head toward the cursor. Standing still, that is all it does; walking, it is also the steering. The cursor is also a *target* — it selects a place, a height and the exact body part or object under it, and the creature starts reaching for that before any button is pressed: lowering itself toward something on the floor, holding its height for something at chest level. The marker sits where the jaws would actually land, and is brought in to arm's length when you aim past it |
+| left click | bite (anatomical hit + cooldown). Never refused: aimed at something the body cannot get its mouth onto, the lunge is thrown and misses. The reticle is hollow and the `TARGET` readout says why before you press it |
 | hold left click | keep hold of what you bit — a creature, or a severed part; drag it, carry it off, or be dragged by it |
 | click again while holding | chew: shut the same jaws on the same flesh once more. On a piece of meat this works it in, and swallows it once what is left will fit |
 | `Space` | leave the ground — a leap from a standing start, and a climb for anything with wings. A creature with no leap in its legs stays put |
-| `Ctrl` | come down: a controlled descent with wings out, a dive with them folded |
+| `Ctrl` | come down. In the air that is a controlled descent with wings out and a dive with them folded; on the ground it is close control — the animal slows to 40% of its top speed and folds as low as its own joints go, which is a belly-down stalk on a lizard, a crouch on a cat, and on an elephant simply a slower elephant |
 | `Shift` | sprint |
 | `F1` | open/close **Creature Creation** — the species, every parameter and the live specimen on one page. `Esc` also closes it |
 | `F2` | toggle debug draw |
@@ -1641,6 +1641,45 @@ there is, and a puncture cannot destroy less than one. Sampling cell centres
 alone would have made the finest points *least* likely to connect, which is
 exactly backwards.
 
+### Steering, and close control
+
+**A walk goes where the head is looking.** The cursor articulates the head around
+the solved neck, and it always did; what is new is that a body moving *forward*
+follows it. The angle the head is carried off the heading is priced as a share of
+the turn the body could make, and handed to the same eased angular velocity `A`
+and `D` drive — so nothing snaps and nothing is teleported. The head reaches the
+direction first, because a neck is quicker than four legs; the body comes round
+after it; and the neck straightens out onto the body as they meet, which is what
+makes it one movement rather than a heading rewrite with a head animation over the
+top. Walking toward a mark 70° off the bow, the creature arrives on that bearing
+within a degree, without swinging past it, and with its head back in line.
+
+Three gates keep it honest, and each is a claim about what the animal is doing.
+Only going forward: a creature backing away from something keeps looking at it,
+and steering by that would drive it in a circle round the thing it is retreating
+from. Only while it is actually being pointed, so a body driven by a test, a
+replay or an AI is bit-for-bit unaffected. And scaled by the throttle, because it
+is a property of the walking — half a commitment turns half as hard. The hand
+overrules it: the head is asked for only as much of the turn as the player is not
+already taking by hand, so `A` and `D` mean exactly what they meant.
+
+**`Ctrl` on the ground is close control.** Not a mode and not a second key: it is
+the bottom end of the same "come down" axis that dives a flier, read by a body
+that is standing on something. Two things follow, and only one of them is a
+number. The speed ceiling drops to 40% of the animal's top speed — a ceiling
+rather than a brake, so it still accelerates and stops with everything it has and
+simply has nowhere fast to get to — and the crouch asks for the whole of
+`Stature.fold`.
+
+That second half is where it stops being a stealth button and becomes anatomy. It
+is the same single crouch a creature reaching for something at its feet spends, so
+a build gets exactly what its own joints have: a lizard puts its belly on the floor
+(riding 13.9 px down to 2.4), a cat drops most of its clearance, and a columnar
+animal whose knees do not close stays standing and merely slows down. Nothing had
+to decide what is anatomically possible, and nothing had to write down that
+elephants do not stalk. The footfalls quieten on their own, because a footfall's
+loudness is read off the speed it was made at.
+
 ### Aiming, and what a mouth can be got onto
 
 A mouse gives two numbers and the world has three, so a click is ambiguous before
@@ -1700,13 +1739,41 @@ stands at, and stands back up when it stops being pointed there. Nothing is keye
 to biting: an animal reaches for what it is aimed at whether or not a button is
 ever pressed.
 
-**And it is refused when it cannot.** A creature pointed at something it cannot
-physically get its mouth onto does not throw the strike at all — a ground-level
-lizard told to bite the top of an elephant simply does not lunge, while the same
-lizard told to bite the planted foot beside it does. Something solid in between is
-the same refusal from a third direction: jaws may not close through a boulder, and
-that is the same band test the collision pass runs, asked along a line. A bite
-with nothing selected is unconditional, exactly as it always was.
+**And it misses when it cannot.** A creature pointed at something it cannot
+physically get its mouth onto still throws the strike, and the strike lands on
+nothing: a ground-level lizard told to bite the top of an elephant snaps at the
+air under its belly, while the same lizard told to bite the planted foot beside it
+takes the foot. The reach knows the difference and says so *before* the button —
+the marker is hollow, and the readout gives the reason — but it never swallows the
+click, because an input that vanishes is indistinguishable from one the game did
+not receive. Something solid in between is the same fact from a third direction:
+jaws may not close through a boulder, and that is the same band test the collision
+pass runs, asked along a line.
+
+**The marker goes where the bite goes.** A pick is two questions, and they are
+answered by two calls. `Reticle.pick` asks what is *there*, and knows nothing
+about who is looking. `Reticle.resolve` asks what would happen if this particular
+body acted on it now, and moves the marker twice for it:
+
+- **onto the surface the jaws meet.** A cursor lands on a silhouette; a mouth
+  arrives on the near side of a thing, at whatever height in its band the neck and
+  the fold can bring the teeth to — `Reach.meeting`, the same reading the reach
+  test makes, so the ring and the bite cannot disagree about where they are aimed.
+  On an elephant those are most of a body apart: point at the far flank and the
+  marker crosses 58 px to the side the lizard is standing on.
+- **in to arm's length, when the selection is past it.** The furthest place along
+  the aim line the animal can put its mouth, taken from `Reach.span` so the offer
+  and the refusal are one number. What was selected is kept on the pick's `beyond`
+  and joined to the marker by a dashed line: *this* is as far as you get, and
+  *that* is what you were pointing at. The click still happens, toward the place
+  that was pointed at.
+
+And the structure itself is traced over the thing — the bone between two joints,
+the ring of a skull, the width of the body at the station picked, the footprint of
+a rock — off the same primitives the hit test scored and the view drew. A ring
+alone cannot say which of four legs overlapping one another in a top-down picture
+the click has hold of. The `TARGET` line on the HUD names it in words, with its
+height and, when it is out of reach, why.
 
 ### The lunge
 

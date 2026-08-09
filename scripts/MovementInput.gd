@@ -17,14 +17,23 @@ class Command extends RefCounted:
 	## given to two different animals.
 	var climb: float = 0.0
 	var sprint: bool = false
+	## Close control: get low, go slow, place the body deliberately. The other
+	## half of `climb`'s bottom end rather than a second key — on a body already
+	## off the ground "come down" is a descent, and on one standing on it, it is
+	## the animal getting its belly nearer the floor. Same instruction, two
+	## animals, exactly as `climb` reads at the top.
+	var stalk: bool = false
 	var aim_world: Vector2 = Vector2.ZERO
 	var aim_active: bool = false
 
 
 var command: Command = Command.new()
 
-## Disabled while the cursor is interacting with the tuning UI. This affects
-## only the articulated head pose; the mouse never writes locomotion or facing.
+## Disabled while the cursor is interacting with the tuning UI. What it turns off
+## is aiming: the head stops tracking the pointer and, with it, the walk stops
+## following the head — see `Creature._head_lead`. Throttle, turn and everything
+## else on the command are untouched, so a creature crossing the paddock while a
+## slider is being dragged keeps going exactly where it was pointed.
 var mouse_look: bool = true
 
 
@@ -42,14 +51,16 @@ func read(_head_pos: Vector2, _heading: float, mouse_world: Vector2) -> Command:
 		turn += 1.0
 
 	var climb: float = 0.0
+	var down: bool = Input.is_physical_key_pressed(KEY_CTRL)
 	if Input.is_physical_key_pressed(KEY_SPACE):
 		climb += 1.0
-	if Input.is_physical_key_pressed(KEY_CTRL):
+	if down:
 		climb -= 1.0
 
 	command.throttle = clampf(throttle, -1.0, 1.0)
 	command.turn = clampf(turn, -1.0, 1.0)
 	command.climb = clampf(climb, -1.0, 1.0)
+	command.stalk = down
 	command.sprint = Input.is_physical_key_pressed(KEY_SHIFT)
 	command.aim_world = mouse_world
 	command.aim_active = mouse_look

@@ -61,6 +61,7 @@ func _process(_delta: float) -> bool:
 	_check_stopped_by_a_wall(player)
 	_check_passing_underneath(player)
 	_check_cursor_has_a_height(player, target)
+	_check_the_marker_is_where_the_bite_lands(player, target)
 	_check_reaching_down(player)
 	_check_refusing_what_it_cannot_reach(player, target)
 	_check_flat_world_unchanged(player)
@@ -414,6 +415,99 @@ func _check_cursor_has_a_height(player: Creature, target: Creature) -> void:
 	target.reset(Vector2(0.0, 8000.0), 0.0)
 
 
+## The second half of the cursor, and the half that is about the animal holding
+## it: not what is under the pointer, but what would happen if this body acted on
+## it now.
+##
+## Two corrections, and the reason both exist is that a marker sitting on the
+## pixel the mouse is over is a marker that lies about a game with a third axis in
+## it. A cursor dragged across a deep-chested animal selects the flank on the far
+## side of it, which is not where any mouth arrives; a cursor thrown across the
+## paddock selects something no mouth arrives at at all.
+func _check_the_marker_is_where_the_bite_lands(player: Creature, target: Creature) -> void:
+	main.terrain.clear()
+	_apply(player, "Lizard")
+	_apply(target, "Elephant")
+	player.reset(Vector2.ZERO, 0.0)
+	target.reset(Vector2(230.0, 0.0), PI)
+	for _tick in 30:
+		player._physics_process(TICK)
+		target._physics_process(TICK)
+	# Stood against the elephant's flank, because the correction under test is
+	# across a body rather than along the road: a lizard half a paddock away is out
+	# of reach in the horizontal, and what happens to a marker then is the *other*
+	# half of this function.
+	var beside: Vector2 = target.body_point(Vector2(0.5, 1.0))
+	var outward: Vector2 = target.spine.sample(0.5).perp
+	player.reset(beside + outward * 34.0, (-outward).angle())
+	for _tick in 24:
+		player._physics_process(TICK)
+		target._physics_process(TICK)
+
+	# --- onto the surface the jaws meet ---------------------------------------
+	# Both flanks of one station on the elephant's back, and the cursor put on the
+	# one the lizard is *not* standing beside. What comes back has to be the other.
+	var station: float = _spine_t_nearest(target, player.jaw_point())
+	var mouth: Vector2 = player.jaw_point()
+	var flanks: Array[Vector2] = [target.body_point(Vector2(station, -1.0)),
+		target.body_point(Vector2(station, 1.0))]
+	var near: Vector2 = flanks[0] if mouth.distance_to(flanks[0]) < mouth.distance_to(flanks[1]) \
+		else flanks[1]
+	var far: Vector2 = flanks[1] if near == flanks[0] else flanks[0]
+	# Just inside the far flank rather than exactly on it: a cursor sitting on a
+	# surface is scored at nothing, and nothing does not beat the open ground.
+	var on_far: Reticle.Pick = Reticle.pick(self,
+		target.body_point(Vector2(station, 1.0 if far == flanks[1] else -1.0)) \
+			.lerp(target.spine.sample(station).pos, 0.25), 8.0, player)
+	_check(on_far.creature == target and on_far.hit != null,
+		"a cursor on an elephant's far flank selected %s" % on_far.describe())
+	var picked_at: Vector2 = on_far.at
+	var met: Reticle.Pick = Reticle.resolve(on_far, player)
+	_check(met.at.distance_to(near) < met.at.distance_to(far),
+		"the marker stayed on the far side of the body the bite would come from")
+	_check(met.at.distance_to(mouth) < picked_at.distance_to(mouth),
+		"resolving the pick against the animal did not bring it nearer its mouth (%.1f -> %.1f px)"
+			% [picked_at.distance_to(mouth), met.at.distance_to(mouth)])
+	# ...and at the height the jaws are actually brought to, rather than the middle
+	# of the band or the top of it. It is the same reading the reach test makes, so
+	# the ring and the bite cannot disagree about where they are aimed.
+	_check(is_equal_approx(met.height, Reach.meeting(player, met.band)),
+		"the marker sat at %.1f px on a target the mouth meets at %.1f"
+			% [met.height, Reach.meeting(player, met.band)])
+	_check(Volume.contains(met.band, met.height),
+		"the marker's height %.1f was outside the band it is on (%s)"
+			% [met.height, Volume.describe(met.band)])
+	_check(met.beyond == null,
+		"something the animal is standing next to was reported as beyond its reach")
+	summary.append("marker crosses to the near flank %.0f px in"
+		% picked_at.distance_to(met.at))
+
+	# --- and in to arm's length, when it is past it ----------------------------
+	var span: float = Reach.span(player)
+	var away: Vector2 = mouth + Vector2.RIGHT.rotated(deg_to_rad(12.0)) * (span * 6.0)
+	var reached: Reticle.Pick = Reticle.resolve(Reticle.pick(self, away, 8.0, player), player)
+	_check(reached.beyond != null,
+		"a marker thrown six times the animal's reach was left out there")
+	var out: float = reached.at.distance_to(mouth)
+	_check(out <= span + 0.5 and out > span * 0.9,
+		"the marker was brought in to %.1f px of a %.1f px reach" % [out, span])
+	_check((reached.at - mouth).normalized().dot((away - mouth).normalized()) > 0.999,
+		"the marker was brought in off the line it was aimed along")
+	var got: Reach = Reach.solve(player, reached.at, reached.band, main.terrain)
+	_check(got.possible,
+		"the furthest point the animal was offered is one it cannot reach (%s)" % got.describe())
+	# The whole purpose of it: the click still happens, and it happens toward the
+	# place that was pointed at.
+	player.aim_at(reached)
+	_check(player.can_reach_aim() and player.request_bite(reached.at),
+		"a click at something past the animal's reach was swallowed")
+	player.aim_at(null)
+	_strike_through(player, target)
+	summary.append("reach clamp %.0f px" % out)
+	target.reset(Vector2(0.0, 8000.0), 0.0)
+	_apply(player, "Lizard")
+
+
 # ------------------------------------------------------------------- reach ----
 
 ## Getting a mouth onto the floor. The clamp this replaced simply granted it, so
@@ -492,8 +586,17 @@ func _check_reaching_down(player: Creature) -> void:
 	_apply(player, "Lizard")
 
 
-## Refusing what it cannot reach — and, just as much, not refusing what it can.
-## A refusal that fired on everything would pass half of this on its own.
+## Missing what it cannot reach — and, just as much, connecting with what it can.
+## A strike that landed on nothing whatever it was aimed at would pass half of
+## this on its own.
+##
+## The claim used to be that the body declined to strike at all, and the reversal
+## is deliberate: an input that vanishes is indistinguishable from one the game
+## did not receive. So the animal throws the lunge either way and the height
+## decides what is in its jaws at the end of it — which is where every other
+## interaction in the game is already decided. What the reach knows is still
+## exactly what it knew; it is now spent on telling the player beforehand rather
+## than on swallowing the click.
 func _check_refusing_what_it_cannot_reach(player: Creature, target: Creature) -> void:
 	_apply(player, "Lizard")
 	_apply(target, "Elephant")
@@ -531,8 +634,13 @@ func _check_refusing_what_it_cannot_reach(player: Creature, target: Creature) ->
 	_check(not up.possible and up.refusal == "above",
 		"a ground-level lizard reached an elephant's back (%s)" % up.describe())
 	player.aim_at(high)
-	_check(not player.request_bite(high.at),
-		"a lizard threw a strike at something it cannot physically reach")
+	_check(player.request_bite(high.at),
+		"a lizard's click at something out of reach was swallowed rather than thrown")
+	var back_before: float = target.anatomy.tissue.body_solid(over, 0.0)
+	_strike_through(player, target)
+	_check(is_equal_approx(target.anatomy.tissue.body_solid(over, 0.0), back_before),
+		"a strike thrown at an elephant's back reached it from the floor (%.3f -> %.3f)"
+			% [back_before, target.anatomy.tissue.body_solid(over, 0.0)])
 
 	# ...and the foot standing next to it, which it can. Same animal, same lizard,
 	# same instant: only the height of the target differs.
@@ -546,9 +654,11 @@ func _check_refusing_what_it_cannot_reach(player: Creature, target: Creature) ->
 	player.aim_at(low)
 	_check(player.request_bite(low.at),
 		"a lizard refused to bite a foot it can reach")
-	summary.append("lizard on elephant: back %s, foot %s"
-		% ["refused" if not up.possible else "allowed",
-			"allowed" if down.possible else "refused"])
+	_strike_through(player, target)
+	_check(player.bite_connected,
+		"a lizard's strike at the foot beside it landed on nothing")
+	summary.append("lizard on elephant: back missed, foot %s"
+		% ["bitten" if player.bite_connected else "missed"])
 
 	# Something solid in between is the same refusal from the third direction.
 	main.terrain.clear()
@@ -606,6 +716,19 @@ func _walk_and_measure(player: Creature) -> float:
 	for _tick in 30:
 		player._physics_process(TICK)
 	return player.gait.support
+
+
+## Runs a queued strike through its hit frame and out the far side of its own
+## cooldown, with both bodies ticking and the habitat's resolver attached — so
+## what the jaws close on is decided exactly as it is in play, by the world,
+## rather than by this file deciding what it thinks should have happened.
+func _strike_through(player: Creature, target: Creature) -> void:
+	for _tick in 300:
+		player._physics_process(TICK)
+		target._physics_process(TICK)
+		if player.can_bite():
+			return
+	_check(false, "a strike never finished: the animal is still mid-lunge")
 
 
 ## Where along a body's spine it comes closest to a point — so a target can be
