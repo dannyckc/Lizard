@@ -225,7 +225,13 @@ func _sway(player: Creature, preset: String) -> float:
 		player._physics_process(TICK)
 		if tick < 60:
 			continue
-		var offset: float = player.spine.points[mid].y
+		# How far the middle of the back sits off the line the head is travelling
+		# along, rather than off the world's y axis. Undulation is a body bending
+		# against itself, and measured absolutely it cannot be told apart from a
+		# body being shoved sideways — which is what the fastest of the three does
+		# when it catches up with the other animal in the habitat.
+		var across: Vector2 = Vector2(-player.move_dir.y, player.move_dir.x)
+		var offset: float = (player.spine.points[mid] - player.head_pos).dot(across)
 		lo = minf(lo, offset)
 		hi = maxf(hi, offset)
 	player.command = MovementInput.Command.new()

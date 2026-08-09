@@ -1,0 +1,333 @@
+## What this body can do about moving itself: how hard it accelerates, how far
+## each leg reaches under it, how long a foot stays down, and how quickly it can
+## be picked up and put somewhere else.
+##
+## The third of the derived descriptors, and built on exactly the terms of the
+## other two. `Physique` reads how much animal there is off the drawn silhouette;
+## `Stature` reads how tall it stands off its own legs; this reads how it walks
+## off both. Nothing here is a setting and nothing here names a species: an
+## Elephant accelerates slowly, swings its legs deliberately and keeps three feet
+## on the ground because it is twenty-three times a Lizard standing on legs three
+## times as long, not because a preset said 300 where another said 800.
+##
+## Four laws do the whole of it, and every number below is one of them applied to
+## the body that has just been solved:
+##
+##   * **Force over mass.** Muscle goes as a cross-section and weight goes as a
+##     volume, so a creature's push-per-kilo falls as the cube root of its size.
+##     That single ratio — `power` — is what makes a heavy animal slow to get
+##     going and slow to turn, and it is the same one `Physique` already derives.
+##     Fat is in the mass and not in the muscle, so a padded animal is duller for
+##     free.
+##   * **A leg is a pendulum.** How long a limb takes to swing through goes as the
+##     square root of its length, so a long leg is a slow leg however strong the
+##     animal wearing it. That, and not a step-duration slider, is why an
+##     Elephant's feet move the way they do.
+##   * **A foot on a sphere.** A planted foot is a point on a sphere of the leg's
+##     own radius about its socket, so how far it can travel fore-and-aft is a
+##     question about the leg's length, the angle it is carried at and how far the
+##     body is willing to sink while it passes over it. Stride length is that
+##     answer. There is no stride parameter any more.
+##   * **Feet stay down.** How many of them a posture keeps on the floor is
+##     already a posture trait, and it is what a duty factor *is* — so the time a
+##     limb is allowed in the air is the rest of its cycle, and never more. This
+##     is the one that was missing, and its absence is what let a columnar
+##     animal's front legs use the whole of a single-support gait between them
+##     and leave the hind pair dragging.
+##
+## Refreshed once per tick from the previous tick's physique, ahead of everything
+## that reads it. That one-tick lag is deliberate and harmless: mass and muscle
+## are properties of a body that is being eaten over seconds, not of this frame.
+class_name Locomotion
+extends RefCounted
+
+## Body length of the default build — 14 segments at 15px — so a creature's
+## rotational inertia is quoted as a ratio against it. A constant for the same
+## reason `Physique.REFERENCE_VOLUME` is: it has to keep meaning the same thing
+## after the tuning panel has restructured the animal underneath it.
+const REFERENCE_LENGTH: float = 195.0
+
+## How much of its reach a standing leg keeps in hand. A leg solved at the exact
+## limit of its own envelope has nowhere left to put its foot: the clamp pins it
+## on the boundary, the distance trigger never fires and the limb is towed for as
+## long as the creature walks. Small, because it only has to keep the stance off
+## the boundary — the stride is bought with the sink below, not with this.
+const EXTENSION_MARGIN: float = 0.06
+
+## How far the body will drop over a stride, as a share of the height it stands
+## at. This is where an upright animal's stride comes from and it cannot come from
+## anywhere else: a leg held near vertical has almost no plan-view reach to swing
+## its foot across, so the only way that foot gets out in front of the body is for
+## the shoulder to come down as it goes. Which is a walk. A sprawled animal buys
+## no stride this way and needs none — its foot is already flung out to the side
+## and sweeps a wide arc at no cost in height at all.
+const STRIDE_SINK: float = 0.12
+## How much of the travel a limb has, it actually uses. Short of all of it so a
+## walking foot is not permanently sitting on its own envelope boundary.
+const STRIDE_SHARE: float = 0.80
+## Least of the disc a foot may be placed inside that is kept for walking rather
+## than for standing wide. The stance and the stride are spent out of one budget —
+## the leg reaches so far across the ground and no further, and every pixel of
+## that spent holding the foot out to the side is a pixel it cannot travel
+## fore-and-aft — so an animal that stands at the full width its posture asks for
+## has no stride left, whatever its legs are like. This is where that argument
+## stops: past here the stance comes in rather than the stride going to nothing.
+const FORE_SHARE: float = 0.55
+## How much of the disc the stride is measured across. The rest is headroom — see
+## `excursion`.
+const TRAVEL_MARGIN: float = 0.94
+## Most of that the stance and the sway between them may use up, so there is
+## always some stride left. See `excursion`.
+const LAT_CEILING: float = 0.88
+## Narrowest a stance may be squeezed to by that reservation, as a share of the
+## reach. A body thrown about hard enough to want its feet directly underneath it
+## is a body that would then be standing on a line, and a creature does not
+## balance on one. Well above where any posture puts its feet of its own accord,
+## so it is a floor on the *squeeze* rather than on the stance.
+const STANCE_FLOOR: float = 0.45
+## Largest share of a stride a foot may be aimed ahead by. `foot_lead` is spent
+## out of the same travel the stride is measured in, so at 1.0 the two cancel and
+## the stride collapses to nothing.
+const LEAD_CEILING: float = 0.75
+
+## Swing time of a limb one pixel long, in seconds — the constant of
+## proportionality on `sqrt(length / gravity)`. Chosen so the default build lands
+## on the quarter-second step it was authored with, which is the only thing an
+## arbitrary constant in a made-up gravity can honestly be pinned to.
+const SWING_PERIOD: float = 1.6
+## Fastest any limb may be flicked through a step, whatever the arithmetic asks
+## for. A floor on the swing, not a target.
+const SWING_FLOOR: float = 0.045
+
+## How much longer a heavy animal keeps its feet down than its posture alone
+## says. The posture already sets the base — three feet down on a columnar build,
+## two on the others — and this is weight leaning on top of it.
+const DUTY_LOAD: float = 0.10
+const DUTY_MIN: float = 0.45
+const DUTY_MAX: float = 0.86
+
+## How much of the rise and fall of a vaulting leg the animal takes up in its own
+## joints rather than showing in its back. A leg with a foot planted lifts the
+## body as it passes underneath and lowers it again as it leaves — that is where
+## every bob comes from — but a stance limb is not a strut and flexes under the
+## load. How much it can flex is a question about muscle against weight, which is
+## `power`: a light, strong animal absorbs nearly all of it and glides, and a
+## heavy one has legs it cannot fold and rolls its whole body over each of them.
+const ABSORB_BASE: float = 0.75
+const ABSORB_MIN: float = 0.30
+const ABSORB_MAX: float = 0.70
+
+## How many times per step cycle the body settles onto the height its feet are
+## holding it at. Quoted in cycles rather than in seconds so it means the same
+## thing on an animal taking four steps a second and one taking one: the body
+## follows its feet at the pace its feet are moving, which is what stops a slow
+## heavy walk being smoothed into a glide by a response that was tuned for a
+## lizard.
+const SETTLE_CYCLES: float = 5.0
+const SETTLE_MIN: float = 3.0
+const SETTLE_MAX: float = 22.0
+
+## How high a foot comes up, as a share of whichever is larger: how high the body
+## is being held, or how long the leg is. Both are needed. The first is what makes
+## an elephant step over what a lizard walks around; the second is what stops a
+## low-slung animal, whose body is barely off the floor, scuffing its feet along
+## it — a lizard picks its foot up by a fraction of its own leg even though it has
+## almost no clearance to clear.
+const LIFT_SHARE: float = 0.22
+
+## Force per unit of weight, against the reference build. Muscle goes as
+## mass^(2/3) and weight as mass, so this falls as the cube root of size all on
+## its own — and every slow thing about a large animal below is this one number.
+var power: float = 1.0
+## How extended the legs stand, as a fraction of a bone. The species' own
+## `stance_reach`, capped at what leaves the limb an envelope to walk in.
+var extension: float = 0.78
+## Share of its cycle each limb must have a foot on the ground.
+var duty: float = 0.5
+## Ground acceleration, in pixels per second squared.
+var accel: float = 800.0
+## Turn rate, in radians per second, before speed falloff and steering losses.
+var turn_rate: float = 0.0
+## Share of the vault the joints swallow — see ABSORB_BASE.
+var absorbed: float = 0.75
+
+
+## Re-derives everything from the body that has just been solved.
+##
+## `physique` carries the mass and the muscle, and it already has this creature's
+## damage folded into both — a limb that is present and not answering contributes
+## its weight and none of its pull — so nothing here has to ask about injuries.
+func update(posture: Posture, physique: Physique, p: CreatureParams, scale: float) -> void:
+	if posture == null or physique == null or p == null:
+		return
+	power = clampf(physique.strength / maxf(physique.mass, 0.0001), 0.05, 8.0)
+
+	# A stance that reaches further than the limb's own working envelope is not a
+	# tall animal, it is an animal with no stride: the foot is clamped onto the
+	# boundary at rest, so the distance trigger can never fire and the leg is towed
+	# for as long as the creature keeps walking. The cap is the whole of what a
+	# columnar build needed and none of what a sprawled one did, because only an
+	# upright leg is ever asked to stand at nine tenths of itself.
+	extension = clampf(minf(p.stance_reach, p.limb_max_reach - EXTENSION_MARGIN),
+		0.2, 0.98)
+
+	accel = p.acceleration * scale * posture.drive * power
+
+	# Torque over rotational inertia. A rod's inertia goes as its mass times the
+	# square of its length while the muscle turning it grows with neither, so a
+	# long heavy animal comes round slowly for the same reason a short light one
+	# snaps about — and the elephant's own body length is doing as much of that
+	# here as its weight is.
+	var span: float = maxf(p.segment_length * float(p.segment_count - 1) * scale, 1.0)
+	turn_rate = deg_to_rad(p.turn_speed_deg) * posture.agility * power \
+		* (REFERENCE_LENGTH * scale / span)
+
+	# How much of its cycle a foot spends on the ground. The posture already says
+	# how many feet stay down, which is exactly what a duty factor is; weight leans
+	# on it, because a heavy animal is unwilling to be caught on fewer legs.
+	duty = clampf(float(posture.feet_down) / 4.0 + DUTY_LOAD * (1.0 - power),
+		DUTY_MIN, DUTY_MAX)
+
+	absorbed = clampf(ABSORB_BASE * power, ABSORB_MIN, ABSORB_MAX)
+
+
+## The span a limb of this bone stands at — the radius of the sphere its foot
+## moves on.
+func stand(bone: float) -> float:
+	return bone * extension
+
+
+## How far across the ground a foot may be placed from directly beneath its
+## socket, given how high that socket is being carried.
+##
+## Pythagoras on the limb, and it replaces a flat projection of the leg's length
+## that had no idea how high the body was. The difference is the whole of the
+## columnar case: a near-vertical leg projects barely a third of itself into the
+## ground plane, so measured that way its foot could never be put down far enough
+## forward to be a stride — while the actual triangle, with most of the leg spent
+## going down and the rest available to lean, gives it half as much again.
+func plan_reach(bone: float, socket_height: float, max_reach: float) -> float:
+	var span: float = bone * max_reach
+	return sqrt(maxf(span * span - socket_height * socket_height, 0.0))
+
+
+## The same reach, quoted at the bottom of the animal's own bob.
+##
+## This is the one the foot is *placed* inside, and it has to be this one rather
+## than the reach at the height the body happens to be at right now, because the
+## two are a loop: the foot goes out because the body is coming down, and the body
+## comes down because the foot went out. Quoting the envelope at the instantaneous
+## height cuts the foot short of where the stride was measured, and the limb then
+## spends the last third of every step skidding along a boundary that opens up
+## underneath it. Nothing is over-extended by the difference — `_carry_body` puts
+## a hard ceiling on the body at what its legs can actually reach, so the sinking
+## always happens.
+func walking_reach(bone: float, socket_height: float, max_reach: float) -> float:
+	return plan_reach(bone, socket_height * (1.0 - STRIDE_SINK), max_reach)
+
+
+## Half the fore-and-aft travel a foot has, from where it rests.
+##
+## One triangle, asked at the bottom of the animal's bob rather than the top. A
+## planted foot is a point on the sphere of the leg's own reach about its socket;
+## how far across the ground that lets it get is how much of the leg is not being
+## spent going down, and the animal makes more of it available by coming down —
+## which is not a concession, it is the walk. So: drop the socket by what the body
+## will sink over a stride, ask how far the leg reaches across the floor from
+## there, and take off what the sideways part of the stance is already using. What
+## is left is the fore-and-aft half-travel.
+##
+## Both extremes fall out of the one line, which is why there are no longer two
+## branches here. A sprawled animal's socket is a few pixels off the floor, so
+## sinking buys it almost nothing — and it needs almost nothing, because its leg
+## is already lying along the ground and nearly the whole of it is plan-view
+## reach. A columnar animal's socket is a whole leg up, so sinking a tenth of that
+## is a long way out for the foot — and it needs every bit, because a near-
+## vertical leg has almost no plan reach until it leans.
+##
+## `lat` is how far out to the side the foot rests and `fan` the joint's own
+## limit on the sweep, which is what a stiffened limb loses first.
+func excursion(bone: float, socket_height: float, lat: float,
+		max_reach: float, fan: float) -> float:
+	# Short of the whole disc, for the same reason the stance is short of the whole
+	# leg. Size the travel to the exact edge and the design point *is* the
+	# boundary: the foot arrives there whenever its stride extreme and the body's
+	# sway peak land on the same tick, and a foot on the boundary is a foot the
+	# clamp is skidding.
+	var across: float = walking_reach(bone, socket_height, max_reach) * TRAVEL_MARGIN
+	# However wide the stance and however far the body throws itself, a limb is
+	# left something to walk with. Without the floor a body that swayed as far as
+	# its own leg reaches would be given a stride of nothing at all — and a stride
+	# of nothing is not a small step, it is a foot that can never become overdue
+	# and is therefore towed for as long as the creature is on its feet.
+	var travel: float = sqrt(maxf(across * across
+		- minf(lat, across * LAT_CEILING) * minf(lat, across * LAT_CEILING), 0.0))
+	# The joint has the last word. Never binding on a sound limb at any ordinary
+	# stance — the reach above runs out first — but it is the whole of what a limb
+	# that has lost its range of motion has left, and it is what makes that limb
+	# take short steps rather than being quietly dragged.
+	return minf(travel, stand(bone) * sin(clampf(fan, 0.0, PI * 0.5)))
+
+
+## The widest a foot may rest from the line under its own socket.
+##
+## The posture asks for a stance width and usually gets it — but not at the price
+## of the stride. A leg reaches a certain distance across the ground and that disc
+## is the whole budget: the sideways offset comes out of it, the body's sway comes
+## out of it twice a cycle, and the fore-and-aft travel is whatever is left. Spend
+## the first two to the edge and the third is nothing, which is not a wide stance,
+## it is an animal standing splay-legged and shuffling — and then dragging its
+## feet, because the wave puts them outside the disc from a standing start.
+##
+## So the fore-and-aft share is reserved first and the stance takes what remains.
+## It binds on a sprawled build, whose feet genuinely do belong out at the edge of
+## its reach, and on nothing else.
+## `sway` is how far the body's own undulation carries this socket sideways, which
+## is why it is per-limb and measured rather than quoted — see Limb.sway.
+func stance_limit(reach: float, sway: float) -> float:
+	return maxf(reach * sqrt(maxf(1.0 - FORE_SHARE * FORE_SHARE, 0.0)) - sway,
+		reach * STANCE_FLOOR)
+
+
+## The distance a foot may drift before it has to be picked up.
+##
+## Derived rather than authored, and it has to be: a stride longer than the travel
+## the limb has is not a long stride but no stride at all, and one shorter than it
+## is an animal mincing on legs it is not using. The foot lands `lead` of a stride
+## ahead of where it rests and drifts back to the trailing edge of its travel, so
+## the whole of the stride is the travel behind it plus the part it was placed
+## ahead by — which is one equation with `stride` on both sides, solved here.
+func stride(sweep: float, lead: float) -> float:
+	return sweep * STRIDE_SHARE / maxf(1.0 - clampf(lead, 0.0, LEAD_CEILING), 0.25)
+
+
+## How long a limb of this length takes to swing through, at a standstill.
+##
+## A leg is a pendulum hanging off a shoulder, so its swing goes as the square
+## root of its length and a long leg is a slow leg however strong the animal
+## wearing it. Muscle shortens it — a limb is thrown as well as dropped — but only
+## as the cube root of the power available, because the same weight that is being
+## pushed along is also what has to be swung.
+func swing_time(bone: float) -> float:
+	return SWING_PERIOD * sqrt(maxf(bone, 1.0) / Elevation.GRAVITY) \
+		/ pow(clampf(power, 0.05, 8.0), 1.0 / 3.0)
+
+
+## The most of a cycle a foot may spend in the air, given how long that cycle is.
+## This is the duty factor stated as a deadline, and it is what keeps three feet
+## under a columnar animal instead of letting two legs use the whole of a
+## single-support gait between them.
+func swing_budget(cycle: float) -> float:
+	return maxf(cycle * (1.0 - duty), SWING_FLOOR)
+
+
+## How quickly the body settles onto the height its feet are holding it at, given
+## how long one limb's cycle is.
+func settle(cycle: float) -> float:
+	return clampf(SETTLE_CYCLES / maxf(cycle, 0.001), SETTLE_MIN, SETTLE_MAX)
+
+
+## How high a foot comes up at the top of a step, before the posture's own leaning
+## is applied. See LIFT_SHARE for why it is the larger of the two.
+func lift(socket_height: float, bone: float) -> float:
+	return maxf(socket_height, bone) * LIFT_SHARE

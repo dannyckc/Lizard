@@ -82,6 +82,11 @@ var dentition: Dentition = null
 ## rest of the derived state, so the contact and grip passes read the physique of
 ## the pose they are correcting, exactly as they already read its bounds.
 var physique: Physique = Physique.new()
+## What that body can do about moving itself: how hard it accelerates and turns,
+## how far it strides, how long its feet stay down. Read off the physique above
+## and the posture, once per tick and ahead of everything that uses it — not
+## settings, see Locomotion.
+var locomotion: Locomotion = Locomotion.new()
 
 # --- motion state -----------------------------------------------------------
 var head_pos: Vector2 = Vector2.ZERO
@@ -361,7 +366,12 @@ func rebuild() -> void:
 	anatomy.set_fat_reserve(params.fat_reserve)
 	# Before the limbs, because how far the ground sits below the torso is what
 	# the gait draws the legs down to — and on the very first tick there is no
-	# previous stature to read it from.
+	# previous stature to read it from. And before *that*, what this body can do
+	# about walking: the stance the legs are solved to, and so the height the whole
+	# picture is registered to, is one of its answers.
+	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
+	locomotion.update(posture, physique, params, size_scale)
+	gait.loco = locomotion
 	_update_stature()
 	if alive:
 		ragdoll = null
@@ -388,7 +398,7 @@ func _update_stature() -> void:
 	# there is nothing to read, and the posture answers instead.
 	var held: float = gait.support if gait != null and gait.measured else -1.0
 	stature.update(posture, body, params, size_scale, body_length(),
-		elevation.height, gape_radius(), alive, held)
+		elevation.height, gape_radius(), alive, held, locomotion.extension)
 
 
 ## The generator a carcass's resting shape is drawn from.
@@ -469,6 +479,15 @@ func _physics_process(delta: float) -> void:
 	if not alive:
 		_dead_process(delta)
 		return
+
+	# First, because everything below is downstream of it: what this body weighs
+	# and what it can pull decide how hard it gets going, how sharply it comes
+	# round and how its legs are placed under it. Read off the previous tick's
+	# physique, and that lag is deliberate — mass and muscle are properties of a
+	# body being eaten over seconds, not of this frame, and the alternative is
+	# solving the whole tick before knowing how fast it was allowed to move.
+	locomotion.update(posture, physique, params, size_scale)
+	gait.loco = locomotion
 
 	bite_cooldown_remaining = maxf(bite_cooldown_remaining - delta, 0.0)
 	_chew_cooldown = maxf(_chew_cooldown - delta, 0.0)
@@ -929,12 +948,18 @@ func _integrate_motion(delta: float) -> void:
 	if elevation.is_airborne():
 		purchase = clampf(AIR_CONTROL + p.wing_lift * WING_CONTROL, AIR_CONTROL, 1.0)
 
-	# Turn rate falls off with speed so the arc stays wider than the body. At a
-	# standstill the full rate is available, which is what lets the creature
-	# pivot on the spot (together with the swing block below). The stance's own
-	# agility is in here too: a semi-upright animal turns flat and a columnar one
-	# carves — same parameter, different build under it.
-	var turn_rate: float = deg_to_rad(p.turn_speed_deg) * posture.agility \
+	# The rate itself is torque over rotational inertia, worked out in Locomotion
+	# off this animal's weight, its muscle and its own length — so a long heavy
+	# build comes round slowly and a short light one snaps about, and neither of
+	# them needed a per-species number saying so. The stance is in there too: a
+	# semi-upright animal turns flat and a columnar one carves.
+	#
+	# What is left here is what this *tick* does to it. Turn rate falls off with
+	# speed so the arc stays wider than the body; at a standstill the full rate is
+	# available, which is what lets the creature pivot on the spot (together with
+	# the swing block below); and what is left of that is how much of its nervous
+	# system still reaches the legs, and whether they are on anything.
+	var turn_rate: float = locomotion.turn_rate \
 		* (1.0 - p.turn_speed_falloff * speed_norm) * steering * purchase
 	# Steering backwards is compromised by exactly what makes backing up slow:
 	# legs built to push a body forward are pushing it the other way, and they
@@ -989,7 +1014,14 @@ func _integrate_motion(delta: float) -> void:
 	if command.throttle < 0.0:
 		top_speed *= p.reverse_speed_factor
 	var desired_speed: float = command.throttle * top_speed
-	var rate: float = p.acceleration * size_scale * posture.drive * haul * drive * purchase
+	# Force over mass, and it is the physique's force and the physique's mass — so
+	# a heavy animal labours into its speed, a fat one is duller than a lean one of
+	# the same build, and a creature with a leg that has stopped answering pushes
+	# with three. None of that is written anywhere; it is one division. `drive` is
+	# deliberately absent, and only here: `physique.strength` already has it, and
+	# applying it twice would make an injured creature slow to accelerate *and*
+	# slow to accelerate again.
+	var rate: float = locomotion.accel * haul * purchase
 	var reversing: bool = not is_zero_approx(speed) and not is_zero_approx(desired_speed) \
 		and signf(speed) != signf(desired_speed)
 	if reversing:

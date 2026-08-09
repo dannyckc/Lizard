@@ -54,6 +54,9 @@ func _process(_delta: float) -> bool:
 	_check_bones_are_rigid_in_the_world(player)
 	_check_the_body_stands_on_its_feet(player)
 	_check_feet_stay_where_they_are_put(player)
+	_check_every_leg_walks(player)
+	_check_the_body_rides_its_feet(player)
+	_check_anatomy_sets_the_pace(player)
 	_check_upright_walks_underneath_itself(player)
 	_check_a_step_is_a_height(player)
 	_check_the_knee_folds_in_its_own_plane(player)
@@ -154,7 +157,7 @@ func _check_the_body_stands_on_its_feet(player: Creature) -> void:
 ## which is the drag a dead leg is made of and has to stay — so what is measured
 ## here is the foot that is not yet overdue. That one may not move at all.
 func _check_feet_stay_where_they_are_put(player: Creature) -> void:
-	for preset in ["Cat", "Elephant"]:
+	for preset in ["Lizard", "Cat", "Elephant"]:
 		_apply(player, preset)
 		var drive := MovementInput.Command.new()
 		drive.throttle = 1.0
@@ -173,6 +176,147 @@ func _check_feet_stay_where_they_are_put(player: Creature) -> void:
 		player.command = MovementInput.Command.new()
 		_check(slide < 0.1,
 			"a walking %s slid a planted foot %.2f px in one tick" % [preset, slide])
+
+
+# ---------------------------------------------------------------------- gait ----
+
+## All four legs walk, on every posture, and they take turns.
+##
+## The check that was missing, and its absence hid the worst thing the gait ever
+## did. A columnar animal lifts one foot at a time; its two front legs were each
+## spending half their cycle in the air, which is the whole of a single-support
+## gait between the two of them, and the hind pair simply never found a gap. They
+## were not stepping badly — they never stepped at all, for as long as the
+## creature walked, and were towed along the ground behind a body that looked from
+## the front as though it were walking perfectly well.
+##
+## Nothing above would have caught it. The bones stayed rigid, the body stood on
+## its feet, the feet that were down stayed down. So this asks the one question
+## none of them do: did this leg ever pick itself up?
+func _check_every_leg_walks(player: Creature) -> void:
+	var lines: Array[String] = []
+	for preset in ["Lizard", "Cat", "Elephant"]:
+		_apply(player, preset)
+		var drive := MovementInput.Command.new()
+		drive.throttle = 1.0
+		var steps: Dictionary = {}
+		var down: Dictionary = {}
+		var was: Dictionary = {}
+		var ticks: int = 0
+		for limb in player.gait.limbs:
+			steps[limb.key] = 0
+			down[limb.key] = 0
+			was[limb.key] = false
+		for tick in 600:
+			player.command = drive
+			player._physics_process(TICK)
+			if tick < 120:
+				continue
+			ticks += 1
+			for limb in player.gait.limbs:
+				if limb.stepping and not was[limb.key]:
+					steps[limb.key] += 1
+				was[limb.key] = limb.stepping
+				if not limb.stepping:
+					down[limb.key] += 1
+		player.command = MovementInput.Command.new()
+
+		var fewest: int = 1 << 30
+		var most: int = 0
+		var least_contact: float = 1.0
+		for limb in player.gait.limbs:
+			fewest = mini(fewest, steps[limb.key])
+			most = maxi(most, steps[limb.key])
+			least_contact = minf(least_contact,
+				float(down[limb.key]) / maxf(float(ticks), 1.0))
+		_check(fewest > 0,
+			"a walking %s had a leg that never took a single step in eight seconds"
+				% preset)
+		# ...and they share the work. One leg stepping twice as often as another is
+		# a pair being favoured and a pair being dragged, which is the same fault
+		# one stage before it becomes total.
+		_check(most <= fewest * 2,
+			"a %s worked one leg %d times and another %d — the gait is favouring a pair"
+				% [preset, most, fewest])
+		# Ground contact is the duty factor, and the duty factor is the posture:
+		# a build that keeps three feet down has each of them down three quarters
+		# of the time. Quoted a little under, because a limb is allowed its swing.
+		var wanted: float = float(player.posture.feet_down) / 4.0
+		_check(least_contact > wanted - 0.12,
+			"a %s that is supposed to keep %d feet down had one down only %.0f%% of the time"
+				% [preset, player.posture.feet_down, least_contact * 100.0])
+		lines.append("%s %d-%d steps, %.0f%% down" % [preset, fewest, most, least_contact * 100.0])
+	summary += " · " + " · ".join(lines)
+
+
+## The body rides up and down over its own feet, and the heavier it is the more
+## of that shows.
+##
+## A leg is a fixed length with its foot nailed down, so a body passing over it
+## rises as the foot comes underneath and falls as it leaves. That is not an
+## effect laid over a walk — it is the only thing a walk is, seen from the side —
+## so a creature whose back never moves is a creature sliding along on legs that
+## happen to be waving. And how much of it survives into the picture is a
+## question about muscle against weight: a light strong animal folds it away in
+## its own joints and glides, and one carrying twenty times its own muscle's
+## worth cannot, and rolls over each leg in turn.
+func _check_the_body_rides_its_feet(player: Creature) -> void:
+	var bob: Array[float] = []
+	for preset in ["Lizard", "Cat", "Elephant"]:
+		_apply(player, preset)
+		var drive := MovementInput.Command.new()
+		drive.throttle = 1.0
+		var low: float = INF
+		var high: float = -INF
+		for tick in 400:
+			player.command = drive
+			player._physics_process(TICK)
+			if tick < 120:
+				continue
+			low = minf(low, player.gait.shoulder_height)
+			high = maxf(high, player.gait.shoulder_height)
+		player.command = MovementInput.Command.new()
+		bob.append(high - low)
+		_check(high - low > 0.5,
+			"a walking %s carried its shoulders at a dead constant height — it is not standing on its feet, it is gliding"
+				% preset)
+	_check(bob[2] > bob[1],
+		"an Elephant transferred less weight than a Cat (%.1f px against %.1f) — the heavy build should be the one that cannot absorb it"
+			% [bob[2], bob[1]])
+
+
+## Acceleration is force over mass, and both of those are read off the animal.
+##
+## No preset says an Elephant is slow off the mark. It is twenty-three times the
+## Lizard's weight and its muscle grew with the square of what its bulk grew with
+## the cube of, so it has under half the Lizard's push per unit of weight — and
+## that one division is the whole of why it labours into its speed while the Cat
+## is gone. The check is the ordering rather than the numbers, because the
+## numbers are consequences of a silhouette that the tuning panel may restyle at
+## any time.
+func _check_anatomy_sets_the_pace(player: Creature) -> void:
+	var power: Array[float] = []
+	var ramp: Array[float] = []
+	for preset in ["Lizard", "Cat", "Elephant"]:
+		_apply(player, preset)
+		var drive := MovementInput.Command.new()
+		drive.throttle = 1.0
+		var reached: float = -1.0
+		for tick in 600:
+			player.command = drive
+			player._physics_process(TICK)
+			if reached < 0.0 and player.speed_norm > 0.9:
+				reached = float(tick) * TICK
+		player.command = MovementInput.Command.new()
+		power.append(player.locomotion.power)
+		ramp.append(reached)
+		_check(reached > 0.0, "a %s never reached its own top speed" % preset)
+	_check(power[2] < power[0] and power[0] < power[1],
+		"push per unit of weight did not fall with size (%.2f, %.2f, %.2f)"
+			% [power[0], power[1], power[2]])
+	_check(ramp[2] > ramp[0] and ramp[0] > ramp[1],
+		"the heavy build did not take the longest to get going (%.2fs, %.2fs, %.2fs)"
+			% [ramp[0], ramp[1], ramp[2]])
 
 
 # -------------------------------------------------------------------- stance ----
@@ -297,13 +441,16 @@ func _check_the_knee_folds_in_its_own_plane(player: Creature) -> void:
 			continue
 		for limb in player.gait.limbs:
 			lowest = minf(lowest, limb.heights[1] / maxf(limb.socket_height, 1.0))
-			# How far the knee swings out of the socket-to-foot line, sideways.
-			var line: Vector2 = limb.plan[2] - limb.plan[0]
-			if line.length_squared() < 1.0:
-				continue
-			var across: Vector2 = Vector2(-line.y, line.x).normalized()
+			# How far the knee swings out to the *side of the animal*, which is the
+			# claim: a joint folding fore-and-aft cannot buckle into the torso.
+			# Against the body's own lateral axis rather than across the
+			# socket-to-foot line, because that line is exactly what a columnar limb
+			# has none of at mid-swing — its foot passes directly beneath its own
+			# socket — and a perpendicular to a line a few pixels long points
+			# wherever the last of those pixels happened to.
+			var out: Vector2 = player.body.anchors[limb.key].perp
 			worst_bulge = maxf(worst_bulge,
-				absf((limb.plan[1] - limb.plan[0]).dot(across)) / limb.anatomical_length)
+				absf((limb.plan[1] - limb.plan[0]).dot(out)) / limb.anatomical_length)
 	player.command = MovementInput.Command.new()
 	_check(lowest > 0.2,
 		"a columnar knee dropped to %.2f of the shoulder height — it is folding across the floor"
@@ -390,18 +537,30 @@ func _lane(player: Creature, target: Creature, leg: Limb, hold_up: bool = false,
 	var drive := MovementInput.Command.new()
 	drive.throttle = 1.0
 	var clearance: float = player.stature.trunk.y * 2.0
+	# Where the target's feet are standing, captured once. Held there for the whole
+	# walk in *both* runs, because the one thing being compared is the height and
+	# nothing else may differ. A target leant on by a walker takes a step to keep
+	# its balance, and a foot that steps aside is a foot the walker was never asked
+	# to get past — which measures how readily an elephant shifts its weight rather
+	# than whether a raised foot is a doorway.
+	var pinned: Dictionary = {}
+	for limb in target.gait.limbs:
+		pinned[limb.key] = limb.ground
 	var out := {"aside": 0.0, "deepest": 0.0, "met": false}
 	for _tick in 420:
 		target.command = MovementInput.Command.new()
 		target._physics_process(TICK)
-		if hold_up:
+		if leg != null:
 			# Held rather than stepped, because what is being isolated is the
 			# height: the foot stays exactly where it is on the ground and only
 			# leaves it, so nothing else about the walk has changed. Posed through
 			# the ordinary solve, so the leg that reaches down to it is the leg the
 			# game would draw and its bands are the bands the game would test.
 			for limb in target.gait.limbs:
-				limb.foot_height = clearance
+				limb.ground = pinned[limb.key]
+				limb.planted = pinned[limb.key]
+				limb.foot_height = clearance if hold_up else 0.0
+				limb.visual = limb.ground + limb.rise()
 				limb.solve_stance(target.body.anchors[limb.key], limb.ground,
 					target.params.fabrik_iterations)
 		player.command = drive

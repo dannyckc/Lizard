@@ -83,7 +83,7 @@ var elevation: float = 0.0
 ## which is what a body with no gait solved yet has to use.
 func update(posture: Posture, body: BodyShape, p: CreatureParams, scale: float,
 		body_length: float, height: float, gape: float, standing: bool = true,
-		held: float = -1.0) -> void:
+		held: float = -1.0, extension: float = -1.0) -> void:
 	elevation = maxf(height, 0.0)
 	if posture == null or body == null or p == null or body.widths.is_empty():
 		torso = Vector2(elevation, elevation)
@@ -99,8 +99,13 @@ func update(posture: Posture, body: BodyShape, p: CreatureParams, scale: float,
 	# the animal forward rather than lowering the whole of it. Against the reach a
 	# leg actually stands at rather than a locked-out one, for the reason Gait
 	# gives at length: a standing animal's legs are bent.
+	# `extension` is how extended the legs actually stand — the species' own
+	# `stance_reach`, capped at what leaves the limb room to walk. Left out it
+	# falls back to the uncapped trait, which is what a body with no locomotion
+	# solved yet has to use.
+	var reach: float = p.stance_reach if extension < 0.0 else extension
 	clearance = posture.clearance(
-		maxf(p.leg_length, p.arm_length) * scale * p.stance_reach) if standing else 0.0
+		maxf(p.leg_length, p.arm_length) * scale * reach) if standing else 0.0
 	if standing and held >= 0.0:
 		clearance = held
 	# Depth is read off the widest part of the trunk rather than off an average:

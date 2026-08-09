@@ -97,12 +97,16 @@ extends Resource
 
 # ----------------------------------------------------------------- gait ----
 @export_group("Gait")
-## A planted foot stays put until it drifts this far from its ideal position.
-@export_range(4.0, 90.0, 0.5) var stride_distance: float = 26.0
-## Fake vertical lift at the top of the step arc (drawn as a screen offset).
-@export_range(0.0, 40.0, 0.5) var step_height: float = 9.0
-## Step time at a standstill; shortens automatically as speed rises.
-@export_range(0.05, 1.2, 0.01) var step_duration: float = 0.26
+# Three numbers used to live here — how far a foot travels between steps, how
+# long it takes to get there, and how high it comes up — and none of them can be
+# a number. A stride is the travel a limb of that length, at that angle, over a
+# body willing to sink that far actually has; a step time is a pendulum of that
+# length swung by that much muscle; a lift is a share of the animal doing the
+# lifting. All three are worked out in Locomotion now, off the same mass, bones
+# and posture everything else about the creature is read from. What is left in
+# this group is the two that really are species traits, because they are choices
+# about coordination rather than consequences of anatomy: how far ahead of itself
+# an animal places its feet, and how tightly it keeps its diagonals together.
 ## How far ahead of the body feet aim while moving (fraction of stride).
 @export_range(0.0, 1.5, 0.01) var foot_lead: float = 0.45
 ## How eagerly the diagonal partner joins the same beat. 0 = independent legs.
@@ -260,9 +264,6 @@ const SCHEMA: Array = [
 	{"prop": "fabrik_iterations", "label": "FABRIK iters", "min": 1.0, "max": 12.0, "step": 1.0},
 
 	{"group": "Gait"},
-	{"prop": "stride_distance", "label": "Stride distance", "min": 4.0, "max": 90.0, "step": 0.5},
-	{"prop": "step_height", "label": "Step height", "min": 0.0, "max": 40.0, "step": 0.5},
-	{"prop": "step_duration", "label": "Step duration", "min": 0.05, "max": 1.2, "step": 0.01},
 	{"prop": "foot_lead", "label": "Foot lead", "min": 0.0, "max": 1.5, "step": 0.01},
 	{"prop": "diagonal_coupling", "label": "Diagonal coupling", "min": 0.0, "max": 1.0, "step": 0.01},
 	{"prop": "front_foot_bias", "label": "Front foot bias", "min": -1.0, "max": 1.0, "step": 0.01},
@@ -338,9 +339,12 @@ const PRESETS: Dictionary = {
 		"hip_width": 14.0, "tail_tip_width": 1.2,
 		"front_limb_t": 0.17, "rear_limb_t": 0.50,
 		"arm_length": 40.0, "leg_length": 46.0, "stance_width": 0.85, "stance_reach": 0.80,
-		"stride_distance": 30.0, "step_duration": 0.20, "step_height": 10.0,
-		"move_speed": 260.0, "acceleration": 1300.0,
-		"turn_speed_deg": 250.0, "turn_responsiveness": 14.0, "turn_pivot": 40.0,
+		# No acceleration or turn rate of its own: this animal is light and it is
+		# strong for its size, and those two facts are already written below as
+		# `density` and `muscle_power`. Quoting a number here as well would be
+		# saying the same thing twice and then arguing with itself.
+		"move_speed": 260.0,
+		"turn_responsiveness": 14.0, "turn_pivot": 40.0,
 		"sprint_multiplier": 1.80,
 		"density": 1.0, "muscle_power": 1.6, "jaw_power": 1.1, "fat_reserve": 0.8,
 		"bite_damage": 2.4, "bite_reach": 30.0, "bite_radius": 14.0,
@@ -377,9 +381,13 @@ const PRESETS: Dictionary = {
 		# it, which is what makes the feet land close underneath the body.
 		"arm_length": 126.0, "leg_length": 132.0,
 		"stance_width": 0.75, "stance_reach": 0.95,
-		"stride_distance": 52.0, "step_duration": 0.55, "step_height": 10.0,
-		"move_speed": 135.0, "acceleration": 300.0,
-		"turn_speed_deg": 70.0, "turn_speed_falloff": 0.70,
+		# ...and no acceleration or turn rate here either, for the opposite reason:
+		# nothing needed to say this animal is slow off the mark. It is twenty-three
+		# times the Lizard's weight and its muscle only grew with the square of
+		# what its bulk grew with the cube of, so it accelerates at under half the
+		# Lizard's rate and comes round slower still on a body half as long again.
+		"move_speed": 135.0,
+		"turn_speed_falloff": 0.70,
 		"turn_responsiveness": 5.0, "turn_pivot": 110.0,
 		"sprint_multiplier": 1.30, "reverse_speed_factor": 0.40,
 		"density": 1.9, "muscle_power": 1.3, "jaw_power": 5.0, "fat_reserve": 1.6,

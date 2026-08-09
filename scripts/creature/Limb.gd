@@ -47,6 +47,12 @@ const ENVELOPE_SLOP: float = 0.05
 ## Below this the limb's own plane is degenerate and the fold direction has to be
 ## picked some other way — see solve_stance.
 const PLANE_EPSILON: float = 0.0001
+## How finely the fold circle is walked when the joint's preferred plane puts it
+## somewhere a joint cannot be — see _steer_fold. Only ever run on a limb that has
+## failed one of the two limits, which is rare, so this is coarse enough to be
+## free and fine enough that the joint lands within a few degrees of its
+## preference.
+const FOLD_STEPS: int = 48
 
 var key: String = "FL"
 var pair: int = FRONT
@@ -101,10 +107,17 @@ var reference: float = 0.0
 ## Resting offset of the foot from the socket: outward, and fore/aft.
 var rest_lat: float = 0.0
 var rest_fore: float = 0.0
-## Radius of the disc on the ground the foot may be set down inside.
+## Radius of the disc on the ground the foot may be set down inside, measured
+## from directly beneath the socket. Already the leg's own reach seen through the
+## height it is holding the body at — see Locomotion.plan_reach — so nothing may
+## scale it by the reach a second time.
 var plan_limit: float = 1.0
 ## Half the fore-and-aft excursion available to it, measured from `rest_fore`.
 var sweep_limit: float = 1.0
+## How long this limb takes to swing through at a standstill — its own pendulum
+## period, read off its length and the animal's power. Cached per tick so the
+## gait, the debug view and the step it starts cannot disagree about it.
+var swing_base: float = 0.25
 ## How far inboard of its own socket the foot may come. Zero on a sprawled limb,
 ## whose foot belongs outside the shoulder; most of the way to the spine on a
 ## columnar one, which stands underneath itself.
@@ -142,6 +155,33 @@ var pace: float = 0.0
 var stride: float = 1.0
 var prev_anchor: Vector2 = Vector2.ZERO
 var socket_tracked: bool = false
+## How far this socket is carried to either side of the line the animal is
+## walking along, by the body's own undulation.
+##
+## Measured rather than derived, and it has to be. The amplitude depends on where
+## along the back this socket sits, on the shape of the travelling wave, and — by
+## much the largest term — on the socket being held out on the flank of a body
+## that is *rotating* underneath it, so a hip swings twice as far as the spine
+## point it hangs off. Predicting all three from parameters was three
+## approximations that disagreed with the body; reading it off the socket is one
+## line that cannot.
+##
+## Zero on anything that keeps its back still, and zero on anything standing
+## still, because the wave is scaled by speed and there is then nothing to
+## measure. Which is right: an animal that is not walking has no reason to stand
+## narrow.
+var sway: float = 0.0
+## Slow mean of that offset — everything about where this socket sits that is not
+## the wave: the body's own curve, and how it changes as the animal turns. The
+## difference between the two is the wave, and subtracting it is what stops a long
+## turn reading as an enormous permanent undulation.
+var _sway_mean: float = 0.0
+var _sway_tracked: bool = false
+## How fast the mean follows, and how fast the peak fades. Both in reciprocal
+## seconds. The first is far below any real undulation, so the wave passes into
+## the difference untouched while a turn does not.
+const SWAY_LEAK: float = 5.0
+const SWAY_FADE: float = 0.6
 
 var stepping: bool = false
 var step_t: float = 0.0
@@ -255,6 +295,23 @@ func support_height(reach_share: float) -> float:
 	return sqrt(maxf(span * span - out * out, 0.0))
 
 
+## Highest this limb could hold its socket with its foot exactly where it is right
+## now — planted, or part way through a step — extended to `reach_share`.
+##
+## The companion to `support_height`, and the difference between them is the
+## difference between carrying and reaching. A limb in the air is holding nothing
+## up and has no say in how high the body rides; it is still *attached*, and the
+## body may not ride higher than the leg can reach down to wherever its foot
+## currently is. That matters for exactly one instant and it is a visible one: on
+## the tick a foot lifts it has not gone anywhere yet, so a body that stopped
+## counting it there rises onto the other three and stretches the leg it has just
+## picked up.
+func carry_ceiling(reach_share: float) -> float:
+	var span: float = (lengths[0] + lengths[1]) * reach_share
+	var out: float = ground.distance_to(plan[0])
+	return foot_height + sqrt(maxf(span * span - out * out, 0.0))
+
+
 ## The heights one drawn part of this limb occupies: 0 and 1 are the two bones,
 ## 2 is the foot. Inflated by how thick that part is, because a bone is a capsule
 ## rather than a line and something has to pass under the whole of it.
@@ -349,11 +406,10 @@ func local(a: Spine.Frame, v: Vector2) -> Vector2:
 ## Verlet spine never settles to perfect stillness, so a planted foot left
 ## exactly on the boundary by its last skid would otherwise follow every micron
 ## of that jitter forever instead of staying nailed to the world.
-func clamp_to_envelope(a: Spine.Frame, target: Vector2, max_reach: float,
-		swing: float = -1.0) -> Vector2:
+func clamp_to_envelope(a: Spine.Frame, target: Vector2, swing: float = -1.0) -> Vector2:
 	var v: Vector2 = target - a.pos
 	var here: Vector2 = local(a, v)
-	var hi: float = maxf(plan_limit * max_reach, 0.001)
+	var hi: float = maxf(plan_limit, 0.001)
 	var fore_limit: float = sweep_limit if swing < 0.0 else maxf(hi * sin(minf(swing, PI * 0.5)), 0.001)
 
 	var lat: float = maxf(here.x, -inboard_limit)
@@ -364,14 +420,21 @@ func clamp_to_envelope(a: Spine.Frame, target: Vector2, max_reach: float,
 	# A foot directly beneath a high shoulder has no plan-view offset at all and is
 	# still most of a leg away from it, which is precisely the case a flat test
 	# would call folded up and then drag inside-out to "fix".
+	#
+	# `plan_limit` is that triangle, already solved by whoever owns this limb — and
+	# it is the only place it may be solved. Recomputing it here off *this tick's*
+	# socket height was a second opinion that disagreed with the first: the gait
+	# sizes a stride against the reach the leg has at the bottom of the animal's
+	# own bob, and a clamp quoting the reach it has at the top cuts every foot
+	# short of the stride it was given and skids it back along the boundary while
+	# the body catches up.
 	var drop: float = socket_height - foot_height
 	var span: float = lengths[0] + lengths[1]
-	var far: float = _flat_span(span * max_reach, drop)
 	var near: float = _flat_span(span * REACH_MIN, drop)
 	var out: Vector2 = Vector2(lat, fore)
 	var r: float = out.length()
-	if r > minf(far, hi):
-		out *= minf(far, hi) / r
+	if r > hi:
+		out *= hi / r
 	elif r < near:
 		out = (Vector2(rest_lat, rest_fore).normalized() if r < 0.000001 else out / r) * near
 
@@ -455,6 +518,7 @@ func solve_stance(a: Spine.Frame, foot_plan: Vector2, iterations: int) -> void:
 	_plane[0] = Vector2.ZERO
 	_plane[1] = _fold_seed(span)
 	_plane[2] = reach
+	fold = _steer_fold(fold, along, _plane[1], a.perp * side)
 	_plane = Fabrik.solve(_plane, lengths, Vector2.ZERO, reach, iterations, 0.05)
 
 	var socket := Vector3(a.pos.x, a.pos.y, socket_height)
@@ -463,6 +527,62 @@ func solve_stance(a: Spine.Frame, foot_plan: Vector2, iterations: int) -> void:
 		plan[i] = Vector2(point.x, point.y)
 		heights[i] = point.z
 		joints[i] = plan[i] + Posture.drop(point.z, reference)
+
+
+## Turns the fold direction just far enough to keep the joint somewhere a joint
+## can be: out of the floor, and out of the animal.
+##
+## A knee folds the way that knee folds, and the direction is right — but on a
+## deeply flexed limb it can be right about the direction and wrong about the
+## world. A hind leg raked back with its foot behind the hip folds *forward*, and
+## forward on a leg pointing backward-and-down is forward-and-down: through the
+## ground. A limb pointing very nearly fore-and-aft has almost no fore-and-aft
+## left to fold into, so what is left of the preference is a sideways lean, and
+## the side it happens to land on may be inward: through the torso.
+##
+## Neither is a special case and neither is a new rule. Every unit vector
+## perpendicular to the limb is a legal fold plane; the one the caller picked is
+## merely the one the joint *prefers*, and both of these are the smallest turn
+## around that circle which puts the joint back somewhere it could be. The floor
+## is applied last because a knee underground is the worse of the two, and because
+## the animal has ground under it wherever it stands while the midline moves.
+func _steer_fold(fold: Vector3, along: Vector3, knee: Vector2, out: Vector2) -> Vector3:
+	if knee.y <= PLANE_EPSILON:
+		return fold
+	var side_axis := Vector3(out.x, out.y, 0.0)
+	var up := Vector3(0.0, 0.0, 1.0)
+	# How much of each axis the fold has to carry for the joint to clear that
+	# limit, given how far out of the limb the joint sits.
+	var clear_side: float = (-inboard_limit - along.dot(side_axis) * knee.x) / knee.y
+	var clear_up: float = (-socket_height - along.z * knee.x) / knee.y
+	if fold.dot(side_axis) >= clear_side and fold.dot(up) >= clear_up:
+		return fold
+
+	# The two have to be answered together. Turning for one alone sweeps the fold
+	# around the limb and can carry it straight through the other — which is what a
+	# knee lifted out of the floor did to a leg pointing fore-and-aft: it came up,
+	# and it came up *inboard*, through the animal. So the circle is walked and the
+	# nearest angle that satisfies both wins, with the floor breaking ties when
+	# neither can be had: a joint slightly inside the flank is a drawing problem
+	# and a joint under the floor is not a joint.
+	var across: Vector3 = along.cross(fold)
+	var best: Vector3 = fold
+	var best_turn: float = INF
+	var least: Vector3 = fold
+	var least_dip: float = INF
+	for i in FOLD_STEPS:
+		var turn: float = TAU * (float(i) / float(FOLD_STEPS)) - PI
+		var candidate: Vector3 = fold * cos(turn) + across * sin(turn)
+		var dip: float = clear_up - candidate.dot(up)
+		if dip < least_dip:
+			least_dip = dip
+			least = candidate
+		if dip > 0.0 or candidate.dot(side_axis) < clear_side:
+			continue
+		if absf(turn) < best_turn:
+			best_turn = absf(turn)
+			best = candidate
+	return (best if is_finite(best_turn) else least).normalized()
 
 
 ## Where the joint sits for a chain of this span, in the plane it folds in: along
@@ -475,24 +595,45 @@ func _fold_seed(span: float) -> Vector2:
 	return Vector2(along, sqrt(maxf(l0 * l0 - along * along, 0.0)))
 
 
-## Measures how fast this socket is moving through the world, for the gait to
-## size its stride and step timing from. `fallback` is used as the travel
-## direction while the socket is essentially stationary.
+## Measures how fast this socket is moving through the world, and how much of
+## that is the body waving underneath it. `fallback` is used as the travel
+## direction while the socket is essentially stationary, and `origin` is a point
+## carried by the body that does not itself undulate — the head — against which
+## the wave can be told apart from the animal simply going somewhere.
 ##
 ## Smoothed, because one tick of constraint correction is body jitter, not a
 ## gait signal, and an unsmoothed reading would make stride length flicker.
-func track_socket(pos: Vector2, delta: float, fallback: Vector2) -> void:
+func track_socket(pos: Vector2, delta: float, fallback: Vector2, origin: Vector2) -> void:
 	if delta <= 0.0 or not socket_tracked:
 		prev_anchor = pos
 		socket_tracked = true
 		socket_vel = Vector2.ZERO
 		socket_speed = 0.0
 		travel = fallback
+		_sway_mean = (pos - origin).dot(Vector2(-fallback.y, fallback.x))
+		_sway_tracked = true
 		return
 	var instant: Vector2 = (pos - prev_anchor) / delta
 	prev_anchor = pos
 	socket_vel = socket_vel.lerp(instant, 1.0 - exp(-9.0 * delta))
 	socket_speed = socket_vel.length()
+	# ...and how much of that is the body waving rather than the animal going
+	# anywhere — see `sway`. Measured as this socket's offset from the head, across
+	# the line of travel: a body translating and turning as one piece holds that
+	# offset exactly, whatever it is doing, so what is left once the slow mean is
+	# taken out is the wave and nothing else.
+	#
+	# The peak only fades while the animal is moving. A creature that has stopped
+	# keeps the stance its walking left it in, because the alternative is a stance
+	# that widens back out under a body standing still — and a foot that is moved
+	# while nothing is happening is a foot that crept.
+	var lateral: float = (pos - origin).dot(Vector2(-fallback.y, fallback.x))
+	if not _sway_tracked:
+		_sway_mean = lateral
+		_sway_tracked = true
+	_sway_mean = lerpf(_sway_mean, lateral, 1.0 - exp(-SWAY_LEAK * delta))
+	var fade: float = SWAY_FADE if socket_speed > 1.0 else 0.0
+	sway = maxf(absf(lateral - _sway_mean), sway * exp(-fade * delta))
 	# Below a pixel a second the direction is numerical noise, so hold the body's
 	# heading instead of letting the foot aim at a random bearing.
 	travel = socket_vel / socket_speed if socket_speed > 1.0 else fallback

@@ -167,8 +167,17 @@ func _run_case(preset_name: String) -> void:
 			for j2 in [1, 2]:
 				worst_inboard = minf(worst_inboard,
 					(limb.plan[j2] - spine.points[station]).dot(outward) / limb.plan_limit)
+			# How extended the leg actually is: the gap it spans through the air,
+			# against the two bones that have to span it. Not the plan distance over
+			# `plan_limit` — that ratio is one by construction now, because
+			# `plan_limit` *is* the envelope the foot is projected into rather than
+			# the flat length of the leg, so a foot sitting legally on its own
+			# boundary read as a limb stretched to a hundred percent of itself.
+			var lift: float = limb.socket_height - limb.foot_height
+			var span: float = sqrt(
+				anchor.pos.distance_squared_to(limb.plan[2]) + lift * lift)
 			max_limb_reach = maxf(max_limb_reach,
-				anchor.pos.distance_to(limb.plan[2]) / limb.plan_limit)
+				span / maxf(limb.lengths[0] + limb.lengths[1], 0.001))
 			max_foot_drift = maxf(max_foot_drift, limb.error / maxf(limb.stride, 0.001))
 		max_airborne = maxi(max_airborne, airborne)
 		if groups_up[0] and groups_up[1]:

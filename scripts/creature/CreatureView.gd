@@ -610,7 +610,7 @@ func _draw_debug() -> void:
 		# the overlay can never disagree with the solver about where a foot may go.
 		var a2: Spine.Frame = creature.body.anchors[limb.key]
 		var out: Vector2 = a2.perp * limb.side
-		var far: float = limb.plan_limit * p.limb_max_reach
+		var far: float = limb.plan_limit
 		var rest: float = (out * limb.rest_lat + a2.fwd * limb.rest_fore).angle()
 		draw_arc(a2.pos, far, rest - PI * 0.5, rest + PI * 0.5, 24, COL_DBG_RANGE, 1.0, true)
 		for end in [limb.sweep_limit, -limb.sweep_limit]:

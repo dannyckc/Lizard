@@ -75,7 +75,7 @@ func settle(body: BodyShape, limbs: Array[Limb], p: CreatureParams, scale: float
 		var out: Vector2 = a.perp * limb.side
 		limb.joints[0] = a.pos
 		limb.joints[2] = limb.clamp_to_envelope(
-			a, a.pos + (out * cos(phi) + a.fwd * sin(phi)) * reach, p.limb_max_reach, sprawl)
+			a, a.pos + (out * cos(phi) + a.fwd * sin(phi)) * reach, sprawl)
 		limb.seed_joint(a, limb.joints[2])
 		limb.joints = Fabrik.solve(
 			limb.joints, limb.lengths, a.pos, limb.joints[2], p.fabrik_iterations, 0.05)
@@ -99,7 +99,10 @@ func _lay_flat(limb: Limb, a: Spine.Frame, p: CreatureParams, scale: float) -> v
 	limb.socket_height = 0.0
 	limb.foot_height = 0.0
 	limb.reference = 0.0
-	limb.plan_limit = limb.total_length
+	# The whole of the bone, less whatever the envelope holds back from a
+	# locked-out chain — a limb lying flat has no height to spend, so its plan
+	# reach is simply its reach.
+	limb.plan_limit = limb.total_length * p.limb_max_reach
 	limb.inboard_limit = 0.0
 	# Straight out to the side: a limp limb has no swing plane to have rotated,
 	# so the whole of its rest radius is lateral.
@@ -150,7 +153,7 @@ func step(delta: float, body: BodyShape, limbs: Array[Limb], p: CreatureParams,
 			continue
 		var a: Spine.Frame = body.anchors[limb.key]
 		_lay_flat(limb, a, p, scale)
-		limb.track_socket(a.pos, delta, a.fwd)
+		limb.track_socket(a.pos, delta, a.fwd, body.head.pos)
 		if not _prev.has(limb.key):
 			_prev[limb.key] = PackedVector2Array([limb.joints[1], limb.joints[2]])
 
@@ -181,7 +184,7 @@ func step(delta: float, body: BodyShape, limbs: Array[Limb], p: CreatureParams,
 			limb.joints[2] = Constraints.solve_angle(
 				limb.joints[0], limb.joints[1], limb.joints[2], fold)
 			limb.joints[2] = limb.clamp_to_envelope(
-				a, limb.joints[2], p.limb_max_reach, sprawl)
+				a, limb.joints[2], sprawl)
 			_hold_bones(limb)
 
 		if collision_query.is_valid():
