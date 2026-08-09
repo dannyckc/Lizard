@@ -30,6 +30,7 @@ script = ExtResource("15_terrain")
 
 [node name="FoodField" type="Node2D" parent="."]
 script = ExtResource("2_food")
+target_count = 0
 
 [node name="ScrapField" type="Node2D" parent="."]
 script = ExtResource("6_scrap")

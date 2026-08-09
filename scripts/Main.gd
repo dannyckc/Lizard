@@ -16,6 +16,10 @@ const PAPER := Color("f3f1ec")
 const INK := Color("14140f")
 const COL_GRID := Color(INK, 0.13)
 
+## The habitat starts bare: one animal, one carcass, and an empty floor to read
+## them against. Both fields below are still live and still answer every query —
+## anything handed to `terrain.add` or dropped into `food_field.pellets` behaves
+## exactly as it always did, which is how the tests populate them.
 @onready var terrain: Terrain = $Terrain
 @onready var food_field: FoodField = $FoodField
 @onready var scrap_field: ScrapField = $ScrapField
@@ -59,7 +63,6 @@ func _ready() -> void:
 		each.swallowed.connect(_on_swallowed.bind(each))
 		each.foot_landed.connect(_on_foot_landed.bind(each))
 	food_field.refresh(creature.head_pos)
-	_build_terrain()
 	_build_ui()
 
 
@@ -92,35 +95,6 @@ func _build_ui() -> void:
 		{"name": "Self", "creature": creature},
 		{"name": "Target", "creature": target_creature},
 	])
-
-
-## Scatters the habitat with things that are not animals.
-##
-## Every object is three numbers — where, how wide, how tall — and none of them
-## is labelled with what it is for. What they are for falls out of the bodies
-## walking among them, which is the whole point of putting them here: the same
-## five objects are a kerb, a step, a wall and a doorway to three different
-## creatures, and nothing had to be authored twice. The heights are chosen
-## against the presets only so that the spread is visible from the first frame —
-## swap the animal and the same rocks answer differently.
-func _build_terrain() -> void:
-	# Low enough that a sprawled animal's ordinary step already clears it. Nothing
-	# about walking over this changes: the foot was coming up that high anyway.
-	terrain.add(Vector2(-240.0, 120.0), 70.0, 4.0, 0.0, "slab")
-	# A kerb: over a lizard's shoulder but well under a cat's, so one climbs it
-	# and the other steps up without breaking stride.
-	terrain.add(Vector2(180.0, -230.0), 55.0, 11.0, 0.0, "kerb")
-	# A ledge broad enough to stand on and low enough for a columnar animal to
-	# walk straight over — and a genuine climb for anything smaller.
-	terrain.add(Vector2(-150.0, -320.0), 90.0, 26.0, 0.0, "ledge")
-	# A boulder. Nothing here can get a foot above it and nothing can spare the
-	# leg to straddle it, so all three walk around — which is not a rule about
-	# boulders, it is this one being taller than any of their shoulders.
-	terrain.add(Vector2(430.0, 260.0), 60.0, 95.0, 0.0, "boulder")
-	# And a branch, which is the same object with its band lifted off the floor.
-	# Two animals walk under it and the third does not fit, and no doorway was
-	# written anywhere.
-	terrain.add(Vector2(-520.0, 300.0), 110.0, 34.0, 72.0, "branch")
 
 
 func _build_backdrop() -> void:

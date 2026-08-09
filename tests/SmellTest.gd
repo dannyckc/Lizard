@@ -237,6 +237,10 @@ func _perception_not_emission(smell: SmellSense, field: ScentField) -> void:
 ## Environmental objects are unchanged by having a smell.
 func _world_untouched(field: ScentField) -> void:
 	field.clear()
+	# The habitat is bare now, so the forage this reads has to be put there. What
+	# is under test is that gathering leaves it alone, and a field with nothing in
+	# it would pass that vacuously.
+	main.food_field.pellets.append(main.creature.head_pos + Vector2(140.0, 0.0))
 	var pellets_before: int = main.food_field.pellets.size()
 	var scraps_before: int = main.scrap_field.scraps.size()
 	var integrity_before: float = main.target_creature.anatomy.tissue.integrity()

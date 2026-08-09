@@ -1296,17 +1296,32 @@ func _push_out_of_creature(other: Creature) -> Vector2:
 
 	var deepest: float = 0.0
 	var out: Vector2 = Vector2.ZERO
+	# The widest either interval can be before anything narrows it, so a pair can
+	# be dismissed on its geometry alone — see the skip in the inner loop.
+	var self_reach: PackedFloat32Array = _interval_reach(body, self_last)
+	var other_reach: PackedFloat32Array = _interval_reach(other.body, other_last)
+	var other_points: PackedVector2Array = other.spine.points
+	var other_widths: PackedFloat32Array = other.body.widths
 	for i in range(self_last):
 		var a0: Vector2 = head_pos if i == 0 else spine.points[i]
 		var a1: Vector2 = spine.points[i + 1]
 		for j in range(other_last):
-			var b0: Vector2 = other.spine.points[j]
-			var b1: Vector2 = other.spine.points[j + 1]
+			var b0: Vector2 = other_points[j]
+			var b1: Vector2 = other_points[j + 1]
 			var uv: Vector2 = _closest_segment_parameters(a0, a1, b0, b1)
 			var axis_a: Vector2 = a0.lerp(a1, uv.x)
 			var axis_b: Vector2 = b0.lerp(b1, uv.y)
 			var delta: Vector2 = axis_a - axis_b
 			var distance: float = delta.length()
+			# The most this pair could possibly be overlapping by, if both pieces of
+			# trunk turned out to be at the same height and completely intact. When
+			# even that is not deeper than the deepest contact already found, nothing
+			# below can change the answer — so the four lattice queries that would
+			# have narrowed it are never asked. Most of the pairs on two bodies the
+			# length of these are metres apart, and every one of them was costing two
+			# solidity lookups and two band lookups to establish it.
+			if self_reach[i] + other_reach[j] - distance <= deepest:
+				continue
 			var normal: Vector2 = delta / distance if distance > CONTACT_EPSILON \
 				else _coincident_contact_normal(other, a0, a1, b0, b1)
 
@@ -1329,7 +1344,7 @@ func _push_out_of_creature(other: Creature) -> Vector2:
 				continue
 			var self_radius: float = lerpf(body.widths[i], body.widths[i + 1], uv.x) * self_solid
 			var other_radius: float = lerpf(
-				other.body.widths[j], other.body.widths[j + 1], uv.y) * other_solid
+				other_widths[j], other_widths[j + 1], uv.y) * other_solid
 			var overlap: float = self_radius + other_radius - distance
 			if overlap <= deepest:
 				continue
@@ -1337,6 +1352,22 @@ func _push_out_of_creature(other: Creature) -> Vector2:
 			out = normal * overlap
 			_contact_spine_t = (float(i) + uv.x) / float(maxi(spine.size() - 1, 1))
 	return out
+
+
+## The furthest each interval of a trunk can possibly reach from its own axis:
+## the wider of the two widths bracketing it.
+##
+## An upper bound and only ever used as one. Every contact radius taken along an
+## interval is a blend of the same two widths, narrowed by however much tissue is
+## missing there, and neither the blend nor the narrowing can come out above the
+## larger of the pair — so a pair of intervals further apart than the sum of their
+## reaches cannot be touching, whatever the lattice would have said about them.
+static func _interval_reach(shape: BodyShape, last: int) -> PackedFloat32Array:
+	var reach: PackedFloat32Array = PackedFloat32Array()
+	reach.resize(last)
+	for i in range(last):
+		reach[i] = maxf(shape.widths[i], shape.widths[i + 1])
+	return reach
 
 
 ## Deepest penetration of this creature's trunk into any of `other`'s legs, as
@@ -1543,13 +1574,37 @@ func _push_out_of_terrain() -> Vector2:
 	var field: Terrain = terrain()
 	if field == null or spine == null or body == null:
 		return Vector2.ZERO
-	var here: float = ground_height()
-	var dimensions: Traversal.Body = Traversal.of(self)
 	var last: int = mini(body.last_index, spine.size() - 1)
 	var deepest: Vector2 = Vector2.ZERO
+	# The whole trunk as one circle, which is all it takes to say "nowhere near
+	# it" — the same broad phase, off the same two numbers, that the
+	# creature-to-creature pass below runs before it walks anybody's spine. It is
+	# the difference between asking about the rock the animal is standing against
+	# and asking about all of them in the habitat: without it a boulder on the far
+	# side of the map costs a full walk of the trunk, interval by interval, tissue
+	# query by tissue query, every tick, forever.
+	#
+	# Deliberately generous, because a bound that rejects something it should have
+	# kept is a body walking through a rock. Every point tested below lies on the
+	# spine polyline, which is inside the bounds; every radius tested is at most
+	# the widest the body gets; and the nose has already integrated this tick
+	# while the bounds are still from the last solved pose, so its own sweep goes
+	# on as well. Nothing that could touch can be outside that.
+	var bound: float = bounds_radius + _widest_trunk(last) \
+		+ head_pos.distance_to(spine.points[0])
+	# Measured on the first obstacle that survives the broad phase and not before.
+	# In a habitat whose rocks are all somewhere else — which is most ticks of most
+	# walks — the body is never measured at all.
+	var dimensions: Traversal.Body = null
+	var here: float = 0.0
 	for obstacle in field.obstacles:
 		if obstacle.gone():
 			continue
+		if bounds_center.distance_to(obstacle.at) > bound + obstacle.girth():
+			continue
+		if dimensions == null:
+			dimensions = Traversal.of(self)
+			here = ground_height()
 		if Traversal.passable(Traversal.assess(dimensions, obstacle.base(),
 				obstacle.top(), obstacle.girth(), here)):
 			continue
@@ -1565,6 +1620,16 @@ func _push_out_of_terrain() -> Vector2:
 			if push.length_squared() > deepest.length_squared():
 				deepest = push
 	return deepest
+
+
+## The widest the trunk gets, which is the most any one interval's contact radius
+## can be: that radius is the mean of two widths, narrowed by tissue that is
+## missing, and neither operation can exceed the larger of the pair.
+func _widest_trunk(last: int) -> float:
+	var widest: float = 0.0
+	for i in range(last + 1):
+		widest = maxf(widest, body.widths[i])
+	return widest
 
 
 ## Translates the pose as one piece and cancels the same shift out of the gait's
@@ -1727,13 +1792,29 @@ func _limb_contact_push(limb_key: String, limb_segment: int,
 	# be put on top of or swung over, and a router that pushed the bone off it
 	# would be undoing the placement as fast as the gait made it — the leg would
 	# stand beside every ledge it was trying to climb.
+	#
+	# Distance first, and it is not a micro-optimisation. This is the innermost
+	# loop in the whole solve — three bones, six contact iterations, four legs,
+	# every creature, every tick — so anything asked here that is not about the
+	# one obstacle this bone might actually be touching is asked some hundreds of
+	# times a frame for nothing. The gate and the verdict both need the whole body
+	# measured; the broad phase needs one distance, and it rejects every rock in
+	# the habitat but the one the leg is standing beside. Which is why the body is
+	# measured inside the loop rather than above it: a leg nowhere near anything
+	# never measures at all.
 	var field: Terrain = terrain()
 	if field != null:
-		var here: float = ground_height()
-		var dimensions: Traversal.Body = Traversal.of(self)
+		var dimensions: Traversal.Body = null
+		var here: float = 0.0
 		for obstacle in field.obstacles:
-			if obstacle.gone() or Traversal.passable(Traversal.assess(dimensions,
-					obstacle.base(), obstacle.top(), obstacle.girth(), here)):
+			if obstacle.gone() \
+					or midpoint.distance_to(obstacle.at) > capsule_bound + obstacle.girth():
+				continue
+			if dimensions == null:
+				dimensions = Traversal.of(self)
+				here = ground_height()
+			if Traversal.passable(Traversal.assess(dimensions, obstacle.base(),
+					obstacle.top(), obstacle.girth(), here)):
 				continue
 			var wall: Vector2 = obstacle.push_capsule(a, b, collision_radius, band)
 			if wall.length_squared() > deepest.length_squared():
@@ -1799,6 +1880,7 @@ func push_capsule_out_of_body(a: Vector2, b: Vector2, radius: float,
 	var last: int = mini(body.last_index, spine.size() - 1)
 	var deepest: float = 0.0
 	var out: Vector2 = Vector2.ZERO
+	var reach: PackedFloat32Array = _interval_reach(body, last)
 	for i in range(last):
 		var body_a: Vector2 = spine.points[i]
 		var body_b: Vector2 = spine.points[i + 1]
@@ -1807,6 +1889,11 @@ func push_capsule_out_of_body(a: Vector2, b: Vector2, radius: float,
 		var body_axis: Vector2 = body_a.lerp(body_b, uv.y)
 		var delta: Vector2 = limb_axis - body_axis
 		var distance: float = delta.length()
+		# As in the trunk-to-trunk pass: the deepest this interval could be, with
+		# the flesh entirely intact and both bands ignored. Anything that cannot
+		# beat the contact already in hand is not worth two lattice queries.
+		if radius + reach[i] - distance <= deepest:
+			continue
 		var normal: Vector2
 		if distance > CONTACT_EPSILON:
 			normal = delta / distance
