@@ -34,6 +34,17 @@
 ##     is the one that was missing, and its absence is what let a columnar
 ##     animal's front legs use the whole of a single-support gait between them
 ##     and leave the hind pair dragging.
+##   * **A body cannot outrun its own legs.** The three above already say how far
+##     a foot reaches and how long it takes to come through, and between them
+##     that is a speed: stride over cycle, and no faster. It was never asked.
+##     `move_speed` was handed straight to the body, the gait divided it by the
+##     stride to get a cadence, and whatever came out was what the legs did —
+##     eleven steps a second on a cat, twelve on a cheetah, with each swing
+##     clipped to a floor of forty-five milliseconds to fit. That is the whole of
+##     why the creatures read as sliding: the feet were not carrying the animal,
+##     they were being flicked through a blur underneath it to keep up. See
+##     `leg_speed`, which is now a ceiling on the body rather than a consequence
+##     of it.
 ##
 ## Refreshed once per tick from the previous tick's physique, ahead of everything
 ## that reads it. That one-tick lag is deliberate and harmless: mass and muscle
@@ -104,8 +115,31 @@ const SLOT_MARGIN: float = 0.85
 ## arbitrary constant in a made-up gravity can honestly be pinned to.
 const SWING_PERIOD: float = 1.6
 ## Fastest any limb may be flicked through a step, whatever the arithmetic asks
-## for. A floor on the swing, not a target.
+## for. A backstop rather than a working floor: what actually holds a swing open
+## is `hurried_swing`, which is the limb's own pendulum with as much taken off it
+## as muscle can take. This is only here so a degenerate body — a limb of no
+## length, a cycle of no duration — cannot ask for a step of zero seconds.
 const SWING_FLOOR: float = 0.045
+## How much of a limb's free swing muscle may take off it when the animal is
+## going flat out.
+##
+## A leg is thrown as well as dropped, so a running animal does bring its limbs
+## through quicker than they would fall — but not by an unbounded amount, and
+## this is the bound. Around three fifths, and that figure is a measurement
+## rather than a taste: a cat's foreleg makes a free swing of about a quarter of
+## a second and its swing phase at a flat gallop is a tenth, so a limb going as
+## hard as it can goes at something near two and a half times the rate it would
+## fall at. Past that the limb is being driven harder than the same muscle is
+## driving the body along, and an animal whose legs outpace its own travel is one
+## flailing on the spot.
+##
+## It used to live inline in `Gait._step_duration` as the target, with the duty
+## factor free to cut below it and a flat forty-five millisecond floor under
+## that. So it bounded nothing: a cat at full tilt got a forty-five millisecond
+## swing out of a two hundred and twenty-seven millisecond leg. Here it is a
+## floor as well as a target, and `leg_speed` is what makes the two agree —
+## rather than the body going as fast as it likes and the legs blurring to suit.
+const SWING_HURRY: float = 0.60
 
 ## How much longer a heavy animal keeps its feet down than its posture alone
 ## says. The posture already sets the base — three feet down on a columnar build,
@@ -113,6 +147,29 @@ const SWING_FLOOR: float = 0.045
 const DUTY_LOAD: float = 0.10
 const DUTY_MIN: float = 0.35
 const DUTY_MAX: float = 0.86
+## How much of its duty factor a body gives up between standing still and going
+## flat out, and the least it may fall to.
+##
+## Every animal keeps fewer feet down the faster it goes — that is what separates
+## a walk from a trot and a trot from a gallop, and it is the same fact whichever
+## end of the size range it is read at: an elephant at a fast walk has two feet
+## down where a standing one has three. Held constant, as it was, a heavy build
+## is stuck at its standing duty forever and `leg_speed` then prices its top
+## speed off a cycle it only has while it is loitering.
+const DUTY_PACE: float = 0.22
+const DUTY_SPRINT: float = 0.28
+
+## Hardest a body may push against the ground, in gravities.
+##
+## Traction, and it is the one ceiling on acceleration that is not about muscle.
+## A foot pushes a body forward by leaning on friction, and past somewhere near
+## its own weight it stops leaning and starts slipping — which is why no animal,
+## however strong for its size, gets away from a standstill much quicker than
+## this. Without it `drive` and `power` multiply: a Cheetah's posture gain of 1.35
+## on a power of 2.28 turned a modest per-species push into 1.64 g, and 1.64 g
+## against its own top speed is a creature at full pelt inside a fifth of a
+## second. That is not a strong animal, it is a body with no mass.
+const PUSH_CEILING: float = 0.55
 
 ## Least a forelimb may be, against the hind leg it would have to stand beside,
 ## and still reach the ground the hips are holding the body over.
@@ -231,7 +288,14 @@ func update(posture: Posture, physique: Physique, p: CreatureParams, scale: floa
 	forelimbs_bear = bears_on_forelimbs(p)
 	bearing_limbs = 4 if forelimbs_bear else 2
 
-	accel = p.acceleration * scale * posture.drive * power
+	# Ground push, in gravities and then in pixels. Quoted against the world's own
+	# pull rather than as a raw rate because that is the only way the number can be
+	# argued about: 0.2 g is a figure a real animal can be held to, and 800 px/s²
+	# is a figure that happened to be four times a Lizard's top speed. Capped at
+	# what a foot can lean on before it slips — see PUSH_CEILING — so the posture
+	# gain and the power ratio can no longer multiply into a launch.
+	accel = minf(p.acceleration * posture.drive * power, PUSH_CEILING) \
+		* Gravity.PULL * scale
 
 	# Torque over rotational inertia. A rod's inertia goes as its mass times the
 	# square of its length while the muscle turning it grows with neither, so a
@@ -435,9 +499,112 @@ func stride(sweep: float, lead: float) -> float:
 ## wearing it. Muscle shortens it — a limb is thrown as well as dropped — but only
 ## as the cube root of the power available, because the same weight that is being
 ## pushed along is also what has to be swung.
+## Never *longer* than the free swing, however weak the animal is, and that bound
+## is the correction: a pendulum comes through at its own rate whether or not
+## anything is driving it, so muscle is the only term that can move this and it
+## can only move it one way. Divided both ways, as it was, an Elephant's legs came
+## through a third slower than gravity alone would have brought them — which is
+## not a heavy animal walking deliberately, it is a heavy animal wading.
 func swing_time(bone: float) -> float:
 	return SWING_PERIOD * sqrt(maxf(bone, 1.0) / Elevation.GRAVITY) \
-		/ pow(clampf(power, 0.05, 8.0), 1.0 / 3.0)
+		/ maxf(pow(clampf(power, 0.05, 8.0), 1.0 / 3.0), 1.0)
+
+
+## The same swing with as much taken off it as going fast can take.
+##
+## A limb at a walk falls through; a limb at a gallop is thrown, and arrives
+## sooner for it. `pace` is how much of that the animal is doing, and SWING_HURRY
+## is how much there is to have. Both halves matter: without the shortening a
+## running creature would take the same deliberate step it takes standing, and
+## without the bound it takes no time at all — which is the blur this replaced.
+func hurried_swing(swing_at_rest: float, pace: float) -> float:
+	return swing_at_rest * (1.0 - SWING_HURRY * clampf(pace, 0.0, 1.0))
+
+
+## How much of its cycle a foot has to be on the ground, at this pace.
+##
+## `duty` is the standing figure — what the posture asks for with weight leaning
+## on it — and this is the same body going faster. It falls rather than holds,
+## because keeping fewer feet down is *how* an animal goes faster once its legs
+## are already swinging as quick as they can be thrown; a gait that could not do
+## it would have to cycle its legs harder instead, which is precisely the failure
+## this file now refuses.
+func duty_at(pace: float) -> float:
+	return maxf(duty - DUTY_PACE * clampf(pace, 0.0, 1.0), minf(duty, DUTY_SPRINT))
+
+
+## The shortest honest cycle a limb of this swing can be turned over in.
+##
+## Two facts and nothing else. The swing takes as long as it takes — a thrown
+## pendulum, no quicker than `hurried_swing` — and it has to fit inside the part
+## of the cycle the foot is off the ground. So the cycle is the one divided by the
+## other, and everything about how fast this animal can move follows from it.
+##
+## How much of the cycle that is has two answers and the smaller wins, which is
+## the same pair `swing_budget` already resolves: the duty factor says how much of
+## its own cycle *this* foot may spend in the air, and the lift limit says how
+## many feet the whole body will have off the ground at once — and four legs each
+## aloft for a third of the time is a body permanently on one foot, whatever the
+## duty factor thinks. Missing it is what left a Camel's ceiling three times what
+## its own gait could deliver, so it was granted a speed it could only meet by
+## dragging its feet along behind it.
+func cycle_floor(swing_at_rest: float, pace: float, aloft_share: float = 1.0) -> float:
+	return maxf(hurried_swing(swing_at_rest, pace)
+		/ maxf(minf(1.0 - duty_at(pace), maxf(aloft_share, 0.05) * SLOT_MARGIN), 0.05),
+		SWING_FLOOR)
+
+
+## How fast the legs can actually carry the body, in pixels per second.
+##
+## Ground covered per cycle over how long a cycle takes, at the only pace worth
+## asking it at: flat out, where the swing is as hurried as muscle will make it
+## and the duty factor is as low as the animal dares. Which makes it a property of
+## the skeleton rather than of what the creature is doing this instant — a
+## ceiling, not a reading — and that is deliberate, because a ceiling that moved
+## with the speed it bounds would be a feedback loop rather than a limit.
+##
+## `travel` is the *whole* fore-and-aft excursion the foot has, both halves of it,
+## and that is the ground covered because that is what a step is: the foot is put
+## down as far forward as its envelope reaches, the body walks over it, and it is
+## picked up again as far back as the envelope reaches. Not the stride threshold,
+## which is the shorter distance the foot is allowed to drift before it becomes
+## due — a foot going the whole way to its trailing edge has been overdue for some
+## time by then, which is exactly why the trigger is set inside the envelope.
+##
+## This is what `move_speed` is now measured against. A species may ask for less
+## than its legs can give, and a stately animal is exactly that; it may not ask
+## for more, because the alternative is the one it was getting — a body towed
+## along at whatever the parameter said with four legs cycling underneath it fast
+## enough to look like a wheel.
+## `aloft_share` is divided out directly rather than through `cycle_floor`, and
+## the difference is SLOT_MARGIN: that margin exists so the footfall pattern has a
+## free slot to *choose* with, which is a statement about sequencing rather than
+## about how fast a leg can be moved. Spending it here as well would price a
+## body's top speed off room it was keeping for a decision.
+func leg_speed(travel: float, swing_at_rest: float, aloft_share: float = 1.0) -> float:
+	return maxf(travel, 0.0) / maxf(hurried_swing(swing_at_rest, 1.0)
+		/ maxf(minf(1.0 - duty_at(1.0), maxf(aloft_share, 0.05)), 0.05), SWING_FLOOR)
+
+
+## How fast the feet can walk a standing body around, in radians per second.
+##
+## A creature turning on the spot is not spinning; it is stepping its feet round
+## a circle, and every term of that is already measured. A socket at `radius` from
+## the point the body turns about is carried sideways at `radius` times the turn
+## rate, and the foot underneath it has to be picked up and put down at least that
+## fast or it is simply dragged round — so the rate is the speed a foot can be
+## placed at, over the radius of the socket that has furthest to go.
+##
+## The furthest rather than the average, because a gait is only as quick as the
+## limb that cannot keep up, and it is the *socket* radius rather than anything
+## about where the mass is: how hard a body is to swing is torque over inertia and
+## is already `turn_rate`, which a species leans on and which still applies. This
+## is a second ceiling beside it and it is the one that was missing — with only
+## the first, a light strong animal on a short body was handed nine radians a
+## second and span like a top with its feet planted, because nothing in the
+## arithmetic had to be walked.
+func walked_turn(carry_speed: float, radius: float) -> float:
+	return maxf(carry_speed, 0.0) / maxf(radius, 1.0)
 
 
 ## The most of a cycle a foot may spend in the air, given how long that cycle is.
@@ -456,8 +623,8 @@ func swing_time(bone: float) -> float:
 ## thing the footfall pattern exists to replace — and it is invisible until a
 ## build has enough interference to want something other than the even four-beat
 ## that order produces.
-func swing_budget(cycle: float, aloft_share: float = 1.0) -> float:
-	return maxf(cycle * minf(1.0 - duty, maxf(aloft_share, 0.05) * SLOT_MARGIN),
+func swing_budget(cycle: float, aloft_share: float = 1.0, pace: float = 0.0) -> float:
+	return maxf(cycle * minf(1.0 - duty_at(pace), maxf(aloft_share, 0.05) * SLOT_MARGIN),
 		SWING_FLOOR)
 
 

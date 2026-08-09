@@ -134,6 +134,14 @@ var speed_norm: float = 0.0
 
 ## Shared feel shaping rather than species traits. Species keep their weight in
 ## acceleration and turn-rate parameters; these only decide how controls settle.
+##
+## Braking harder than driving is not a cheat: a body pulling up props on every
+## leg it has where one getting going can only push with the pair underneath it.
+## What made the old stop read as weightless was the *rate* it was doubling —
+## acceleration was quoted as a raw figure that came to well over a gravity on
+## the quicker builds, so twice that was a creature deleting its own momentum
+## inside a twentieth of its own length. The rate is in gravities now and capped
+## at what a foot can lean on; see Locomotion.PUSH_CEILING.
 const BRAKE_MULTIPLIER: float = 2.0
 const PIVOT_FADE_START: float = 0.08
 const PIVOT_FADE_END: float = 0.45
@@ -142,6 +150,29 @@ const PIVOT_FADE_END: float = 0.45
 ## is what the head leads the turn by, and at 1.0 the body would rotate rigidly
 ## with it and nothing would bend.
 const STANDING_TURN_ASSIST: float = 0.6
+## Least radius a travelling body carves its turn on, in its own body lengths.
+##
+## A creature changing direction at speed is describing an arc across the ground,
+## and an arc tighter than the animal is long is not a turn — it is a body being
+## rotated on the spot while it happens to be moving, which is what reads as
+## spinning. Every build in the file was carving between four tenths and eight
+## tenths of its own length, on a steering rate that had already been faded for
+## speed; the fade was a fraction of a number rather than a statement about the
+## ground, so it could not know how tight was too tight.
+##
+## Just over one, because a real quadruped's tightest sustained turn is about its
+## own length and anything less involves it slowing down first — which is exactly
+## what this makes it do, since the arc is a bound on the rate at a given speed
+## and the speed is the player's to give up.
+##
+## Divided by the stance's own agility, so it is a bound on this animal rather
+## than a single circle every creature in the game carves. Carving is bracing: a
+## limb out to the side has ground to push against sideways and a pillar stacked
+## under the shoulder has almost none, which is what `agility` already says and
+## the only honest reason one build should corner tighter than another. Flat, it
+## put a Cat and an Elephant on the same arc measured in their own lengths — which
+## is not a wide-turning elephant, it is a scaled one.
+const MIN_TURN_ARC: float = 1.15
 ## How much of its steering and acceleration a body keeps with nothing under its
 ## feet. Small but not zero — a leaping animal can still twist — and it is the
 ## whole reason a leap is a commitment rather than a hop with full control.
@@ -286,7 +317,17 @@ const MAX_GAPE_RATIO: float = 2.6
 const GRIP_SLACK: float = 3.0
 ## Separation speed, in px/s, at which one unit of purchase puts one unit of
 ## force on the jaws. This is what `jaw_power` is measured against.
-const GRIP_LOAD_REFERENCE: float = 150.0
+##
+## A currency rather than a fact, and it has to be re-anchored whenever the thing
+## it prices changes scale. What loads a set of jaws is a victim thrashing, and
+## thrashing is turning: a body held by the leg heaves against the hold at the
+## rate it can swing itself, and that rate is now a third to a quarter of what it
+## was — the feet have to walk a standing turn round and there are only so many
+## steps a second in them, see Locomotion.walked_turn. Left at 150 the same
+## struggle produced well under half the load it used to and no victim in the file
+## could tear itself off anything, which is not a stronger bite; it is a currency
+## quoted in a speed nothing reaches any more.
+const GRIP_LOAD_REFERENCE: float = 65.0
 ## How quickly measured load follows the instantaneous pull. A grip has to be
 ## broken by a sustained heave rather than by one coarse tick.
 const GRIP_LOAD_RESPONSE: float = 6.0
@@ -1262,8 +1303,25 @@ func _integrate_motion(delta: float) -> void:
 	# available, which is what lets the creature pivot on the spot (together with
 	# the swing block below); and what is left of that is how much of its nervous
 	# system still reaches the legs, and whether they are on anything.
+	#
+	# ...and then held to what the feet can actually do about it, which is the
+	# ceiling that was missing. A standing turn is walked — see
+	# Locomotion.walked_turn — so how fast a body comes round is how fast a foot can
+	# be put down, over how far out the socket with furthest to travel sits. A
+	# travelling one is bounded instead by the arc: past a certain rate the creature
+	# is no longer following a curve across the ground, it is pirouetting along one.
+	# The two are taken as whichever allows more, because they are alternatives
+	# rather than a pair of costs — an animal at a standstill is not carving an arc,
+	# and one at speed is not stepping its feet round in a circle.
+	var backing: float = _reverse_fraction()
 	var turn_rate: float = locomotion.turn_rate \
-		* (1.0 - p.turn_speed_falloff * speed_norm) * steering * purchase
+		* (1.0 - p.turn_speed_falloff * speed_norm)
+	var walked: float = _walked_turn_rate(backing)
+	if walked > 0.0:
+		turn_rate = minf(turn_rate, maxf(walked * (1.0 - speed_norm),
+			absf(speed) / maxf(body_length() * MIN_TURN_ARC
+				/ maxf(posture.agility, 0.1), 1.0)))
+	turn_rate *= steering * purchase
 	# Steering backwards is compromised by exactly what makes backing up slow:
 	# legs built to push a body forward are pushing it the other way, and they
 	# are steering it from the wrong end while they do. So a reversing creature
@@ -1271,7 +1329,6 @@ func _integrate_motion(delta: float) -> void:
 	# one species trait covering both halves of the same handicap, rather than a
 	# second number saying the same thing. Without it a body backs into a circle
 	# tighter than it is long, which is the coil this replaced.
-	var backing: float = _reverse_fraction()
 	turn_rate *= lerpf(1.0, p.reverse_speed_factor, backing)
 	# Angular velocity eases toward the commanded rate rather than snapping, so
 	# the body has something to lag behind during a turn. Shedding the old swing —
@@ -1319,7 +1376,16 @@ func _integrate_motion(delta: float) -> void:
 	# sprint does not apply to it.
 	var sprint: float = p.sprint_multiplier \
 		if command.sprint and command.throttle > 0.0 and not is_stalking() else 1.0
-	var top_speed: float = p.move_speed * size_scale * sprint * haul * drive
+	# What the species asks for, and then what the legs will honour. `move_speed`
+	# is a request rather than a promise now, and sprint is a request too: an
+	# animal already cycling its legs as fast as they can be thrown has nothing
+	# left to spend on going quicker, and the honest thing for it to do is not go
+	# quicker. Everything else in the file follows from that one clamp — the feet
+	# stop being dragged, the swing stops being clipped, and the body stops
+	# arriving somewhere its legs never took it. See Locomotion.leg_speed.
+	var asked: float = p.move_speed * sprint * size_scale
+	var legs: float = _leg_ceiling()
+	var top_speed: float = (minf(asked, legs) if legs > 0.0 else asked) * haul * drive
 	if command.throttle < 0.0:
 		top_speed *= p.reverse_speed_factor
 	# Close control is a ceiling on the speed rather than a brake applied to it:
@@ -1358,7 +1424,7 @@ func _integrate_motion(delta: float) -> void:
 	# contacts and the downstream gait in their existing ownership layers.
 	if speed < 0.0 and spine != null:
 		spine.translate_followers(displacement)
-	speed_norm = clampf(absf(speed) / maxf(p.move_speed * size_scale, 1.0), 0.0, 1.0)
+	speed_norm = clampf(absf(speed) / cruise_speed(), 0.0, 1.0)
 
 
 ## How much of the turn the head is asking for, -1..1 alongside the turn keys.
@@ -1405,13 +1471,82 @@ func is_stalking() -> bool:
 	return command.stalk and alive and elevation.is_grounded()
 
 
+## The fastest these legs will carry this body, before the species has asked for
+## anything. Zero — meaning "not known, do not bind" — until the first gait solve
+## has placed four feet and measured it, which is what leaves a body with no legs
+## yet behaving exactly as it always did. A zero rather than an infinity because
+## an infinity has to survive being multiplied by the speed fade below, and
+## `INF * 0.0` is a quiet NaN that spreads through the heading into the whole
+## body. See Locomotion.leg_speed and Gait.leg_speed.
+func _leg_ceiling() -> float:
+	return gait.leg_speed if gait != null and gait.leg_speed > 0.0 else 0.0
+
+
+## The speed this creature walks at flat out without sprinting — the lower of what
+## it asks for and what its legs will give.
+##
+## The denominator every pace in the game is quoted against, and it has to be this
+## one rather than the parameter alone: a creature whose legs hold it below its own
+## `move_speed` would otherwise never read as going full tilt, and the stride, the
+## step timing, the sway and the turn fade all hang off that reading. Sprint is
+## deliberately left out, so holding sprint still takes the animal past pace 1 and
+## is still what the gait sees as running rather than walking.
+func cruise_speed() -> float:
+	var asked: float = params.move_speed * size_scale
+	var legs: float = _leg_ceiling()
+	return maxf(minf(asked, legs) if legs > 0.0 else asked, 1.0)
+
+
 ## How much of what this creature is doing is backing up, 0..1 of its own reverse
 ## top speed. Measured off travel rather than off the key, so a body that has
 ## been commanded backward but is still coasting forward is still steering the
 ## way it is actually moving.
 func _reverse_fraction() -> float:
-	var reverse_top: float = params.move_speed * params.reverse_speed_factor * size_scale
-	return clampf(-speed / maxf(reverse_top, 1.0), 0.0, 1.0)
+	return clampf(-speed / maxf(cruise_speed() * params.reverse_speed_factor, 1.0),
+		0.0, 1.0)
+
+
+## How fast the feet can walk this standing body around, in radians per second.
+##
+## The arithmetic is Locomotion's; what belongs here is the body it is asked
+## about, because both terms of it are measurements of this creature's own shape
+## this tick. `backing` picks the station, exactly as `_turn_station` does — a
+## reversing animal turns about its hips and a forward one about its shoulders, so
+## it is genuinely a different amount of animal being swung either way.
+func _walked_turn_rate(backing: float) -> float:
+	if gait == null or gait.pivot_speed <= 0.0 or spine == null or spine.size() < 2:
+		return 0.0
+	return locomotion.walked_turn(gait.pivot_speed, _socket_radius(backing))
+
+
+## How far the furthest weight-bearing socket sits from the point the body turns
+## about, along the animal.
+##
+## The lever the turn is walked on, and the girdle with the longer one is the one
+## that runs out of foot speed first — which is why this is the further of the two
+## rather than the mean of them. A forelimb that does not reach the ground is left
+## out, because a leg nothing is standing on is not a leg that has to keep up.
+##
+## Measured along the spine rather than through it. A body bent into a turn has
+## its hips somewhere off the centreline and the straight-line distance would
+## shorten as it curled, which would quietly *raise* the ceiling exactly when the
+## animal is already turning hard.
+func _socket_radius(backing: float) -> float:
+	var arc: float = maxf(spine.arc_length(), 1.0)
+	var station: float = clampf(_turn_station_distance(backing), 0.0, arc)
+	var reach: float = absf(arc * params.rear_limb_t - station)
+	if locomotion.forelimbs_bear:
+		reach = maxf(reach, absf(arc * params.front_limb_t - station))
+	return maxf(reach, 1.0)
+
+
+## How far behind the head the turn station sits, along the spine. The one
+## expression `_turn_station` and `_gyration` have to agree about, so it is
+## written once — see `_turn_station` for why a reversing body turns about its
+## hips.
+func _turn_station_distance(backing: float) -> float:
+	return lerpf(params.turn_pivot * size_scale,
+		spine.arc_length() * params.rear_limb_t, backing)
 
 
 ## The point on the body a turn swings the head around.
@@ -1446,9 +1581,8 @@ func _reverse_fraction() -> float:
 func _turn_station(backing: float, blend: float) -> Vector2:
 	if spine == null or spine.size() < 2 or blend <= 0.0:
 		return head_pos
-	var distance: float = lerpf(params.turn_pivot * size_scale,
-		spine.arc_length() * params.rear_limb_t, backing)
-	return head_pos.lerp(spine.station_behind_head(distance), blend)
+	return head_pos.lerp(
+		spine.station_behind_head(_turn_station_distance(backing)), blend)
 
 
 # ------------------------------------------------------------- collision ----

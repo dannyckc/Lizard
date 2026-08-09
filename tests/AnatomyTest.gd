@@ -503,7 +503,14 @@ func _check_heart_stops_it_slowly(c: Creature) -> void:
 		c._physics_process(TICK)
 		ticks += 1
 	_check(not c.alive, "a creature with no heart was still going after 30 seconds")
-	_check(ticks > 60,
+	# Half a second is a long way from the brain's single tick, which is the claim.
+	# It used to be a whole second, and the extra half was an artefact rather than a
+	# measurement: `Locomotion.swing_time` divided the free pendulum by the muscle
+	# available, so a body with none was credited with a swing nearly three times
+	# what gravity would have given it and `Balance.grace` inherited the lot. The
+	# pendulum no longer stretches for a weak animal and the recovery clock says so
+	# on purpose instead — see Balance.SPENT_RECOVERY.
+	_check(ticks > 30,
 		"the body collapsed %.1f s after its heart stopped — that is a switch, not circulation"
 			% (float(ticks) * TICK))
 	_restore(c)

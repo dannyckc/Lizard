@@ -228,7 +228,13 @@ func _check_walking_follows_the_head() -> void:
 	var mark: Vector2 = creature.head_pos + Vector2.RIGHT.rotated(deg_to_rad(70.0)) * 900.0
 	var start: float = absf(wrapf((mark - creature.head_pos).angle() - creature.heading, -PI, PI))
 	var overshoot: float = 0.0
-	for _tick in 150:
+	# Ten seconds rather than two and a half. A walking turn is bounded by the arc
+	# the body can carve across the ground — see Creature.MIN_TURN_ARC — so coming
+	# round seventy degrees is a manoeuvre the animal walks through, on a circle
+	# wider than it is long, rather than one it snaps into. The claim is that it
+	# arrives and settles with its neck straight, not how soon; the window stops
+	# short of where it would walk past the mark and start turning back.
+	for _tick in 600:
 		drive.aim_world = mark
 		creature.command = drive
 		creature._physics_process(TICK)

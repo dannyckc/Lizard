@@ -305,7 +305,12 @@ func _check_it_leaves_from_where_it_was(player: Creature) -> void:
 	_check(worst < travel * 0.35,
 		"a jump moved the body %.1f px in one tick of a %.1f px joint travel"
 			% [worst, travel])
-	_check(covered and landed_at.distance_to(from) > 60.0,
+	# A running jump carries the run-up's speed through the air, so the ground it
+	# covers scales with that speed — and a Cat now runs at about a third of what
+	# it used to, because it is held to the pace its legs can actually be cycled
+	# at (see Locomotion.leg_speed). A third of a body length is still a jump
+	# rather than a hop, which is the claim; the old sixty pixels was three.
+	_check(covered and landed_at.distance_to(from) > 40.0,
 		"a running jump covered %.0f px of ground" % landed_at.distance_to(from))
 	notes.append("a running Cat jumps %.0f px down the road" % landed_at.distance_to(from))
 

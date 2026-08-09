@@ -66,6 +66,18 @@ const STANDING_MIN: float = 0.55
 ## animal is given a tenth of a second and an elephant most of one, and neither
 ## number is written down anywhere.
 const RECOVERY_SWINGS: float = 1.8
+## How much longer that takes a body whose limbs have stopped answering.
+##
+## The same statement Gait already makes about a spent limb — weakness is slowness
+## as well as shortness, see Gait.SWING_SLOWEST — asked at the one other place that
+## wants to know how long a leg takes to get somewhere. It belongs here explicitly
+## because it used to arrive by accident: `Locomotion.swing_time` divided the free
+## pendulum by the muscle available, so a creature with no muscle left was handed a
+## swing nearly three times what gravity alone would have given it, and the
+## recovery clock inherited the whole of that. A pendulum does not slow down
+## because the animal is weak; getting a leg back underneath yourself very much
+## does, and this is that, said once and on purpose.
+const SPENT_RECOVERY: float = 2.1
 
 ## How much of a girdle's joint travel is spent folding under a body it cannot
 ## hold. All of it at total failure: legs going out from under an animal is
@@ -114,7 +126,8 @@ func update(delta: float, limbs: Array[Limb], body: BodyShape, spine: Spine,
 		physique: Physique, state: BodyState, loco: Locomotion,
 		swing: float, airborne: bool, alive: bool) -> void:
 	failed = false
-	grace = maxf(swing, 0.05) * RECOVERY_SWINGS
+	grace = maxf(swing, 0.05) * RECOVERY_SWINGS * lerpf(SPENT_RECOVERY, 1.0,
+		clampf(state.locomotion, 0.0, 1.0) if state != null and state.impaired else 1.0)
 	if not alive:
 		return
 	if airborne or body == null or spine == null or body.anchors.is_empty():

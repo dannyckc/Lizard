@@ -166,6 +166,36 @@ var support: float = 0.0
 ## solved has no feet to be standing on and has to fall back on its posture.
 var measured: bool = false
 
+## How fast these legs can actually carry this body, in pixels per second, and
+## the stride that answer is priced off.
+##
+## The one reading in this file the *body* consumes rather than the picture. Every
+## other measurement here says where the animal's feet have ended up; this one says
+## how fast it is allowed to travel, and Creature holds its top speed to it — see
+## Locomotion.leg_speed. It belongs here because both terms are here: the stride is
+## whatever this tick's geometry left the shortest-striding bearing limb, and the
+## cycle is the longest swing among the legs doing the carrying, because a body
+## goes at the pace of its slowest leg rather than its quickest.
+##
+## Zero until four feet have been solved, which is the signal to fall back on the
+## species parameter — a body with no gait yet has no legs to be limited by.
+var leg_speed: float = 0.0
+## ...and the same speed for a body turning on the spot, which is a slower one.
+##
+## A standing turn is walked one foot at a time. It has to be: a creature going
+## nowhere is squarely in the regime where it keeps as many feet on the floor as
+## it can — `Footfall.caution` is at its highest exactly when nothing is
+## travelling — so the two-feet-up gait `leg_speed` is priced at is not on offer.
+## Half the ground per second on four legs, and all of it on two, which is why a
+## hopping biped comes round briskly and a cat has to shuffle.
+##
+## Without it the pivot was the one manoeuvre where the feet were still being
+## dragged: the turn rate was priced off a gait the animal cannot use while it is
+## standing still, so it span faster than its legs could be put down and scuffed
+## them round the last three pixels of every step.
+var pivot_speed: float = 0.0
+var stride_shared: float = 0.0
+
 # --- how the body is tipped on its feet ---------------------------------------
 # The other half of the same measurement `shoulder_height` and `hip_height` are.
 # Four legs hold a body up at four corners, and a body held at four different
@@ -287,7 +317,17 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 	if body.anchors.is_empty():
 		return
 
+	# What full pace means for this body. The species asks for a speed and the legs
+	# answer with one, and it is the lower of the two that the animal actually
+	# travels at — so it has to be the lower of the two a socket's speed is quoted
+	# against as well. Measured against the parameter alone, a creature the legs are
+	# holding back would never read as going flat out however hard it was driven,
+	# and every reading downstream of pace — the stride, the swing, the sway — would
+	# sit permanently at half throttle. Last tick's answer, which is the same
+	# deliberate lag the physique is read with.
 	var top_speed: float = maxf(p.move_speed * scale, 1.0)
+	if leg_speed > 0.0:
+		top_speed = maxf(minf(top_speed, leg_speed), 1.0)
 	var impaired: bool = state != null and state.impaired
 	var arm: float = p.arm_length * scale
 	var leg: float = p.leg_length * scale
@@ -1523,14 +1563,53 @@ func _footing(limb: Limb, a: Spine.Frame, aim: Vector2, scale: float,
 ## disagreements about what the stride is.
 func _share_stride() -> void:
 	var shared: float = INF
+	var sweep: float = INF
+	var swing: float = 0.0
 	for limb in limbs:
 		if _skip(limb) or not limb.bearing:
 			continue
 		shared = minf(shared, limb.stride)
+		sweep = minf(sweep, limb.sweep_limit)
+		# The longest swing among the legs doing the carrying, and it is the longest
+		# rather than the mean for the same reason the stride is the shortest: a
+		# body travels at the pace of the leg that holds it up latest, not at the
+		# average of four legs two of which could manage more.
+		swing = maxf(swing, limb.swing_base)
 	if is_inf(shared):
 		return
+	stride_shared = maxf(shared, 0.001)
+	# What those legs come to as a speed. Off the shortest limb's whole excursion —
+	# both halves of it, which is the ground one step covers — rather than off the
+	# paced stride, because this is the ceiling the body is held to rather than the
+	# drift the foot is currently allowed. An animal standing still has a short
+	# trigger distance and its legs are no less capable for it.
+	if swing > 0.0 and not is_inf(sweep):
+		# Against the most feet this body will ever have off the ground at once
+		# rather than the number it is lifting right now, and that is not a rounding
+		# — it is what keeps the ceiling from locking the animal in. `lift_limit`
+		# comes down to one while a creature is still going slowly enough to have to
+		# be standing at every instant, so a ceiling priced off it would hold the
+		# body at the speed that made it cautious in the first place, and nothing
+		# could ever get up to a run.
+		#
+		# ...against what this body would lift if it committed rather than what it is
+		# lifting while it dawdles — see Footfall.lift_ceiling. It has to be the
+		# former or the two lock each other in: an animal picks its feet up one at a
+		# time *because* it is going slowly, so a ceiling priced off that would hold
+		# it at the speed which made it careful and nothing could ever reach a run.
+		#
+		# ...and never all of them. Something has to stay down: a body with every
+		# foot in the air is not walking quickly, it is airborne, and pricing a
+		# ground speed off a suspension would hand a two-legged build twice the
+		# ceiling of a four-legged one for no better reason than that two of its
+		# legs are the whole set. The same guard `Locomotion.duty` already applies
+		# to the posture's own preference, applied to the other end of it.
+		var bearing: int = maxi(loco.bearing_limbs, 1)
+		var aloft: int = mini(footfall.lift_ceiling, maxi(bearing - 1, 1))
+		leg_speed = loco.leg_speed(sweep * 2.0, swing, float(aloft) / float(bearing))
+		pivot_speed = loco.leg_speed(sweep * 2.0, swing, 1.0 / float(bearing))
 	for limb in limbs:
-		limb.stride = maxf(shared, 0.001) * (0.45 + 0.55 * limb.pace) \
+		limb.stride = stride_shared * (0.45 + 0.55 * limb.pace) \
 			* lerpf(STRIDE_FLOOR, 1.0, limb.drive)
 
 
@@ -1633,12 +1712,29 @@ func _step_clearance(limb: Limb) -> float:
 ##   * a weak limb swings *slower*, which is the second half of a limp. The
 ##     ceiling rises with it, because a leg that cannot keep up is exactly a leg
 ##     that should be seen labouring rather than one held to a healthy tempo.
+##
+## The first of the three is a floor now as well as a target, and that one change
+## is most of what stopped the creatures reading as machinery. A deadline is a
+## statement about the gait's arithmetic; a pendulum is a statement about the leg.
+## When the two disagreed the deadline used to win all the way down to a flat
+## forty-five milliseconds, so a cat travelling faster than its legs could carry
+## it simply cycled them faster — eleven times a second, each swing a fifth of
+## what that limb takes to come through. Nothing in the picture said the animal
+## was overrunning itself; the legs just blurred. Now the limb takes the time it
+## takes, and the body is held to a speed its legs can honour — see
+## Locomotion.leg_speed.
 func _step_duration(limb: Limb) -> float:
 	var labour: float = lerpf(SWING_SLOWEST, 1.0, limb.drive)
-	var base: float = limb.swing_base * (1.0 - 0.55 * limb.pace) * labour
+	var base: float = loco.hurried_swing(limb.swing_base, limb.pace) * labour
 	var budget: float = loco.swing_budget(limb.stride / maxf(limb.socket_speed, 1.0),
-		float(footfall.lift_limit) / float(maxi(loco.bearing_limbs, 1)))
-	return clampf(minf(base, budget), Locomotion.SWING_FLOOR, limb.swing_base * labour)
+		float(footfall.lift_limit) / float(maxi(loco.bearing_limbs, 1)), limb.pace)
+	# The deadline may still hurry a step — a socket racing round the outside of a
+	# turn has a short cycle at any speed — but only as far as muscle can hurry a
+	# limb, which is the same swing quoted at full pace. Below that there is no
+	# step being taken, only a leg being redrawn somewhere else.
+	return clampf(minf(base, budget),
+		loco.hurried_swing(limb.swing_base, 1.0) * labour,
+		limb.swing_base * labour)
 
 
 ## How long one limb's whole step cycle currently is, averaged over the legs that

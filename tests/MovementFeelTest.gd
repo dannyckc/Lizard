@@ -46,7 +46,11 @@ func _check_reverse_keeps_facing() -> void:
 	var reverse := MovementInput.Command.new()
 	reverse.throttle = -1.0
 
-	for _tick in 120:
+	# Three seconds rather than two. Backing up is a fraction of a walking speed
+	# that is itself now the pace the legs can be cycled at — see
+	# Locomotion.leg_speed — so the same hundred pixels of retreat takes longer to
+	# cover. The claim is that the whole animal goes backwards facing forwards.
+	for _tick in 180:
 		creature.command = reverse
 		creature._physics_process(TICK)
 
@@ -130,8 +134,14 @@ func _check_turn_response() -> void:
 		creature.command = turn
 		creature._physics_process(TICK)
 
+	# Four degrees in a tenth of a second, not eight. A standing turn is walked —
+	# the feet have to be picked up and put down round the arc, and there are only
+	# so many steps a second in a leg of a given length, see Locomotion.walked_turn
+	# — so the reference build comes round at about ninety degrees a second where
+	# it used to manage a hundred and ninety unbounded. What this still pins is
+	# that the control answers immediately and eases in rather than snapping.
 	var six_tick_turn: float = rad_to_deg(absf(creature.heading))
-	_check(six_tick_turn >= 8.0,
+	_check(six_tick_turn >= 4.0,
 		"turn input changed heading only %.1f degrees in 100 ms" % six_tick_turn)
 
 	turn.turn = -1.0
@@ -197,7 +207,11 @@ func _check_turn_switch_stays_put() -> void:
 	_check(start.distance_to(_spine_centre(creature)) < 30.0,
 		"switching a standing turn walked the body %.1f px across the ground"
 			% start.distance_to(_spine_centre(creature)))
-	_check(rad_to_deg(swept) > 30.0,
+	# Twenty degrees in half a second, at the walked turn rate above. The point of
+	# the check is that the *body* comes round rather than the head alone, so it is
+	# the sweep of a mid-spine station that is measured; the figure moved with the
+	# turn rate and the claim did not.
+	_check(rad_to_deg(swept) > 20.0,
 		"the body only came round %.1f degrees in half a second of standing turn"
 			% rad_to_deg(swept))
 	_destroy_creature(creature)

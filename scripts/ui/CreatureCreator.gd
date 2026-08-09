@@ -679,7 +679,11 @@ func _read_body() -> void:
 	_tiles["BITE FORCE"].text = "%.2f" % physique.bite_force
 	_tiles["STANDS"].text = "%d PX" % int(round(stature.stand_height()))
 	_tiles["LENGTH"].text = "%d PX" % int(round(subject.body_length()))
-	_tiles["TOP SPEED"].text = "%d PX/S" % int(round(params.move_speed))
+	# What the body actually manages, not what the slider asks for. `move_speed` is
+	# a request the legs have to honour now — see Locomotion.leg_speed — so a build
+	# given a speed its stride and step rate cannot deliver reads back the lower
+	# figure, which is the whole point of the tile.
+	_tiles["TOP SPEED"].text = "%d PX/S" % int(round(subject.cruise_speed()))
 	_tiles["STANCE"].text = subject.posture.name().to_upper()
 	_tiles["BEARING"].text = "%d LEGS" % loco.bearing_limbs
 	_tiles["GAIT"].text = subject.gait.footfall.describe().to_upper()

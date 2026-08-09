@@ -209,8 +209,38 @@ extends Resource
 
 # ------------------------------------------------------------- movement ----
 @export_group("Movement")
-@export_range(20.0, 600.0, 5.0) var move_speed: float = 190.0
-@export_range(50.0, 3000.0, 10.0) var acceleration: float = 800.0
+## The speed this species asks to travel at, and no longer the speed it gets.
+##
+## What it actually gets is the lower of this and what its legs will carry it at,
+## which is a stride divided by a step and is worked out in Locomotion.leg_speed.
+## That is the only honest arrangement: a number here cannot know how far the
+## animal's legs reach or how long they take to come through, so left in charge it
+## simply drove the body faster than the gait could keep up with and the feet were
+## cycled to suit — eleven and twelve steps a second on the two quickest builds in
+## the file, with each swing clipped to a floor to fit.
+##
+## So a value under what the legs give is a species choosing not to hurry, and a
+## value over it says nothing at all. They are quoted a little above what each
+## build's legs deliver, which leaves the anatomy in charge while keeping the
+## number in the creation menu from being a fiction.
+@export_range(20.0, 600.0, 5.0) var move_speed: float = 90.0
+## How hard this species pushes off the ground, in gravities.
+##
+## In g rather than in pixels per second squared, because that is the form the
+## number can be argued about in: a fifth of a gravity is a figure a real animal
+## can be held to, while 800 px/s² was only ever "four times the reference
+## Lizard's top speed", and it read as one — every creature in the file was at
+## full pelt within a fifth of a second of the key going down. The posture's drive
+## and the body's power still multiply it, and traction still caps the product;
+## see Locomotion.PUSH_CEILING.
+@export_range(0.02, 0.8, 0.01) var acceleration: float = 0.12
+## The turn a body's own muscle can put into it, before the feet are asked.
+##
+## Torque over rotational inertia — Locomotion works the rest out from the mass,
+## the muscle and the animal's own length — and it is now one of two ceilings
+## rather than the only one. The other is what the legs can walk the body around
+## at, which is what a standing turn actually is, and on every light quick build
+## in the file it is much the lower of the two. See Locomotion.walked_turn.
 @export_range(20.0, 720.0, 5.0) var turn_speed_deg: float = 190.0
 ## How much of the turn rate is given up at top speed. Turn radius is
 ## speed / turn_rate, so without a falloff a fast creature carves a circle
@@ -362,7 +392,7 @@ const SCHEMA: Array = [
 
 	{"group": "Movement"},
 	{"prop": "move_speed", "label": "Move speed", "min": 20.0, "max": 600.0, "step": 5.0},
-	{"prop": "acceleration", "label": "Acceleration", "min": 50.0, "max": 3000.0, "step": 10.0},
+	{"prop": "acceleration", "label": "Ground push (g)", "min": 0.02, "max": 0.8, "step": 0.01},
 	{"prop": "turn_speed_deg", "label": "Turn speed (deg/s)", "min": 20.0, "max": 720.0, "step": 5.0},
 	{"prop": "turn_speed_falloff", "label": "Turn falloff @ speed", "min": 0.0, "max": 0.9, "step": 0.01},
 	{"prop": "turn_responsiveness", "label": "Turn response", "min": 1.0, "max": 20.0, "step": 0.1},
@@ -465,7 +495,7 @@ const PRESETS: Dictionary = {
 		# strong for its size, and those two facts are already written below as
 		# `density` and `muscle_power`. Quoting a number here as well would be
 		# saying the same thing twice and then arguing with itself.
-		"move_speed": 260.0,
+		"move_speed": 85.0, "acceleration": 0.08,
 		"turn_responsiveness": 14.0, "turn_pivot": 40.0,
 		"sprint_multiplier": 1.80,
 		"density": 1.0, "muscle_power": 1.6, "jaw_power": 1.1, "fat_reserve": 0.8,
@@ -553,7 +583,7 @@ const PRESETS: Dictionary = {
 		# times the Lizard's weight and its muscle only grew with the square of
 		# what its bulk grew with the cube of, so it accelerates at under half the
 		# Lizard's rate and comes round slower still on a body half as long again.
-		"move_speed": 135.0,
+		"move_speed": 65.0, "acceleration": 0.14,
 		"turn_speed_falloff": 0.70,
 		"turn_responsiveness": 5.0, "turn_pivot": 110.0,
 		"sprint_multiplier": 1.30, "reverse_speed_factor": 0.40,
@@ -637,7 +667,7 @@ const PRESETS: Dictionary = {
 		# build has to be going fast enough for its size to be caught briefly on one
 		# pair, and no faster: past a run it starts throwing itself between girdles
 		# instead, which is a different gait again. See Footfall.caution.
-		"move_speed": 215.0,
+		"move_speed": 130.0, "acceleration": 0.16,
 		"turn_speed_falloff": 0.60, "turn_responsiveness": 7.0, "turn_pivot": 70.0,
 		"sprint_multiplier": 1.50, "reverse_speed_factor": 0.50,
 		"density": 1.2, "muscle_power": 1.1, "jaw_power": 1.4, "fat_reserve": 2.2,
@@ -675,7 +705,7 @@ const PRESETS: Dictionary = {
 		"fore_swing_deg": 62.0, "hind_swing_deg": 84.0,
 		"toe_push": 0.70,
 		"fore_spring": 0.40, "hind_spring": 0.65,
-		"move_speed": 420.0,
+		"move_speed": 130.0, "acceleration": 0.09,
 		"turn_speed_falloff": 0.50, "turn_responsiveness": 13.0, "turn_pivot": 44.0,
 		"sprint_multiplier": 2.00, "reverse_speed_factor": 0.45,
 		"density": 0.85, "muscle_power": 2.0, "jaw_power": 1.0, "fat_reserve": 0.4,
@@ -725,7 +755,7 @@ const PRESETS: Dictionary = {
 		# body far too heavy for it to be worth much. What comes out is a creature
 		# that can get itself off the ground and has no business doing it often.
 		"fore_spring": 0.18, "hind_spring": 0.22,
-		"move_speed": 210.0,
+		"move_speed": 205.0, "acceleration": 0.18,
 		"turn_speed_falloff": 0.60, "turn_responsiveness": 7.0, "turn_pivot": 90.0,
 		"sprint_multiplier": 1.35, "reverse_speed_factor": 0.45,
 		"density": 1.5, "muscle_power": 1.5, "jaw_power": 7.0, "fat_reserve": 0.9,
@@ -768,9 +798,10 @@ const PRESETS: Dictionary = {
 		# this a hop rather than a stride — and the reason the same animal is a
 		# poor walker: a store is cheap to bounce on and expensive to carry.
 		"fore_spring": 0.25, "hind_spring": 0.95,
-		"move_speed": 300.0,
+		"move_speed": 170.0, "acceleration": 0.09,
+		"turn_speed_deg": 60.0,
 		"turn_speed_falloff": 0.55, "turn_responsiveness": 9.0, "turn_pivot": 60.0,
-		"sprint_multiplier": 1.60, "reverse_speed_factor": 0.40,
+		"sprint_multiplier": 2.35, "reverse_speed_factor": 0.40,
 		"density": 0.9, "muscle_power": 2.2, "jaw_power": 0.8, "fat_reserve": 0.8,
 		"bite_damage": 1.6, "bite_reach": 26.0, "bite_radius": 9.0,
 		"bite_cooldown": 0.50, "chew_interval": 0.45,

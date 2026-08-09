@@ -57,13 +57,32 @@ extends RefCounted
 ## gait. Below it the animal is vaulting over a stiff leg and has to keep enough
 ## feet on the floor to be caught standing at any instant; above it the fall
 ## between beats is short enough to be run out of. Around ½ in the literature and
-## for the same reason it is here: it is where the centripetal demand of vaulting
-## over a leg reaches what gravity can supply.
-const FROUDE_WALK: float = 0.5
+## for the same reason it would be here: it is where the centripetal demand of
+## vaulting over a leg reaches what gravity can supply.
+##
+## Quoted against these bodies rather than against Earth, though, and that is a
+## correction rather than a fudge. A Froude number compares a creature's speed to
+## the pendulum its own leg makes, and the textbook transitions — a half for the
+## walk, somewhere between two and three for the gallop — are measured on animals
+## whose feet swing about as far under them as their hips are high. These are
+## drawn with feet that travel around four tenths of that, so the fastest any of
+## them can move its legs lands about a quarter of the way to the Earth figure.
+##
+## Left at a half the threshold is simply unreachable, and that is not a
+## hypothetical: with the body now held to a speed its legs can honour — see
+## Locomotion.leg_speed — every creature in the file sits permanently in the
+## walking regime, picking its feet up one at a time however hard it is driven,
+## and a Cheetah's gallop becomes unreachable code. Scaled, which animal crosses
+## which threshold still falls out of the bodies rather than out of these two
+## numbers: an Elephant stays under the first, a Cheetah passes both, and a Camel
+## lands between them and is kept out of the asymmetric regime by its `launch`,
+## which is where that decision always belonged.
+const FROUDE_WALK: float = 0.12
 ## And where a symmetrical gait runs out. Past this the two limbs of a girdle
 ## gain nothing by alternating and a great deal by pushing together, which is a
-## bound, a gallop or a hop. Real animals change over between two and three.
-const FROUDE_RUN: float = 2.4
+## bound, a gallop or a hop. Between two and three on the same literature, and
+## scaled by the same argument.
+const FROUDE_RUN: float = 0.85
 
 ## Least launch a build needs before an asymmetric gait is available to it at
 ## all, and the launch at which it commits to one completely. Between the two is
@@ -147,6 +166,16 @@ var caution: float = 1.0
 var interference: float = 0.0
 ## Most feet that may be off the ground at once.
 var lift_limit: int = LIFT_SYMMETRIC
+## ...and the most this body would ever lift, caution set aside.
+##
+## The same rule with the "is it going fast enough yet" clause taken out, so it is
+## a statement about the skeleton rather than about this instant: what these legs
+## could do if the animal committed to it. Only one thing reads it, and it needs
+## exactly this rather than `lift_limit` — Gait prices the body's top speed off
+## how many feet may be in the air at once, and pricing it off a limit that is low
+## *because the animal is going slowly* would hold every creature at the speed
+## that made it careful. See Gait.leg_speed.
+var lift_ceiling: int = LIFT_SYMMETRIC
 ## Share of a cycle one limb spends in the air. Two limbs closer together in
 ## phase than this belong to the same beat and may be aloft together; anything
 ## further apart may not.
@@ -294,6 +323,14 @@ func update(posture: Posture, loco: Locomotion, p: CreatureParams,
 		lift_limit = LIFT_CAREFUL
 	if aerial >= SUSPENSION_AT:
 		lift_limit = LIFT_SUSPENDED
+	# The same three lines with caution taken out. A stance that prefers three feet
+	# down still keeps them down — that is anatomy, not hesitation — but a body that
+	# is merely going slowly is not held to a walk it has no other reason for.
+	lift_ceiling = LIFT_SYMMETRIC
+	if posture.feet_down >= 3 and aerial <= 0.0:
+		lift_ceiling = LIFT_CAREFUL
+	if aerial >= SUSPENSION_AT:
+		lift_ceiling = LIFT_SUSPENDED
 
 
 ## Where in the cycle this limb's step belongs, 0..1.

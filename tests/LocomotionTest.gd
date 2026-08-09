@@ -576,8 +576,13 @@ func _lane(player: Creature, target: Creature, leg: Limb, hold_up: bool = false,
 	var pinned: Dictionary = {}
 	for limb in target.gait.limbs:
 		pinned[limb.key] = limb.ground
+	# Twenty seconds, where seven used to do. What is being compared is how far a
+	# walker is turned aside, and being turned aside is something that accumulates
+	# while it leans on the obstacle — so the window has to be long enough for a
+	# body held to the pace its own legs deliver to do the leaning. See
+	# Locomotion.leg_speed.
 	var out := {"aside": 0.0, "deepest": 0.0, "met": false}
-	for _tick in 420:
+	for _tick in 1200:
 		target.command = MovementInput.Command.new()
 		target._physics_process(TICK)
 		if leg != null:

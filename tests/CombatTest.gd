@@ -215,7 +215,11 @@ func _shove(pusher: Creature, pushee: Creature, pusher_name: String, pushee_name
 	var start: Vector2 = pushee.head_pos
 	var drive := MovementInput.Command.new()
 	drive.throttle = 1.0
-	for _i in 240:
+	# A shove travels at the pusher's own walking pace and no faster, so the ground
+	# it covers in a fixed window scales with that pace — see Locomotion.leg_speed,
+	# which now holds every body to what its legs can deliver. Same claim, same
+	# distances, over the time those legs need.
+	for _i in 460:
 		pusher.command = drive
 		pusher._physics_process(TICK)
 		pushee._physics_process(TICK)
@@ -407,14 +411,29 @@ func _hold(biter: Creature, victim: Creature, biter_name: String, victim_name: S
 		# leg it was aiming at. Closing to reach is what a predator is doing anyway.
 		var close := MovementInput.Command.new()
 		close.throttle = 1.0
-		for _i in 60:
+		# Long enough for a body held to the speed its own legs deliver to actually
+		# arrive. The loop stops the moment the jaws are in range, so this is a
+		# budget rather than a duration — and at a second it was a budget sized for
+		# creatures travelling three times as fast as any of them now does.
+		for _i in 220:
 			var foot: Vector2 = victim.gait.limbs[0].plan[2]
 			if biter.head_pos.distance_to(foot) <= biter.params.bite_reach * biter.size_scale:
 				break
 			biter.command = close
 			biter._physics_process(TICK)
 			victim._physics_process(TICK)
+		# ...and then let it come to a stop before it strikes, which is what an
+		# animal does and what the scaffolding used to get for free. A body has
+		# weight now — see Locomotion.PUSH_CEILING — so letting go of the throttle
+		# no longer stops it on the same tick: it coasts the last of the gap, walks
+		# into the leg it was closing on, and takes the contact pass's shove in the
+		# back at exactly the moment it was supposed to be biting.
 		biter.command = MovementInput.Command.new()
+		for _i in 40:
+			if absf(biter.speed) < 1.0:
+				break
+			biter._physics_process(TICK)
+			victim._physics_process(TICK)
 
 	# Pointed at the leg before striking at it, because a strike goes where the
 	# head is looking and the leg has been moving the whole way in: the gait routes

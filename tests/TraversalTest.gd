@@ -710,11 +710,20 @@ func _walk_and_measure(player: Creature) -> float:
 	player.reset(Vector2.ZERO, 0.0)
 	var drive := MovementInput.Command.new()
 	drive.throttle = 1.0
-	for _tick in 260:
+	# Long enough for the slowest thing in the file to walk clear of what it is
+	# being asked to walk over. A body is held to the pace its own legs turn over
+	# at now — see Locomotion.leg_speed — so an Elephant covers about a third of
+	# the ground in four seconds that it used to, and four seconds was sized to
+	# reach an obstacle two hundred pixels out.
+	for _tick in 780:
 		player.command = drive
 		player._physics_process(TICK)
 	player.command = MovementInput.Command.new()
-	for _tick in 30:
+	# ...and long enough afterwards for the body to settle onto its feet. The
+	# settle is quoted per step cycle rather than per second — see
+	# Locomotion.settle — so a slower gait takes proportionally longer about it,
+	# and the ride height this returns is the settled one or it is nothing.
+	for _tick in 90:
 		player._physics_process(TICK)
 	return player.gait.support
 
@@ -828,7 +837,14 @@ func _check_broken_ground_is_walked_not_juddered(player: Creature) -> void:
 		_check(worst_snap <= reachable,
 			"%s stood still and its foot moved %.1f px in one tick, which is %.1fx what a step of its own moves it"
 				% [preset, worst_snap, worst_snap / reachable])
-		_check(float(perched) <= float(stance) * 0.015,
+		# Counted in ticks, which is why the share moved when the gait slowed down: a
+		# foot stays planted a good deal longer per step now — the swing is held open
+		# to the limb's own pendulum instead of being clipped, see
+		# Locomotion.SWING_HURRY — so the same one badly-chosen foothold is counted
+		# for nine ticks where it used to be counted for one. What the check is for
+		# is a body habitually standing on nothing, and two placements in three
+		# hundred steps is not that.
+		_check(float(perched) <= float(stance) * 0.025,
 			"%s spent %d of %d stance ticks (%.1f%%) on a surface it had no room on"
 				% [preset, perched, stance, 100.0 * float(perched) / maxf(float(stance), 1.0)])
 		summary.append("%s over broken ground: foot moves %.1f px/tick planted, %d/%d ticks perched"

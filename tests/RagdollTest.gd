@@ -184,7 +184,12 @@ func _check_solid(player: Creature, body: Creature) -> void:
 	var pose_before: PackedFloat32Array = _joint_angles(body.spine)
 	var drive := MovementInput.Command.new()
 	drive.throttle = 1.0
-	for _tick in 240:
+	# Four seconds was a window sized for a creature walking at three times the
+	# pace its legs actually turn over at — see Locomotion.leg_speed. A carcass is
+	# shoved along at whatever pace the thing shoving it walks, so the same twenty
+	# pixels of ground now takes the best part of twenty seconds. The claim is that
+	# the carcass moves rather than being walked through, not how quickly.
+	for _tick in 1200:
 		player.command = drive
 		player._physics_process(TICK)
 		body._physics_process(TICK)
@@ -250,7 +255,9 @@ func _check_dragged(player: Creature, body: Creature) -> void:
 	var pose_before: PackedFloat32Array = _joint_angles(body.spine)
 	var drive := MovementInput.Command.new()
 	drive.throttle = -1.0
-	for _tick in 180:
+	# ...and the same again for the tow, which is a backing Elephant: the slowest
+	# thing in the file, going the slow way.
+	for _tick in 420:
 		player.command = drive
 		player.set_bite_held(true)
 		player._physics_process(TICK)
