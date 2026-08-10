@@ -70,11 +70,21 @@ const LAYER_DEPTH: Array[float] = [
 ## reads as mass 1.0 there and every other creature is a ratio against it. A
 ## constant rather than a measured baseline for the same reason the lattice's
 ## dimensions are: it has to mean the same thing after the creation menu has
-## restructured the body underneath it.
+## restructured the body underneath it. Still quoted in the damage ledger's own
+## units, because it norms the trunk reading that sizes the limbs — see `update`.
 const REFERENCE_CELL_MASS: float = 280.0
 ## ...and its muscle alone, in cells, so `muscle_power` 1.0 reads as strength 1.0
-## on the same animal.
+## on the same animal. Ledger units, for the latticeless fallback only.
 const REFERENCE_MUSCLE_CELLS: float = 172.0
+## The same two rulers for the 3D cell lattice the census is now counted off:
+## the default build's density-weighted standing cells, and its muscle cells
+## alone. Chosen so the default build weighs and pulls *exactly* what it did
+## under the ledger census it replaced — its cells are 3740.6 units and 914
+## muscle, quoted against slightly smaller rulers because the old census also
+## sat a fraction over its own reference — so no calibrated behaviour anywhere
+## downstream moves. Re-measure with tests/LatticeProbe.gd if the carve changes.
+const REFERENCE_LATTICE_UNITS: float = 3728.8013
+const REFERENCE_LATTICE_MUSCLE: float = 910.5964
 
 ## Silhouette volume of the default Lizard build, kept as the reference for the
 ## plan-view `volume` reading below — a picture-space number some consumers still
@@ -185,22 +195,33 @@ func update(body: BodyShape, spine: Spine, tissue: TissueGrid, p: CreatureParams
 		# T. rex's legs come out pillars and its arms stay the twigs they are,
 		# with no rule anywhere saying so.
 		var trunk: float = p.density \
-			* _tally(tissue, tissue.region_full, false) / REFERENCE_CELL_MASS
+			* _tally(tissue, tissue.region_full) / REFERENCE_CELL_MASS
 		var bearing: bool = Locomotion.bears_on_forelimbs(p)
 		limb_load = Vector2(
 			trunk * 0.25 if bearing else 0.0,
 			trunk * (0.25 if bearing else 0.5))
 
-		# Now the limbs are sized, they are volume too — length, width, depth,
-		# girth and foot together, so a leg thickened to carry a heavier body is
-		# itself more cells, more muscle and more weight on the scales.
-		_limb_volumes(p, scale)
+		# The load is what sizes the legs, so it is settled before the lattice
+		# lays cells around their bones. The lattice is the census: a genuine 3D
+		# body of constant-sized cells, rebuilt only when the animal's own
+		# description changes, mirrored against the damage ledger every tick.
+		if tissue.lattice == null:
+			tissue.lattice = AnatomyLattice.new()
+		tissue.lattice.ensure(tissue.plan, p, scale, stance.depth_ratio,
+			tissue.fat_reserve, limb_load)
+		tissue.lattice.refresh_damage(tissue)
 
-		# The standing census: every region, every layer, at whatever is left in
-		# it. Damage needs no multiplier — a bitten region simply counts fewer
-		# cells, and fewer of whichever tissue the bite actually took.
-		var standing: float = _tally(tissue, tissue.region_hp, true)
-		mass = maxf(p.density * standing / REFERENCE_CELL_MASS, MIN_MASS)
+		# The standing census, counted straight off the cells: every region,
+		# every tissue, at whatever is left standing in it. Damage needs no
+		# multiplier — a bitten region simply counts fewer cells, and fewer of
+		# whichever tissue the bite actually took. The same counts the anatomy
+		# panel prints and its specimen draws, which is the whole claim.
+		cells = float(tissue.lattice.standing_total)
+		muscle_cells = float(tissue.lattice.tissue_cells(AnatomyLattice.MUSCLE))
+		for region in BodyPlan.REGIONS:
+			region_cells[region] = float(tissue.lattice.region_cells(region))
+		mass = maxf(p.density * tissue.lattice.standing_units \
+			/ REFERENCE_LATTICE_UNITS, MIN_MASS)
 	else:
 		mass = maxf(p.density * (volume / REFERENCE_VOLUME), MIN_MASS)
 
@@ -213,7 +234,7 @@ func update(body: BodyShape, spine: Spine, tissue: TissueGrid, p: CreatureParams
 	# and strength in one currency: power-to-weight falls as the cube root of
 	# density exactly as it falls with size.
 	var drive: float = state.locomotion if state != null and state.impaired else 1.0
-	var fibre: float = p.density * muscle_cells / REFERENCE_MUSCLE_CELLS \
+	var fibre: float = p.density * muscle_cells / REFERENCE_LATTICE_MUSCLE \
 		if tissue != null else mass
 	strength = maxf(p.muscle_power * pow(maxf(fibre, 0.0), AREA_EXPONENT) * drive, 0.0001)
 
@@ -272,48 +293,20 @@ func _axial_volumes(body: BodyShape, spine: Spine, plan: BodyPlan,
 	_region_volume[BodyPlan.TAIL] += tip * (tip * depth_ratio) * tip * (2.0 / 3.0)
 
 
-## Physical volume of the four limbs, each sized to what it carries.
+## Adds up the axial tissue stacks as density-weighted cells — the trunk the
+## limbs are asked to carry.
 ##
-## A limb scales in every dimension at once: its length is the species' bone, its
-## thickness is asked of the load it holds up — see Limb.girth_of — and its foot
-## spreads with the same load. So the volume here is where "a heavier body needs
-## thicker legs" becomes "thicker legs are more cells": the extra girth is real
-## tissue, weighed and counted like any other, and most of it is muscle.
-func _limb_volumes(p: CreatureParams, scale: float) -> void:
-	for region in BodyPlan.LIMB_REGIONS:
-		var fore: bool = region == BodyPlan.FL or region == BodyPlan.FR
-		var bone: float = (p.arm_length if fore else p.leg_length) * scale
-		var load: float = limb_load.x if fore else limb_load.y
-		var upper_share: float = p.fore_upper_share if fore else p.hind_upper_share
-		var upper_r: float = Limb.girth_of(bone, scale, load) * 0.5
-		# The lower bone runs slimmer than the upper, in exactly the ratio the
-		# lattice and the renderer draw it.
-		var lower_r: float = upper_r * 0.72
-		var foot_r: float = Limb.foot_of(bone, scale)
-		_region_volume[region] = bone * upper_share * upper_r * upper_r \
-			+ bone * (1.0 - upper_share) * lower_r * lower_r \
-			+ foot_r * foot_r * foot_r * (4.0 / 3.0)
-
-
-## Adds up one set of tissue stacks as density-weighted cells.
-##
-## `hp` is which reading of the lattice to count — `region_full` for the animal
-## as built, `region_hp` for what is still standing — and the conversion runs
-## through each region's *reference* stack: the region's physical volume is worth
-## its reference depth (hit points through LAYER_DEPTH), so a layer's cells are
-## its share of that, and tissue beyond the reference (a heavy fat reserve) is
-## genuinely extra cells. The
-## return is Σ cells × density, the mass numerator; alongside it the full pass
-## fills `cells`, `region_cells` and `muscle_cells`, which are the same counts
-## before the densities are applied.
-func _tally(tissue: TissueGrid, hp: PackedFloat32Array, full_pass: bool) -> float:
+## Quoted off the damage ledger rather than the cell lattice, deliberately: the
+## lattice needs the limb loads *before* it can lay a leg's cells, so the trunk
+## reading that produces those loads has to come from somewhere the legs are not.
+## The conversion runs through each region's *reference* stack: the region's
+## physical volume is worth its reference depth (hit points through
+## LAYER_DEPTH), so a layer's cells are its share of that, and tissue beyond the
+## reference (a heavy fat reserve) is genuinely extra cells.
+func _tally(tissue: TissueGrid, hp: PackedFloat32Array) -> float:
 	var total: float = 0.0
-	if full_pass:
-		cells = 0.0
-		muscle_cells = 0.0
-		region_cells.fill(0.0)
 	for region in BodyPlan.REGIONS:
-		if not full_pass and tissue.plan.is_limb_region(region):
+		if tissue.plan.is_limb_region(region):
 			continue
 		var base: int = region * TissueGrid.LAYERS
 		var norm: float = 0.0
@@ -323,13 +316,8 @@ func _tally(tissue: TissueGrid, hp: PackedFloat32Array, full_pass: bool) -> floa
 			continue
 		var cells_per_depth: float = _region_volume[region] / (norm * CELL_VOLUME)
 		for layer in TissueGrid.LAYERS:
-			var counted: float = hp[base + layer] * LAYER_DEPTH[layer] * cells_per_depth
-			total += counted * TISSUE_DENSITY[layer]
-			if full_pass:
-				cells += counted
-				region_cells[region] += counted
-				if layer == TissueGrid.MUSCLE:
-					muscle_cells += counted
+			total += hp[base + layer] * LAYER_DEPTH[layer] * cells_per_depth \
+				* TISSUE_DENSITY[layer]
 	return total
 
 

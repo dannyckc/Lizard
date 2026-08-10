@@ -34,12 +34,15 @@ const ROWS: Array[Dictionary] = [
 const VESSELS_ROW: int = 4
 const NERVES_ROW: int = 5
 
-## The whole depth stack, in the order it is striped across the composition bar.
-## The organ layer has no row of its own — an organ cannot be peeled off the
-## specimen — but it is part of what the animal weighs, so the bar carries it and
-## the shares below it add up to the body rather than to the four toggles.
+## Every tissue of the cell lattice, in the order it is striped across the
+## composition bar. The organ layer has no row of its own — an organ cannot be
+## peeled off the specimen — but organs, nerves and vessels are all cells and
+## all part of what the animal weighs, so the bar carries the lot and the shares
+## add up to the body rather than to the four toggles.
 const COMPOSITION: Array[int] = [
-	TissueGrid.SKIN, TissueGrid.FAT, TissueGrid.MUSCLE, TissueGrid.BONE, TissueGrid.ORGAN,
+	AnatomyLattice.SKIN, AnatomyLattice.FAT, AnatomyLattice.MUSCLE,
+	AnatomyLattice.BONE, AnatomyLattice.ORGAN, AnatomyLattice.NERVE,
+	AnatomyLattice.VESSEL,
 ]
 ## Not a `const`: a packed array is built by a constructor, which is one step more
 ## than a constant expression is allowed to be.
@@ -49,7 +52,16 @@ static var COMPOSITION_INKS := PackedColorArray([
 	CreatureView.COL_MUSCLE,
 	CreatureView.COL_BONE,
 	CreatureView.COL_ORGAN,
+	CreatureView.COL_DBG_NERVE,
+	CreatureView.COL_DBG_VESSEL,
 ])
+## The section chips, in canonical-axis order with OFF in front.
+const SLICES: Array[Dictionary] = [
+	{"label": "OFF", "axis": AnatomyView.SLICE_OFF},
+	{"label": "LONG", "axis": AnatomyView.SLICE_LONG},
+	{"label": "SIDE", "axis": AnatomyView.SLICE_SIDE},
+	{"label": "FLAT", "axis": AnatomyView.SLICE_FLAT},
+]
 
 const BRAIN_VITAL: int = 0
 const HEART_VITAL: int = 1
@@ -147,6 +159,13 @@ var _chip_row: HBoxContainer
 var _rows: Array[Dictionary] = []
 var _vitals: Array[Dictionary] = []
 var _chips: Array[Button] = []
+var _slice_chips: Array[Dictionary] = []
+var _slice_slider: HSlider
+var _xray_chip: Control
+## The mask the specimen wore before a tissue was isolated, so a second
+## right-click puts the body back exactly as it stood.
+var _before_solo: int = -1
+var _solo_row: int = -1
 
 
 func set_ui_fonts(sans: Font, sans_tracked: Font, mono: Font, mono_tracked: Font) -> void:
@@ -226,17 +245,28 @@ func refresh() -> void:
 	_status.text = _status_word(each, state, integrity)
 	_integrity.set_bar(integrity, INK if integrity >= DIM else CreatureView.COL_DBG_VESSEL)
 
-	var gone: int = grid.gone_count()
-	var cells: int = grid.cell_count()
-	_note.text = "%d CELLS OUT OF %d" % [gone, cells] if gone > 0 \
-		else "LATTICE %d CELLS" % cells
+	# The cell lattice is what the body *is* — the same cells the physique
+	# weighed, printed rather than restated. Where it has not been built yet the
+	# damage ledger's own counts stand in for one frame. Refreshed against the
+	# ledger before anything is printed, so a wound bitten between ticks is
+	# already counted out of the cells it took.
+	var lat: AnatomyLattice = grid.lattice if grid.lattice != null \
+		and grid.lattice.count > 0 else null
+	if lat != null:
+		lat.refresh_damage(grid)
+	if lat != null:
+		var gone: int = lat.built_total - lat.standing_total
+		_note.text = "%d CELLS OUT OF %d" % [gone, lat.built_total] if gone > 0 \
+			else "LATTICE %d CELLS" % lat.built_total
+	else:
+		_note.text = "LATTICE %d CELLS" % grid.cell_count()
 
 	# What the animal is made of, and what that adds up to. Mass is quoted beside
 	# the shares because a share is of something: a lean creature and a fat one can
 	# read the same percentage of muscle and not be the same animal at all.
 	var shares := PackedFloat32Array()
-	for layer in COMPOSITION:
-		shares.append(grid.layer_share(layer))
+	for tissue_kind in COMPOSITION:
+		shares.append(lat.mass_share(tissue_kind) if lat != null else 0.0)
 	_composition.set_segments(shares, COMPOSITION_INKS)
 	_mass.text = "MASS %.2f" % each.physique.mass
 
@@ -246,13 +276,19 @@ func refresh() -> void:
 		var meter: Meter = _rows[index]["meter"]
 		var value: Label = _rows[index]["value"]
 		if layer >= 0:
-			# The bar is how much of that tissue is still standing; the number beside
-			# it is how much of the creature that tissue currently *is*. Two different
-			# questions about the same layer, and the panel is worth having because
-			# they come apart — a limb torn off takes muscle and skin with it and
-			# leaves the body a larger fraction bone than it started.
-			meter.set_bar(grid.layer_left(layer), row["ink"])
-			value.text = "%d%%" % int(round(grid.layer_share(layer) * 100.0))
+			# The bar is how many of that tissue's cells are still standing; the
+			# number beside it is how much of the creature's weight that tissue
+			# currently *is*. Two different questions about the same tissue, and
+			# the panel is worth having because they come apart — a limb torn off
+			# takes muscle and skin with it and leaves the body a larger fraction
+			# bone than it started.
+			if lat != null:
+				meter.set_bar(float(lat.tissue_cells(layer)) \
+					/ maxf(float(lat.tissue_built(layer)), 1.0), row["ink"])
+				value.text = "%d%%" % int(round(lat.mass_share(layer) * 100.0))
+			else:
+				meter.set_bar(grid.layer_left(layer), row["ink"])
+				value.text = "%d%%" % int(round(grid.layer_share(layer) * 100.0))
 		else:
 			var network: AnatomyNetwork = state.vessels if index == VESSELS_ROW \
 				else state.nerves
@@ -492,7 +528,96 @@ func _build_layers() -> Control:
 		line.add_child(value)
 
 		_rows.append({"line": line, "swatch": swatch, "meter": meter, "value": value})
+
+	column.add_child(_build_inspect())
 	return section
+
+
+## The ways inside the specimen that are not a peel: the section plane that
+## carves the lattice along one of its own axes, and the X-ray that thins every
+## cell to a film. Both are subtractions from the same cells, so what they show
+## is always what is genuinely there.
+func _build_inspect() -> Control:
+	var row := HBoxContainer.new()
+	row.custom_minimum_size.y = 22.0
+	row.add_theme_constant_override("separation", 6)
+
+	row.add_child(_label("SECTION", 8, _sans_tracked, Color(INK, 0.38)))
+	for entry in SLICES:
+		var chip := Button.new()
+		chip.text = str(entry["label"])
+		chip.flat = true
+		chip.focus_mode = Control.FOCUS_NONE
+		chip.add_theme_font_override("font", _mono_tracked)
+		chip.add_theme_font_size_override("font_size", 8)
+		chip.pressed.connect(_on_slice_pressed.bind(int(entry["axis"])))
+		row.add_child(chip)
+		_slice_chips.append({"chip": chip, "axis": int(entry["axis"])})
+
+	_slice_slider = HSlider.new()
+	_slice_slider.min_value = 0.0
+	_slice_slider.max_value = 1.0
+	_slice_slider.step = 0.01
+	_slice_slider.value = 1.0
+	_slice_slider.custom_minimum_size = Vector2(52.0, 14.0)
+	_slice_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_slice_slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_slice_slider.focus_mode = Control.FOCUS_NONE
+	_slice_slider.value_changed.connect(_on_slice_moved)
+	row.add_child(_slice_slider)
+
+	var xray := Button.new()
+	xray.text = "X-RAY"
+	xray.flat = true
+	xray.focus_mode = Control.FOCUS_NONE
+	xray.add_theme_font_override("font", _mono_tracked)
+	xray.add_theme_font_size_override("font_size", 8)
+	xray.pressed.connect(_on_xray_pressed)
+	row.add_child(xray)
+	_xray_chip = xray
+
+	_style_inspect()
+	return row
+
+
+func _on_slice_pressed(axis: int) -> void:
+	view.slice_axis = axis if view.slice_axis != axis or axis < 0 else AnatomyView.SLICE_OFF
+	if view.slice_axis >= 0 and view.slice_at >= 0.999:
+		# A plane parked past the end of the animal sections nothing; arriving on
+		# a fresh axis, start midway through the body so the click shows a cut.
+		view.slice_at = 0.5
+		_slice_slider.set_value_no_signal(0.5)
+	_style_inspect()
+
+
+func _on_slice_moved(value: float) -> void:
+	view.slice_at = clampf(value, 0.0, 1.0)
+
+
+func _on_xray_pressed() -> void:
+	view.xray = not view.xray
+	_style_inspect()
+
+
+func _style_inspect() -> void:
+	for entry in _slice_chips:
+		var on: bool = view != null and view.slice_axis == int(entry["axis"]) \
+			and int(entry["axis"]) >= 0
+		var off_axis: bool = int(entry["axis"]) < 0 \
+			and (view == null or view.slice_axis < 0)
+		var chip: Button = entry["chip"]
+		chip.add_theme_color_override("font_color",
+			INK if on or off_axis else Color(INK, 0.40))
+		chip.add_theme_color_override("font_hover_color", INK)
+		chip.add_theme_stylebox_override("normal", _chip_style(0.40 if on else 0.13))
+		chip.add_theme_stylebox_override("hover", _chip_style(0.40))
+		chip.add_theme_stylebox_override("pressed", _chip_style(0.55))
+	if _xray_chip != null:
+		var lit: bool = view != null and view.xray
+		(_xray_chip as Button).add_theme_color_override("font_color",
+			INK if lit else Color(INK, 0.40))
+		(_xray_chip as Button).add_theme_stylebox_override("normal",
+			_chip_style(0.40 if lit else 0.13))
 
 
 ## The organs, and the blood that decides what either of them is worth.
@@ -536,7 +661,7 @@ func _build_footer() -> Control:
 	row.add_theme_constant_override("separation", 10)
 	section.add_child(row)
 
-	_readout = _label("HOVER A CELL", 9, _mono, Color(INK, 0.34))
+	_readout = _label("HOVER A CELL · RIGHT-CLICK A TISSUE TO ISOLATE", 9, _mono, Color(INK, 0.34))
 	_readout.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_readout.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_readout.clip_text = true
@@ -584,7 +709,14 @@ func _apply_specimen() -> void:
 
 func _on_row_input(event: InputEvent, index: int) -> void:
 	var click := event as InputEventMouseButton
-	if click == null or not click.pressed or click.button_index != MOUSE_BUTTON_LEFT:
+	if click == null or not click.pressed:
+		return
+	if click.button_index == MOUSE_BUTTON_RIGHT:
+		_toggle_solo(index)
+		_sync_toggles()
+		accept_event()
+		return
+	if click.button_index != MOUSE_BUTTON_LEFT:
 		return
 	var layer: int = int(ROWS[index]["layer"])
 	if layer >= 0:
@@ -597,9 +729,29 @@ func _on_row_input(event: InputEvent, index: int) -> void:
 	accept_event()
 
 
+## Right-click a tissue to see it alone — the skeleton by itself, the vessels
+## by themselves — and right-click again to put the body back as it stood.
+func _toggle_solo(index: int) -> void:
+	if _solo_row == index:
+		view.layers = _before_solo >> 2
+		view.show_vessels = (_before_solo & 1) != 0
+		view.show_nerves = (_before_solo & 2) != 0
+		_solo_row = -1
+		_before_solo = -1
+		return
+	if _solo_row < 0:
+		_before_solo = (view.layers << 2) \
+			| (2 if view.show_nerves else 0) | (1 if view.show_vessels else 0)
+	_solo_row = index
+	var layer: int = int(ROWS[index]["layer"])
+	view.layers = (1 << layer) if layer >= 0 else 0
+	view.show_vessels = layer < 0 and index == VESSELS_ROW
+	view.show_nerves = layer < 0 and index == NERVES_ROW
+
+
 func _on_cell_hovered(readout: String, alarm: bool) -> void:
 	if readout.is_empty():
-		_readout.text = "HOVER A CELL"
+		_readout.text = "HOVER A CELL · RIGHT-CLICK A TISSUE TO ISOLATE"
 		_readout.add_theme_color_override("font_color", Color(INK, 0.34))
 		return
 	_readout.text = readout

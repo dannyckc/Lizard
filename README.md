@@ -1329,6 +1329,29 @@ erodes cells; every consequence below is worked out afterwards, from the cells
 that survived. That is what keeps the anatomy and the functional state from ever
 disagreeing, including in cases nobody anticipated.
 
+#### The 3D cell lattice
+
+[`AnatomyLattice`](scripts/creature/AnatomyLattice.gd) is the body as a true 3D
+lattice of constant-sized cells — one tissue per cell, every cell with a place
+in the animal's own three axes. Skin is the outermost shell of cells and only
+that; fat is a real layer laid beneath it, thickened shell by shell as
+`fat_reserve` rises (and the animal genuinely swells and outweighs its lean self
+for it); muscle is the bulk wrapped around an *internal* skeleton of skull,
+vertebrae, ribs, girdle hoops and limb cores, none of which ever faces open air;
+the brain sits in its case and the heart in its chest as volumes with named
+substructures; the cord and the great vessels thread the middle of everything as
+cells of their own. The cell size never changes: a bigger animal is more cells,
+a leg sized to a heavier load carries more muscle cells around its own bone, and
+the census counted off these cells is what `Physique` weighs, what the anatomy
+drawer prints, and what its specimen draws — one body, counted once.
+
+The lattice is structure; `TissueGrid` remains the damage ledger. Every cell
+knows which ledger column it stands in, and wounds are mirrored onto the cells
+outside-in, so the specimen's craters are the same missing cells the scales no
+longer weigh. The drawer inspects all of it directly: peel tissues off, isolate
+one with a right-click, thin the body to an X-ray, or run a section plane down
+any of its three axes and read single cells off the cut face.
+
 #### The organs are protected by being behind something
 
 Bone stops a bite dead, because there is nothing behind it to reach — so an organ
@@ -2410,6 +2433,7 @@ godot --headless --path . --script tests/LocomotionTest.gd # legs solved from th
 godot --headless --path . --script tests/ArticulationTest.gd # joints, girdles and the join
 godot --headless --path . --script tests/VolumeTest.gd    # every cell in three axes
 godot --headless --path . --script tests/TraversalTest.gd # under, over, onto or stopped
+godot --headless --path . --script tests/LatticeTest.gd   # the 3D cell lattice, one census
 ```
 
 `HeightTest` is weighted toward the seams rather than the arithmetic — the places

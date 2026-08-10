@@ -312,12 +312,19 @@ func _measure(player: Creature, preset: String, throttle: float) -> Dictionary:
 	var long: float = -INF
 	var fore_foot: float = 0.0
 	var bearing: int = 0
+	var aerial: float = 0.0
 
 	for tick in SETTLE + SAMPLE:
 		player.command = drive
 		player._physics_process(TICK)
 		if tick < SETTLE:
 			continue
+		# The solver's commitment, at its fullest over the run rather than at
+		# whatever instant the window happens to close on. The reading breathes
+		# with the surge of the gait as the body works across the habitat's
+		# terrain, so the final tick is a sample of that oscillation's phase —
+		# the build's answer to "does this animal commit" is its peak.
+		aerial = maxf(aerial, player.gait.footfall.aerial)
 		var up: int = 0
 		for limb in player.gait.limbs:
 			if limb.stepping and not was[limb.key]:
@@ -374,7 +381,7 @@ func _measure(player: Creature, preset: String, throttle: float) -> Dictionary:
 		# What the solver decided, for the failure messages.
 		"froude": want.froude,
 		"launch": want.launch,
-		"aerial": want.aerial,
+		"aerial": aerial,
 		"interference": want.interference,
 		"gait": want.describe(),
 	}

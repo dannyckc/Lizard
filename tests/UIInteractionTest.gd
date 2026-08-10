@@ -249,8 +249,9 @@ func _check_anatomy(hud: EvolutionHUD) -> void:
 		panel._vitals[AnatomyPanel.HEART_VITAL]["word"].text,
 		panel._vitals[AnatomyPanel.BLOOD_VITAL]["word"].text,
 	]
-	_check(panel._note.text.contains(str(main.creature.anatomy.tissue.cell_count())),
-		"the stage note did not count the creature's own lattice: " + panel._note.text)
+	_check(main.creature.anatomy.tissue.lattice != null and panel._note.text.contains(
+			str(main.creature.anatomy.tissue.lattice.built_total)),
+		"the stage note did not count the creature's own cell lattice: " + panel._note.text)
 
 	var f3 := InputEventKey.new()
 	f3.keycode = KEY_F3
@@ -269,13 +270,17 @@ func _check_anatomy(hud: EvolutionHUD) -> void:
 ## reading that took up a quarter of this panel and told nobody anything.
 func _check_composition(panel: AnatomyPanel, each: Creature) -> void:
 	var grid: TissueGrid = each.anatomy.tissue
+	var lat: AnatomyLattice = grid.lattice
+	_check(lat != null and lat.count > 0, "the specimen has no cell lattice to quote")
 	var total: float = 0.0
-	for layer in AnatomyPanel.COMPOSITION:
-		total += grid.layer_share(layer)
+	for tissue_kind in AnatomyPanel.COMPOSITION:
+		total += lat.mass_share(tissue_kind)
 	_check(is_equal_approx(total, 1.0),
 		"the tissue shares did not account for the whole body: %.4f" % total)
-	_check(grid.layer_share(TissueGrid.MUSCLE) > grid.layer_share(TissueGrid.SKIN),
-		"the specimen read as more skin than muscle")
+	# The flesh outnumbers the frame: however coarse the animal, its muscle is
+	# laid around the skeleton in more cells than the skeleton itself.
+	_check(lat.tissue_cells(AnatomyLattice.MUSCLE) > lat.tissue_cells(AnatomyLattice.BONE),
+		"the specimen read as more skeleton than muscle")
 
 	panel.refresh()
 	var muscle: String = panel._rows[2]["value"].text
@@ -287,7 +292,9 @@ func _check_composition(panel: AnatomyPanel, each: Creature) -> void:
 	# Every proportion on the panel is a bar, and the bars are on the creature's
 	# own numbers rather than on whatever was last set.
 	_check(is_equal_approx(panel._rows[2]["meter"].values[0],
-		grid.layer_left(TissueGrid.MUSCLE)), "the muscle bar was not the muscle left")
+		float(lat.tissue_cells(AnatomyLattice.MUSCLE)) \
+			/ maxf(float(lat.tissue_built(AnatomyLattice.MUSCLE)), 1.0)),
+		"the muscle bar was not the muscle cells left standing")
 
 	var brain: String = panel._vitals[AnatomyPanel.BRAIN_VITAL]["word"].text
 	var heart: String = panel._vitals[AnatomyPanel.HEART_VITAL]["word"].text

@@ -478,6 +478,12 @@ var patches: Dictionary = {}
 var plan: BodyPlan = null
 ## How much fat this species lays down, as a multiple of the plan's profile.
 var fat_reserve: float = 1.0
+## The creature's 3D cell lattice — the structural description this ledger
+## records damage against, hung here so everything that already reaches the
+## tissue (the physique, the anatomy panel, a bare test) finds the same lattice.
+## Built and refreshed by Physique.update; untyped to keep the two scripts free
+## of a load cycle. See AnatomyLattice.
+var lattice = null
 
 ## Tissue standing per region and layer, indexed `region * LAYERS + layer`, and
 ## the same totals when whole. Maintained as damage lands rather than measured, so
