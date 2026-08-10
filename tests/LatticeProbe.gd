@@ -46,7 +46,7 @@ func _run() -> void:
 		var regions: PackedStringArray = PackedStringArray()
 		for r in BodyPlan.REGIONS:
 			regions.append("%s %d" % [BodyPlan.REGION_NAMES[r], lat.region_cells(r)])
-		print("%s: cells %d  units %.1f  axial %.1f  muscle %d  (built in %.1f ms)"
+		print("%s: cells %d  units %.4f  axial %.4f  muscle %d  (built in %.1f ms)"
 			% [preset, lat.standing_total, lat.standing_units, lat.axial_units,
 				lat.tissue_cells(AnatomyLattice.MUSCLE), first_tick])
 		print("    tissues: %s" % " · ".join(counts))

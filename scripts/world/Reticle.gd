@@ -391,7 +391,6 @@ static func _limb_in_front(creature: Creature, cursor: Vector2) -> AnatomyState.
 	for limb in creature.gait.limbs:
 		if limb.severed:
 			continue
-		var girth: float = limb.girth(creature.size_scale)
 		for segment in 3:
 			var solid: float = tissue.limb_solid(limb.key, segment)
 			if solid <= 0.0:
@@ -399,7 +398,7 @@ static func _limb_in_front(creature: Creature, cursor: Vector2) -> AnatomyState.
 			var a: Vector2 = limb.joints[segment]
 			var b: Vector2 = limb.joints[mini(segment + 1, 2)]
 			var thickness: float = limb.foot_radius(creature.size_scale) if segment == 2 \
-				else girth * (0.5 if segment == 0 else 0.36)
+				else limb.segment_girth(segment, creature.size_scale) * 0.5
 			var u: float = AnatomyState.segment_u(cursor, a, b)
 			var score: float = cursor.distance_to(a.lerp(b, u)) - thickness * solid
 			if score > 0.0 or (best != null and score >= best.score):

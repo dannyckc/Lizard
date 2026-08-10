@@ -1374,8 +1374,16 @@ func _skip(limb: Limb) -> bool:
 ## value at 1.0, which is the guarantee that a healthy creature walks exactly as
 ## it did before this existed.
 func _read_function(limb: Limb, state: BodyState, impaired: bool) -> void:
+	# What the muscle behind this limb's girdle can actually put across the
+	# socket. A ceiling rather than a gain: an animal built with the muscle to
+	# swing its legs is at full capability and reads exactly as it always did,
+	# and one whose girdle has too little — a vestigial forelimb, a hip chewed
+	# hollow — cannot swing them however sound its nerves are. This is where the
+	# anatomy becomes the movement rather than merely describing it.
+	var built: float = maxf(loco.girdle_drive[limb.pair] if loco != null else 1.0,
+		Physique.DRIVE_FLOOR)
 	if not impaired:
-		limb.drive = 1.0
+		limb.drive = minf(1.0, built)
 		limb.flex = 1.0
 		limb.command = 1.0
 		limb.carry = 1.0
@@ -1398,8 +1406,8 @@ func _read_function(limb: Limb, state: BodyState, impaired: bool) -> void:
 	# stride is priced off — not the limb's average. A shoulder eaten out and a
 	# shank eaten out are different injuries and have to walk differently, and
 	# these two lines are the whole of why they do.
-	limb.drive = minf(region.strength,
-		state.actuator(region.index, BodyPlan.JOINT_ROOT))
+	limb.drive = minf(minf(region.strength,
+		state.actuator(region.index, BodyPlan.JOINT_ROOT)), built)
 	limb.flex = state.actuator(region.index, BodyPlan.JOINT_MID)
 	# A limb that cannot bear its own weight folds under the body as well as
 	# reaching less far, so the two collapse into one envelope scale.
@@ -1814,8 +1822,8 @@ func _solve_limb(limb: Limb, body: BodyShape, p: CreatureParams,
 	#
 	# So a leg only routes around what it would actually walk into: a planted foot
 	# is an obstacle at ankle height, and the same foot picked up is a doorway.
-	var upper_radius: float = limb.girth(scale) * 0.5
-	var lower_radius: float = upper_radius * 0.72
+	var upper_radius: float = limb.segment_girth(0, scale) * 0.5
+	var lower_radius: float = limb.segment_girth(1, scale) * 0.5
 	var foot_radius: float = limb.foot_radius(scale)
 	var contact_applied: bool = false
 	for _iteration in LIMB_CONTACT_ITERATIONS:

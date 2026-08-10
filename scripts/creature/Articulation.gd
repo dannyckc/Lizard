@@ -90,6 +90,12 @@ class Joint extends RefCounted:
 	## knee that barely bends is a horse, and the reverse is a rabbit.
 	var swing: float = 1.08
 
+	## How much muscle this girdle's limbs carry at the top — see Limb.belly_of,
+	## which is where the reasoning is. Derived here because this is where both of
+	## the things that ask for muscle are already in hand: how far the socket
+	## swings, and how far past its stance the joint folds.
+	var belly: float = Limb.BELLY_BASE
+
 	## How much of the foot is a toe to push off from, 0 to 1.
 	##
 	## The last joint in the chain, and the only propulsion a straight-legged
@@ -132,6 +138,7 @@ class Joint extends RefCounted:
 		fold = span(fold_angle)
 		swing = clampf(p_swing, 0.05, PI * 0.5)
 		push = clampf(p_push, 0.0, 1.0)
+		belly = Limb.belly_of(swing, fold_range)
 
 	## What the chain measures end to end at an included angle of `angle`, as a
 	## share of its own length. The cosine rule and nothing else: two bones with a

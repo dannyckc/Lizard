@@ -229,6 +229,12 @@ const BUNCH_SHARE: float = 0.16
 ## mass^(2/3) and weight as mass, so this falls as the cube root of size all on
 ## its own — and every slow thing about a large animal below is this one number.
 var power: float = 1.0
+## What the muscle behind each girdle can deliver across its sockets, against an
+## ordinarily-built animal — see Physique.girdle_drive, which is where it is
+## counted and why. Held here because this is the object the gait already reads
+## its capabilities off, and because it belongs beside `power`: that is how hard
+## the whole animal can push and this is which end of it is pushing.
+var girdle_drive: Vector2 = Vector2.ONE
 ## What each girdle's joints do — how extended its limbs stand, how far they lock
 ## out and how far they fold. Held rather than derived: it is a description of the
 ## skeleton, refreshed when the body is rebuilt, and every reading below that used
@@ -267,6 +273,7 @@ func update(posture: Posture, physique: Physique, p: CreatureParams, scale: floa
 	if posture == null or physique == null or p == null:
 		return
 	power = clampf(physique.strength / maxf(physique.mass, 0.0001), 0.05, 8.0)
+	girdle_drive = physique.girdle_drive
 
 	# What the joints do. There is no longer a cap here, and its absence is the
 	# whole of what let a column stand up: the old one held every limb a fixed

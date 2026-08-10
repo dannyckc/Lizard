@@ -1352,6 +1352,89 @@ longer weigh. The drawer inspects all of it directly: peel tissues off, isolate
 one with a right-click, thin the body to an X-ray, or run a section plane down
 any of its three axes and read single cells off the cut face.
 
+##### A limb is thick where its muscle is
+
+A leg is not a cylinder, and modelling it as one was why the legs in this game
+had nothing inside them. The muscle that moves a limb sits at the top of it —
+the belly is up at the girdle where it has leverage and where its weight costs
+the swing least — what crosses the joint is tendon, and what runs down to the
+foot is bone in a sleeve. [`Limb.shape_at`](scripts/creature/Limb.gd) is that
+shape: a belly at the socket, a *waist* at the joint, and a slender shank. The
+ledger poses its stations through it, the lattice fills it and every contact
+query measures against it, so there is one description of how much limb there is
+at a place.
+
+How deep the belly runs is read off what the limb is built to do with itself —
+how far the socket swings, and how far past its stance the joint folds. Both are
+work rather than weight, and weight is already in the girth. A cheetah and a
+kangaroo score high on both and come out with the deep proximal muscle their
+speed and their leaps require; an elephant, whose legs neither swing far nor
+fold, comes out with the near-cylindrical column it actually has.
+
+This is not cosmetic. At two and a half pixels to the cell, a uniform shaft five
+pixels across is *entirely surface* — every cell of it has a face on open air, so
+the hull rule makes every cell skin and the leg contains no muscle, no bone and
+nothing to bite through. That was the state of every leg in the file. Widening
+the belly is what gives a limb an inside.
+
+##### Where the muscle is, and what it drives
+
+`Physique` publishes two readings off the census that were not askable before.
+`girdle_muscle` is the muscle standing behind each girdle — the pair's own limbs
+plus the thorax or pelvis they hang from, because the muscle that swings a leg is
+mostly not on the leg. `girdle_share` is which end of the animal that muscle is
+on, and it reads a cheetah as built to drive from behind and an elephant from the
+shoulder without either being told to.
+
+`girdle_drive` is how much of it is still standing, against what the animal was
+built with there — exactly one on a sound body of any build, and the ceiling the
+gait holds each limb's force under. So a hip eaten hollow stops driving the hind
+legs, which under the whole-body strength reading it did not: a girdle is a small
+share of an animal and chewing one barely moved the total.
+
+##### A bite lands where the teeth are
+
+The ledger says how much of a column's tissue is gone; the lattice says which
+cells that is, and it picks them by where the jaws actually were. A column can
+lose the flesh the teeth can reach and no more, however many times they close on
+it — so a bite along the top of a back is a wound along the top of a back rather
+than a hole punched through the whole animal, and the structures it destroys are
+the ones at the point of impact. A mouth that covers the whole column is capped
+at everything, which is to say not capped at all, so every bite that was ever
+going to take a leg off still does.
+
+##### Drawing it
+
+The specimen marks each cell with a patch of its own *surface* — a quad in the
+plane the cell's outward direction defines — rather than a square stamped flat on
+the page. Neighbouring cells on a shell are neighbouring patches of one surface,
+so their marks meet and overlap instead of coming apart wherever the surface is
+not facing the eye, which is where the holes in the skin used to be. The
+direction is the one the carve took off the shape of the animal rather than off
+the face of a cube, so the marks roll around the body and it shades as a solid.
+
+It is also the cheaper way round. A closed body hides its own back, so every mark
+facing away is dropped for one dot product; the whole chain of transforms is
+folded into one affine per *station* and spent four multiply-adds at a time per
+cell; every shade is banked once a frame instead of computed per cell; and past
+the point where a cell is smaller than the mark that can honestly be made for it
+the specimen halves its marks on a checkerboard through the solid and grows what
+is left. X-ray has no surface to it at all — every cell of the body is a mark —
+so past a budget it sieves the census instead and thickens what survives.
+
+Measured against the same scene with the drawer shut, so what is quoted is the
+specimen and nothing else:
+
+| specimen | before | after |
+| --- | --- | --- |
+| Lizard, 3.3k cells | 27.6 ms/frame | 1.0 |
+| Elephant, 52k cells | 45.3 ms/frame | 5.7 |
+| Elephant, X-ray | 199.8 ms/frame | 35.3 |
+
+With the drawer shut the frame is unchanged to within a tenth of a millisecond,
+and the simulation tick is unchanged everywhere except the tick a bite lands on,
+which is four per cent dearer for resolving where the teeth were.
+
 #### The organs are protected by being behind something
 
 Bone stops a bite dead, because there is nothing behind it to reach — so an organ
@@ -2434,6 +2517,20 @@ godot --headless --path . --script tests/ArticulationTest.gd # joints, girdles a
 godot --headless --path . --script tests/VolumeTest.gd    # every cell in three axes
 godot --headless --path . --script tests/TraversalTest.gd # under, over, onto or stopped
 godot --headless --path . --script tests/LatticeTest.gd   # the 3D cell lattice, one census
+```
+
+Two diagnostic harnesses sit beside the tests and are not part of the suite.
+`tests/LatticeAudit.gd` prints every preset's census region by region and tissue
+by tissue, plus where its locomotor muscle stands, whether anything is hollow
+that should not be and what the specimen would draw — it is how "the cheetah has
+no leg muscles" is checkable rather than arguable. `tests/AnatomyShot.gd` must run
+windowed: it opens the anatomy drawer on a named preset, times the frame with the
+specimen up and saves pictures of it from three angles.
+
+```
+godot --headless --path . --script tests/LatticeAudit.gd
+godot --path . --resolution 1440x810 --disable-vsync \
+    --script tests/AnatomyShot.gd -- --preset Elephant [--peel|--xray|--wire|--field]
 ```
 
 `HeightTest` is weighted toward the seams rather than the arithmetic — the places

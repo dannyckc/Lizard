@@ -1881,7 +1881,7 @@ func _push_out_of_limbs(other: Creature) -> Vector2:
 			if solid <= 0.0:
 				continue
 			var radius: float = limb.foot_radius(other.size_scale) if segment == 2 \
-				else limb.girth(other.size_scale) * (0.5 if segment == 0 else 0.36)
+				else limb.segment_girth(segment, other.size_scale) * 0.5
 			# `push_capsule_out_of_body` answers for the capsule; this body is the
 			# one that yields, so it goes the other way. The leg's band goes with
 			# it: which of *this* creature's own intervals the leg is standing in

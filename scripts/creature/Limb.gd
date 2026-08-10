@@ -121,6 +121,10 @@ var working: float = 0.78
 var swing: float = 1.08
 ## How much of the foot is a toe to push off from — see `toe_rise`.
 var push: float = 0.15
+## How much muscle this limb carries at the top of itself — see `belly_of`. The
+## thickness profile is read off it, and so, therefore, is how much muscle the
+## lattice lays on the leg and how hard the leg can push.
+var belly: float = BELLY_BASE
 ## Share of the limb in the upper bone. Held here as well as applied to
 ## `lengths`, so a limb re-measured after it has stopped walking keeps the
 ## proportions it grew with.
@@ -404,6 +408,7 @@ func read_joint(joint: Articulation.Joint) -> void:
 	swing = joint.swing
 	push = joint.push
 	upper_share = joint.upper
+	belly = joint.belly
 
 
 ## What angle this limb's joint is currently solved at, in radians. A reading
@@ -422,7 +427,14 @@ func joint_angle() -> float:
 ## Slimmest a limb may run against its own length: flesh wrapped around a bone
 ## cannot be a line however little it carries. This is the floor a biped's arm
 ## and a runner's shank sit on.
-const GIRTH_ASPECT: float = 0.10
+##
+## Quoted against the *characteristic* girth, which the muscle belly then stands
+## about a half again above — so the floor on a real thigh is nearer a fifth of
+## the limb's length, which is what a measured limb actually is. It used to be a
+## tenth, and a tenth is a stick: a cheetah's leg came out five pixels across,
+## which at two and a half pixels to the cell is a leg with no inside and hence
+## no muscle in it at all.
+const GIRTH_ASPECT: float = 0.13
 ## How limb thickness grows with the mass carried: girth = GIRTH_LOAD × load^GIRTH_ALLOMETRY.
 ##
 ## The exponent is the measured one, and it sits between two arguments that are
@@ -439,6 +451,54 @@ const GIRTH_ASPECT: float = 0.10
 const GIRTH_ALLOMETRY: float = 0.4
 const GIRTH_LOAD: float = 11.5
 
+# --- where the meat on a limb actually is -------------------------------------
+## A limb is not a cylinder, and treating it as one is why the legs in this game
+## had no muscle in them. The muscle that moves a leg sits at the top of it — the
+## belly is up at the girdle where it has leverage and where its weight costs the
+## swing least — and what runs down to the foot is bone, tendon and skin. That
+## taper is the whole of what makes a limb *cursorial*: mass carried high swings
+## quickly, and the same mass carried low does not.
+##
+## `girth` below stays what it always was, the characteristic thickness the load
+## asks for, and this is the shape laid around it: a plateau of muscle down the
+## proximal bone, and then the drop through the knee to a shank that is bone in a
+## sleeve. The plateau is the part that matters and it is why this is not a decay
+## curve — a thigh is thick all the way down to the knee, and a leg that starts
+## tapering at the hip has its muscle in the wrong place and, at two and a half
+## pixels to the cell, has no room to hold any at all.
+##
+## The curve has three points on it and each is a fact about a limb. The socket
+## is the belly, where the muscle is. The joint is a *waist* — muscle bellies end
+## above a joint and what crosses it is tendon, so a knee is narrower than the
+## thigh above it, and a limb that stayed thick right down to its joint would be
+## carrying a capsule whose lower cap hangs below the joint into space no part of
+## the animal occupies. And the ankle is the tip: bone in a sleeve.
+##
+## The waist rides at the limb's own `upper_share` rather than at a constant, so
+## a cursorial build — whose proximal bone is the long one — carries its muscle
+## further down than a graviportal one does, without either being told to.
+const TAPER_WAIST: float = 0.72
+const TAPER_TIP: float = 0.42
+## The belly a limb of ordinary proportions carries, and how much the two things
+## that ask for muscle add to it.
+##
+## Both terms are the work the limb does rather than the weight it holds — weight
+## is already in `girth`. A socket that swings through a wide fan moves its foot
+## a long way per stride and needs the long muscle bellies to do it; a joint that
+## folds far past where it stands is a spring being wound, and winding it is what
+## the extensors are for. A cheetah and a kangaroo score high on both and come out
+## with the deep proximal muscle that their speed and their leaps require; an
+## elephant, whose legs neither swing far nor fold, comes out with the near-
+## cylindrical column it actually has.
+const BELLY_BASE: float = 1.45
+const BELLY_SWING: float = 0.35
+const BELLY_FOLD: float = 0.30
+const BELLY_MIN: float = 1.10
+const BELLY_MAX: float = 1.95
+## Swing a limb of ordinary proportions carries, in radians — the default
+## `fore_swing_deg`, so the base belly is the belly of the default build.
+const BELLY_REF_SWING: float = 1.0821
+
 
 ## Thickness of the upper bone, and the flesh over it. Asked of the load the
 ## limb is built to carry — see `load` — so the legs under a heavy body are
@@ -447,6 +507,45 @@ const GIRTH_LOAD: float = 11.5
 ## agree on how much limb is there.
 func girth(scale: float) -> float:
 	return girth_of(anatomical_length, scale, load)
+
+
+## Thickness at one station along the limb, `u` running 0 at the socket to 1 at
+## the ankle. The one description of how much limb there is at a place, read by
+## the ledger that poses it, the lattice that fills it and every contact query
+## that has to know how wide a leg is where it was touched.
+func girth_at(u: float, scale: float) -> float:
+	return girth(scale) * shape_at(u, belly, upper_share)
+
+
+## Thickness of one drawn bone: the profile read at that bone's own middle.
+## `segment` is 0 for the upper bone and 1 for the lower. Everything that
+## approximates a limb as two capsules — the contact router, the ragdoll, the
+## reticle, the bite's hit test — measures itself against this, so none of them
+## can be describing a leg of a different thickness from the one on the page.
+func segment_girth(segment: int, scale: float) -> float:
+	return girth_at(upper_share * 0.5 if segment == 0
+		else upper_share + (1.0 - upper_share) * 0.5, scale)
+
+
+## The taper, as a multiple of the characteristic girth.
+static func shape_at(u: float, p_belly: float, knee: float) -> float:
+	var belly_here: float = maxf(p_belly, TAPER_TIP)
+	var waist: float = maxf(belly_here * TAPER_WAIST, TAPER_TIP)
+	var t: float = clampf(u, 0.0, 1.0)
+	var joint: float = clampf(knee, 0.2, 0.8)
+	if t <= joint:
+		return lerpf(belly_here, waist, smoothstep(0.0, 1.0, t / joint))
+	return lerpf(waist, TAPER_TIP, smoothstep(0.0, 1.0, (t - joint) / (1.0 - joint)))
+
+
+## How much muscle this girdle's limbs carry at the top, from what they are built
+## to do with themselves. Static because the lattice sizes a leg before any limb
+## has been built to ask — see AnatomyLattice._carve_limb — and both readings have
+## to be the same leg.
+static func belly_of(swing: float, fold_range: float) -> float:
+	return clampf(BELLY_BASE
+		+ BELLY_SWING * (swing / BELLY_REF_SWING - 1.0)
+		+ BELLY_FOLD * (fold_range - 1.0), BELLY_MIN, BELLY_MAX)
 
 
 ## The foot stays sized to the leg, and deliberately so: its radius is a working

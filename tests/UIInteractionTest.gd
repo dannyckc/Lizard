@@ -119,10 +119,11 @@ func _check_creator(hud: EvolutionHUD) -> void:
 
 	# ...and it can be opened up on the spot, which is the point of putting it
 	# here rather than making the player leave to look at the body they are making.
+	var outlined: bool = stage.show_lattice
 	creator._on_layer_chip_input(_click(), AnatomyPanel.ROWS.size())
-	_check(not stage.show_lattice, "a layer chip did not reach the specimen")
+	_check(stage.show_lattice != outlined, "a layer chip did not reach the specimen")
 	creator._on_layer_chip_input(_click(), AnatomyPanel.ROWS.size())
-	_check(stage.show_lattice, "a layer chip would not switch back on")
+	_check(stage.show_lattice == outlined, "a layer chip would not switch back on")
 
 	# What the body reports about itself. Read off the creature rather than
 	# authored here, so the failure worth catching is a tile quoting a plausible

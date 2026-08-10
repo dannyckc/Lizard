@@ -79,12 +79,19 @@ const REFERENCE_MUSCLE_CELLS: float = 172.0
 ## The same two rulers for the 3D cell lattice the census is now counted off:
 ## the default build's density-weighted standing cells, and its muscle cells
 ## alone. Chosen so the default build weighs and pulls *exactly* what it did
-## under the ledger census it replaced — its cells are 3740.6 units and 914
+## under the ledger census it replaced — its cells are 3814.54 units and 932
 ## muscle, quoted against slightly smaller rulers because the old census also
 ## sat a fraction over its own reference — so no calibrated behaviour anywhere
-## downstream moves. Re-measure with tests/LatticeProbe.gd if the carve changes.
-const REFERENCE_LATTICE_UNITS: float = 3728.8013
-const REFERENCE_LATTICE_MUSCLE: float = 910.5964
+## downstream moves. Re-measure with tests/LatticeProbe.gd if the carve changes;
+## these last moved when the limbs grew their muscle bellies (Limb.shape_at),
+## which put real flesh on every leg in the file and so more cells on all of them.
+const REFERENCE_LATTICE_UNITS: float = 3802.5081
+const REFERENCE_LATTICE_MUSCLE: float = 928.5294
+
+## Least a girdle may be reduced to by having its muscle eaten. Not zero: a leg
+## with nothing driving it is dragged rather than deleted, and every consumer of
+## `drive` already has its own floor under what a spent limb still does.
+const DRIVE_FLOOR: float = 0.08
 
 ## Silhouette volume of the default Lizard build, kept as the reference for the
 ## plan-view `volume` reading below — a picture-space number some consumers still
@@ -125,6 +132,38 @@ var cells: float = 0.0
 var region_cells: PackedFloat32Array = PackedFloat32Array()
 ## Muscle cells standing, the only tissue strength is read off.
 var muscle_cells: float = 0.0
+
+## Muscle standing behind each girdle: the pair's own limbs plus the girdle
+## region they hang from — thorax in x, pelvis in y — in cells.
+##
+## The muscle that swings a leg is mostly not on the leg. It is on the trunk, on
+## the girdle the leg hangs from, and it reaches the limb across the socket; so
+## "how much muscle drives this pair" is a question about a region of the body
+## rather than about the limbs alone, and this is that region counted.
+var girdle_muscle: Vector2 = Vector2.ZERO
+
+## How much of that muscle is still standing, against what the animal was built
+## with there. Exactly one on a body nobody has touched — for every build, by
+## construction — and it is what makes this a description of an injury rather
+## than of a species.
+##
+## The distinction matters and it is why this is quoted against the creature's
+## own intact girdle rather than against a reference animal. How strong a build
+## is for its size is `strength`, and how it splits its muscle between its two
+## ends is `girdle_share`; neither of those is a thing that should move because
+## the animal is hurt. This is: a hip eaten hollow stops driving the hind legs,
+## which under the whole-body reading it did not, because a girdle is a small
+## share of an animal and chewing one barely moved the total.
+var girdle_drive: Vector2 = Vector2.ONE
+
+## Which end of the animal its locomotor muscle is on: the fore girdle's share in
+## x, the hind girdle's in y, adding to one.
+##
+## The reading that says a cheetah is built to drive from behind and an elephant
+## from the shoulder. Descriptive — nothing multiplies a gait by it, because how
+## much force there is altogether is already `strength` and pricing the same
+## muscle twice would be the square-cube law applied at both ends of one animal.
+var girdle_share: Vector2 = Vector2(0.5, 0.5)
 
 ## Mass each limb of a girdle is built to hold up, in Lizard units: x the fore
 ## pair, y the hind. This is what sizes a leg's thickness — see Limb.girth_of —
@@ -222,6 +261,7 @@ func update(body: BodyShape, spine: Spine, tissue: TissueGrid, p: CreatureParams
 			region_cells[region] = float(tissue.lattice.region_cells(region))
 		mass = maxf(p.density * tissue.lattice.standing_units \
 			/ REFERENCE_LATTICE_UNITS, MIN_MASS)
+		_muscle_behind_the_girdles(tissue)
 	else:
 		mass = maxf(p.density * (volume / REFERENCE_VOLUME), MIN_MASS)
 
@@ -254,6 +294,36 @@ func update(body: BodyShape, spine: Spine, tissue: TissueGrid, p: CreatureParams
 	balance = Vector2(
 		beyond(body, spine, p.front_limb_t, true),
 		beyond(body, spine, p.rear_limb_t, false))
+
+
+## Counts the muscle each girdle has to drive its pair with — see `girdle_drive`.
+##
+## Straight off the lattice, so it is the same cells the specimen draws and the
+## scales weigh, and so a bite that opens a hip takes muscle out of this the tick
+## it lands.
+func _muscle_behind_the_girdles(tissue: TissueGrid) -> void:
+	var lat: AnatomyLattice = tissue.lattice
+	var fore := Vector2(
+		float(lat.region_tissue(BodyPlan.THORAX, AnatomyLattice.MUSCLE)),
+		float(lat.region_tissue_built(BodyPlan.THORAX, AnatomyLattice.MUSCLE)))
+	var hind := Vector2(
+		float(lat.region_tissue(BodyPlan.PELVIS, AnatomyLattice.MUSCLE)),
+		float(lat.region_tissue_built(BodyPlan.PELVIS, AnatomyLattice.MUSCLE)))
+	for key in BodyPlan.LIMB_KEYS:
+		var reg: int = int(tissue.plan.limb_region[key])
+		var mine := Vector2(
+			float(lat.region_tissue(reg, AnatomyLattice.MUSCLE)),
+			float(lat.region_tissue_built(reg, AnatomyLattice.MUSCLE)))
+		if key.begins_with("F"):
+			fore += mine
+		else:
+			hind += mine
+	girdle_muscle = Vector2(fore.x, hind.x)
+	girdle_drive = Vector2(
+		clampf(fore.x / maxf(fore.y, 1.0), 0.0, 1.0),
+		clampf(hind.x / maxf(hind.y, 1.0), 0.0, 1.0))
+	var total: float = maxf(fore.x + hind.x, 1.0)
+	girdle_share = Vector2(fore.x / total, hind.x / total)
 
 
 ## Biological cells standing in one region — how big that body part is, in the

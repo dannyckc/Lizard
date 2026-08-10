@@ -36,6 +36,7 @@ func _process(_delta: float) -> bool:
 	_check_fat_is_a_layer_of_cells(player)
 	_check_muscle_lands_on_its_own_limb(player)
 	_check_damage_eats_cells_outside_in(player)
+	_check_a_bite_lands_where_the_teeth_were(player)
 	_finish()
 	return false
 
@@ -375,6 +376,64 @@ func _check_damage_eats_cells_outside_in(player: Creature) -> void:
 	_check(inverted == 0,
 		"%d tissue groups lost a deep cell while an outer one still stands" % inverted)
 	notes.append("a wound is %d missing cells" % (whole - lat.standing_total))
+	_apply(player)
+
+
+## Jaws that can only reach the top of a back take the top of it.
+##
+## The claim the whole spatial layer exists for, and the one a column-wide ledger
+## cannot make on its own: two bites of identical depth on identical flesh, one
+## along the spine and one under the belly, are different wounds. What is checked
+## is that the cells which went are the cells the teeth could get to — measured
+## against the same posed heights the specimen draws them at — and that the flesh
+## outside the jaws' reach in the *same columns* is still standing.
+func _check_a_bite_lands_where_the_teeth_were(player: Creature) -> void:
+	_apply(player)
+	var lat: AnatomyLattice = _lattice(player)
+	var grid: TissueGrid = player.anatomy.tissue
+	var body: TissueGrid.Patch = grid.patch(TissueGrid.BODY_KEY)
+	var whole: Vector2 = grid.whole_band()
+	# The upper third of the animal, and nothing below it.
+	var high := Vector2(lerpf(whole.x, whole.y, 0.66), whole.y + 20.0)
+	var at: Vector2 = player.spine.points[5]
+	var mark: BiteMark = BiteMark.mouthful(at, Vector2.RIGHT, 12.0, 4.0)
+	mark.reach = high
+	var scraps: Array = []
+	for _bite in 5:
+		grid.bite(mark, scraps)
+	player._physics_process(TICK)
+
+	var eaten: int = 0
+	var eaten_high: int = 0
+	var spared_low: int = 0
+	var threads: int = 0
+	for i in lat.count:
+		if int(lat.patch_of[i]) != 0:
+			continue
+		if body.touched[lat.cell_of[i]] == 0:
+			continue
+		var reached: bool = Stature.overlaps(high, lat.cell_band(body, i))
+		if lat.gone[i] == 0:
+			if not reached:
+				spared_low += 1
+			continue
+		# A conduit is exempt and has to be: it is a thread rather than a volume,
+		# so cutting it anywhere takes the run, and the cells that go are along
+		# its length rather than at the teeth. Everything solid is answerable.
+		var t: int = int(lat.kind[i])
+		if t == AnatomyLattice.NERVE or t == AnatomyLattice.VESSEL:
+			threads += 1
+			continue
+		eaten += 1
+		eaten_high += 1 if reached else 0
+	_check(eaten > 0, "a bite along the back cost the lattice nothing")
+	_check(eaten_high == eaten,
+		"%d of %d solid cells a high bite destroyed stood below the jaws"
+			% [eaten - eaten_high, eaten])
+	_check(spared_low > 0,
+		"a bite the height of the back left nothing standing under it")
+	notes.append("a high bite took %d cells (%d threads) and left %d under it standing"
+		% [eaten, threads, spared_low])
 	_apply(player)
 
 

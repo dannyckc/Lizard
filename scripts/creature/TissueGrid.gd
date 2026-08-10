@@ -611,6 +611,11 @@ func reset() -> void:
 		full_hp += patches[key].full_hp
 	region_hp = region_full.duplicate()
 	organ_hp = organ_full.duplicate()
+	# The cells a bite took are a fact about wounds, so putting the tissue back
+	# has to put them back too. Without this a healed body still remembers where
+	# it was last bitten, and the next wound opens in the old crater.
+	if lattice != null:
+		lattice.bitten.fill(0)
 	revision += 1
 	resolve_attachment()
 
@@ -819,10 +824,12 @@ func _update_body(body: BodyShape, spine: Spine, stature: Stature,
 
 
 func _update_limb(p: Patch, limb: Limb, scale: float, lift: float) -> void:
-	# Mirrors the widths CreatureView strokes the bones with, so the lattice
-	# covers exactly what is drawn.
-	var upper_half: float = limb.girth(scale) * 0.5
-	var lower_half: float = upper_half * 0.72
+	# The limb's own taper, sampled station by station — see Limb.shape_at. A leg
+	# is thick at the girdle where its muscle is and slender at the ankle where it
+	# is bone and tendon, and this is the one place that shape is stated: the
+	# picture is stroked from these stations, the lattice fills them, and every
+	# contact query measures against them.
+	var half: float = limb.girth(scale) * 0.5
 	var foot_r: float = limb.foot_radius(scale)
 
 	var d0: Vector2 = limb.joints[1] - limb.joints[0]
@@ -855,21 +862,24 @@ func _update_limb(p: Patch, limb: Limb, scale: float, lift: float) -> void:
 	var toe: float = limb.heights[2] + lift
 
 	var span: int = LIMB_BONE_COLS / 2
+	var upper: float = limb.upper_share
 	var station: int = 0
 	for k in range(span):
 		var t0: float = float(k) / float(span)
+		var shaft: float = half * Limb.shape_at(t0 * upper, limb.belly, upper)
 		p.set_station(station,
-			limb.joints[0].lerp(limb.joints[1], t0), n0, upper_half,
-			lerpf(hip, knee, t0), upper_half)
+			limb.joints[0].lerp(limb.joints[1], t0), n0, shaft,
+			lerpf(hip, knee, t0), shaft)
 		station += 1
-	var joint_half: float = lerpf(upper_half, lower_half, 0.5)
+	var joint_half: float = half * Limb.shape_at(upper, limb.belly, upper)
 	p.set_station(station, limb.joints[1], joint_n, joint_half, knee, joint_half)
 	station += 1
 	# The lower bone flares out into the foot, so the ankle is continuous with
 	# the foot circle instead of stepping into it.
 	for k in range(1, span + 1):
 		var t: float = float(k) / float(span)
-		var shaft: float = lerpf(lower_half, foot_r, t)
+		var slim: float = half * Limb.shape_at(lerpf(upper, 1.0, t), limb.belly, upper)
+		var shaft: float = lerpf(slim, foot_r, t * t)
 		p.set_station(station,
 			limb.joints[1].lerp(limb.joints[2], t), n1, shaft,
 			lerpf(knee, toe, t), shaft)
@@ -949,7 +959,7 @@ func bite(mark: BiteMark, shed: Array) -> float:
 			var depth: float = mark.depth_over(at, _quad)
 			if depth <= 0.0:
 				continue
-			removed += _erode(p, cell, depth, at, loose)
+			removed += _erode(p, cell, depth, at, loose, mark.reach)
 	coalesce_shed(loose, shed)
 	return removed
 
@@ -1012,17 +1022,41 @@ static func shed_layer(layer: int, at: Vector2, extent: float, angle: float) -> 
 	return chunk
 
 
-func _erode(p: Patch, cell: int, budget: float, at: Vector2, shed: Array) -> float:
+func _erode(p: Patch, cell: int, budget: float, at: Vector2, shed: Array,
+		reach: Vector2 = Stature.UNBOUNDED) -> float:
 	var base: int = cell * LAYERS
 	var removed: float = erode_stack(p.hp, base, budget, _taken)
 	if removed <= 0.0:
 		return 0.0
 	var region_base: int = int(p.region[cell]) * LAYERS
 	var organ: int = int(p.organ[cell])
+	var patch_index: int = AnatomyLattice.PATCH_KEYS.find(p.key)
 	for layer in LAYERS:
 		var take: float = _taken[layer]
 		if take <= 0.0:
 			continue
+		# Which boxes of flesh that was — and whether the teeth could have got to
+		# that much of it at all. The lattice is told where the jaws were, marks
+		# the cells they actually reached, and reports back how much of the layer
+		# that came to; anything the bite asked for beyond the flesh it could
+		# close on is handed back. So the crater on the specimen, the structures
+		# the strike destroyed and the tissue the ledger lost are one event in one
+		# place, rather than a column emptied from end to end by teeth that only
+		# reached the top of it.
+		if lattice != null and patch_index >= 0:
+			var full: float = _layer_capacity(p, cell, layer)
+			if full > 0.0:
+				var lost: float = clampf((full - p.hp[base + layer]) / full, 0.0, 1.0)
+				var allowed: float = lattice.take(
+					patch_index, cell, layer, lost, reach, p)
+				var back: float = minf((lost - allowed) * full, take)
+				if back > 0.0:
+					p.hp[base + layer] += back
+					removed -= back
+					take -= back
+					_taken[layer] = take
+					if take <= 0.0:
+						continue
 		region_hp[region_base + layer] = maxf(region_hp[region_base + layer] - take, 0.0)
 		if layer == ORGAN and organ != BodyPlan.NO_ORGAN:
 			organ_hp[organ] = maxf(organ_hp[organ] - take, 0.0)
@@ -1043,6 +1077,23 @@ func _erode(p: Patch, cell: int, budget: float, at: Vector2, shed: Array) -> flo
 	if _cell_is_empty(p, base):
 		p.retire(cell)
 	return removed
+
+
+## How much of one layer a sound cell of this column carries. The denominator
+## every "how much of it has gone" reading is taken against, said once so the
+## specimen, the census and the bite cannot each have their own idea of full.
+func _layer_capacity(p: Patch, cell: int, layer: int) -> float:
+	match layer:
+		SKIN:
+			return SKIN_HP
+		FAT:
+			return fat_capacity(p, cell)
+		MUSCLE:
+			return MUSCLE_HP
+		BONE:
+			return BONE_HP if p.bone[cell] != 0 else 0.0
+		_:
+			return ORGAN_HP if int(p.organ[cell]) != BodyPlan.NO_ORGAN else 0.0
 
 
 ## Whether a cell has nothing left in any layer. Written as a loop over the stack

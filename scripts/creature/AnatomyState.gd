@@ -298,5 +298,4 @@ static func segment_u(point: Vector2, a: Vector2, b: Vector2) -> float:
 
 
 static func _limb_widths(limb: Limb, scale: float) -> Vector2:
-	var upper: float = limb.girth(scale)
-	return Vector2(upper, upper * 0.72)
+	return Vector2(limb.segment_girth(0, scale), limb.segment_girth(1, scale))
