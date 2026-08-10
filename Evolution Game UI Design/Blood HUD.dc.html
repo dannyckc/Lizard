@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #F3F1EC; }
+  * { box-sizing: border-box; }
+  a { color: #14140F; text-decoration: none; border-bottom: 1px solid rgba(20,20,15,0.22); }
+  a:hover { color: rgba(20,20,15,0.55); }
+  ::selection { background: #14140F; color: #F3F1EC; }
+  .om-scroll::-webkit-scrollbar { width: 3px; height: 3px; }
+  .om-scroll::-webkit-scrollbar-thumb { background: rgba(20,20,15,0.22); }
+  .om-scroll::-webkit-scrollbar-track { background: transparent; }
+</style>
+</helmet>
+<div ref="{{ stageRef }}" style="position:relative;width:100%;height:100vh;min-height:660px;overflow:hidden;background:#F3F1EC;color:#14140F;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased">
+
+  <canvas ref="{{ canvasRef }}" onPointerDown="{{ onDown }}" onPointerMove="{{ onMove }}" onPointerUp="{{ onUp }}" onPointerLeave="{{ onUp }}" style="position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair;touch-action:none"></canvas>
+
+  <div style="position:absolute;inset:0;pointer-events:none;background:radial-gradient(115% 85% at 50% 42%, rgba(243,241,236,0) 45%, rgba(20,20,15,0.055) 100%)"></div>
+  <div style="position:absolute;inset:0;pointer-events:none;opacity:0.035;mix-blend-mode:multiply;background-image:url(&quot;data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/></filter><rect width='140' height='140' filter='url(%23n)'/></svg>&quot;)"></div>
+  <div style="position:absolute;inset:14px;pointer-events:none;border:1px solid rgba(20,20,15,0.10)"></div>
+
+  <div style="position:absolute;top:30px;left:32px;display:flex;flex-direction:column;gap:15px;pointer-events:none">
+    <div style="display:flex;align-items:center;gap:11px">
+      <div style="width:7px;height:7px;border-radius:50%;background:#8E1B12"></div>
+      <div style="font-size:11px;letter-spacing:0.34em;text-transform:uppercase;line-height:1">Evolution</div>
+      <div style="width:22px;height:1px;background:rgba(20,20,15,0.22)"></div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.16em;color:rgba(20,20,15,0.42);line-height:1">BLOOD&nbsp;&nbsp;RHEOLOGY&nbsp;&nbsp;0.1</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:4px;pointer-events:auto">
+      <a href="./Evolution HUD.dc.html" style="display:flex;align-items:center;padding:7px 12px;font-size:9.5px;letter-spacing:0.22em;text-transform:uppercase;line-height:1;color:rgba(20,20,15,0.42);border-bottom:1px solid transparent">Field</a>
+      <a href="./Anatomy HUD.dc.html" style="display:flex;align-items:center;padding:7px 12px;font-size:9.5px;letter-spacing:0.22em;text-transform:uppercase;line-height:1;color:rgba(20,20,15,0.42);border-bottom:1px solid transparent">Anatomy</a>
+      <a href="./Environment HUD.dc.html" style="display:flex;align-items:center;padding:7px 12px;font-size:9.5px;letter-spacing:0.22em;text-transform:uppercase;line-height:1;color:rgba(20,20,15,0.42);border-bottom:1px solid transparent">Meadow</a>
+      <div style="display:flex;align-items:center;gap:7px;padding:7px 12px;font-size:9.5px;letter-spacing:0.22em;text-transform:uppercase;line-height:1;border-bottom:1px solid #14140F">
+        <div style="width:4px;height:4px;border-radius:50%;background:#8E1B12"></div>
+        Blood
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:auto auto;gap:4px 22px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.1em;line-height:1.4;color:rgba(20,20,15,0.72)">
+      <span style="opacity:0.55">MODEL</span><span>{{ modelText }}</span>
+      <span style="opacity:0.55">IN&nbsp;BODY</span><span>{{ volumeText }}</span>
+      <span style="opacity:0.55">SPILLED</span><span>{{ spillText }}</span>
+      <span style="opacity:0.55">PARCELS</span><span>{{ countText }}</span>
+      <span style="opacity:0.55">CLOTTED</span><span>{{ clotText }}</span>
+    </div>
+  </div>
+
+  <div style="position:absolute;top:30px;right:32px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+    <sc-for list="{{ modeList }}" as="m" hint-placeholder-count="3">
+      <div onClick="{{ m.pick }}" style="position:relative;display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;min-height:32px">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.12em;color:{{ m.tagInk }};transition:color 240ms ease">{{ m.tag }}</div>
+        <div style="font-size:9.5px;letter-spacing:0.22em;text-transform:uppercase;line-height:1;color:{{ m.ink }};transition:color 240ms ease">{{ m.name }}</div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:1px;background:{{ m.rule }};transition:background 240ms ease"></div>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="position:absolute;left:32px;bottom:28px;display:flex;flex-direction:column;gap:12px;max-width:min(560px,50vw);pointer-events:none">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;line-height:1.8;letter-spacing:0.08em;color:rgba(20,20,15,0.34);text-transform:uppercase;text-wrap:pretty">{{ modeNote }}</div>
+    <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:7px">
+        <div style="min-width:19px;height:19px;padding:0 6px;border:1px solid rgba(20,20,15,0.30);display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:9px">LMB</div>
+        <span style="font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(20,20,15,0.52)">Smear</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:7px">
+        <div style="min-width:19px;height:19px;padding:0 5px;border:1px solid rgba(20,20,15,0.30);display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:9px">F1</div>
+        <span style="font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(20,20,15,0.52)">Rheology</span>
+      </div>
+    </div>
+  </div>
+
+  <div onClick="{{ togglePanel }}" style="position:absolute;right:32px;bottom:28px;display:flex;align-items:center;gap:9px;padding:9px 14px;min-height:36px;cursor:pointer;user-select:none;background:rgba(243,241,236,0.88);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(20,20,15,0.13);box-shadow:0 14px 34px -18px rgba(20,20,15,0.45)" style-hover="border-color:rgba(20,20,15,0.34)">
+    <div style="width:4px;height:4px;background:{{ panelDot }};transition:background 220ms ease"></div>
+    <span style="font-size:9.5px;letter-spacing:0.22em;text-transform:uppercase;line-height:1">Rheology</span>
+    <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(20,20,15,0.38);line-height:1">F1</span>
+  </div>
+
+  <div style="position:absolute;top:76px;right:32px;bottom:80px;width:clamp(300px,25vw,332px);max-width:calc(100vw - 64px);display:flex;flex-direction:column;background:rgba(243,241,236,0.90);backdrop-filter:blur(14px) saturate(0.9);-webkit-backdrop-filter:blur(14px) saturate(0.9);border:1px solid rgba(20,20,15,0.13);box-shadow:0 26px 60px -30px rgba(20,20,15,0.5);transition:opacity 300ms ease,transform 380ms cubic-bezier(.2,.7,.2,1);opacity:{{ panelOpacity }};transform:{{ panelTransform }};pointer-events:{{ panelEvents }}">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;padding:16px 18px 13px;border-bottom:1px solid rgba(20,20,15,0.11)">
+      <div style="display:flex;align-items:center;gap:9px">
+        <div style="width:5px;height:5px;background:#8E1B12"></div>
+        <div style="font-size:10px;letter-spacing:0.28em;text-transform:uppercase;line-height:1">Rheology</div>
+      </div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.12em;color:rgba(20,20,15,0.38)">{{ modeTag }}</div>
+    </div>
+
+    <div class="om-scroll" style="flex:1;overflow-y:auto;overflow-x:hidden;padding:4px 18px 18px">
+      <sc-for list="{{ groups }}" as="g" hint-placeholder-count="3">
+        <div style="padding-top:18px">
+          <div style="display:flex;align-items:center;gap:10px;padding-bottom:9px">
+            <div style="font-size:9px;letter-spacing:0.26em;text-transform:uppercase;color:rgba(20,20,15,0.40);line-height:1">{{ g.name }}</div>
+            <div style="flex:1;height:1px;background:rgba(20,20,15,0.11)"></div>
+          </div>
+          <sc-for list="{{ g.rows }}" as="row" hint-placeholder-count="4">
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) 76px 40px;align-items:center;gap:9px;height:26px">
+              <div style="font-size:10.5px;color:rgba(20,20,15,0.78);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ row.label }}</div>
+              <sc-if value="{{ row.isSlider }}" hint-placeholder-val="{{ true }}">
+                <div onPointerDown="{{ row.onDown }}" style="position:relative;height:26px;display:flex;align-items:center;cursor:ew-resize;touch-action:none">
+                  <div style="position:absolute;left:0;right:0;height:1px;background:rgba(20,20,15,0.20)"></div>
+                  <div style="position:absolute;left:0;height:1px;background:#14140F;width:{{ row.pct }}"></div>
+                  <div style="position:absolute;left:{{ row.pct }};width:6px;height:6px;background:#14140F;transform:translateX(-50%);box-shadow:0 0 0 3px rgba(243,241,236,0.9)"></div>
+                </div>
+              </sc-if>
+              <sc-if value="{{ row.isToggle }}" hint-placeholder-val="{{ false }}">
+                <div onClick="{{ row.toggle }}" style="height:26px;display:flex;align-items:center;cursor:pointer">
+                  <div style="position:relative;width:26px;height:14px;border:1px solid rgba(20,20,15,0.28)">
+                    <div style="position:absolute;top:2px;width:8px;height:8px;background:#14140F;left:{{ row.knobLeft }};opacity:{{ row.knobOpacity }};transition:left 220ms cubic-bezier(.2,.7,.2,1),opacity 220ms ease"></div>
+                  </div>
+                </div>
+              </sc-if>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;text-align:right;color:rgba(20,20,15,0.62)">{{ row.display }}</div>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 18px;border-top:1px solid rgba(20,20,15,0.11)">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(20,20,15,0.34)">{{ footerText }}</span>
+      <div style="display:flex;align-items:center;gap:4px">
+        <div onClick="{{ reset }}" style="padding:6px 10px;cursor:pointer;user-select:none;font-family:'IBM Plex Mono',monospace;font-size:8.5px;letter-spacing:0.12em;text-transform:uppercase;line-height:1;color:rgba(20,20,15,0.55);border:1px solid rgba(20,20,15,0.16)" style-hover="color:#14140F;border-color:rgba(20,20,15,0.4)">Purge</div>
+        <div onClick="{{ preset }}" style="padding:6px 10px;cursor:pointer;user-select:none;font-family:'IBM Plex Mono',monospace;font-size:8.5px;letter-spacing:0.12em;text-transform:uppercase;line-height:1;color:rgba(20,20,15,0.55);border:1px solid rgba(20,20,15,0.16)" style-hover="color:#14140F;border-color:rgba(20,20,15,0.4)">Default</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:820},&quot;model&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;drip&quot;,&quot;spurt&quot;,&quot;seep&quot;],&quot;default&quot;:&quot;drip&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Blood&quot;},&quot;viscosity&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0,&quot;max&quot;:1,&quot;step&quot;:0.01,&quot;default&quot;:0.42,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Blood&quot;},&quot;tack&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0,&quot;max&quot;:1,&quot;step&quot;:0.01,&quot;default&quot;:0.4,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Blood&quot;},&quot;gloss&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Blood&quot;}}">
+class Component extends DCLogic {
+  stageRef = React.createRef();
+  canvasRef = React.createRef();
+
+  // Palette lifted from BiteCue.gd — MARK / MARK_DEEP, the one red in the game.
+  IN = '#8E1B12'; DEEP = '#5E0F08'; FRESH = '#A51F14';
+
+  MODES = [
+    { key: 'drip', tag: 'A', name: 'Drip',
+      note: 'Drip · surface tension wins. A bead swells at the wound until its own weight tears it off, trails a filament, and lands with a fat slap.',
+      p: { rate: 0.55, pressure: 0.25, viscosity: 0.42, tension: 0.78, tack: 0.40, gravity: 1.0, clot: 0.24 } },
+    { key: 'spurt', tag: 'B', name: 'Spurt',
+      note: 'Spurt · arterial. Pressure arrives on the heartbeat, throws an arc, and breaks into satellites that stick where they land.',
+      p: { rate: 1.0, pressure: 0.85, viscosity: 0.30, tension: 0.55, tack: 0.55, gravity: 1.0, clot: 0.45 } },
+    { key: 'seep', tag: 'C', name: 'Seep',
+      note: 'Seep · thick and tacky. No throw at all — the blood leans out of the wound, crawls, and mounds up in a pool that skins over as it clots.',
+      p: { rate: 0.8, pressure: 0.05, viscosity: 0.92, tension: 0.66, tack: 0.94, gravity: 0.7, clot: 0.62 } }
+  ];
+
+  PARAMS = [
+    { g: 'Flow', k: 'rate', label: 'Flow rate', min: 0, max: 3, step: 0.05, unit: 'x' },
+    { g: 'Flow', k: 'pressure', label: 'Pressure', min: 0, max: 2, step: 0.05, unit: 'x' },
+    { g: 'Body', k: 'viscosity', label: 'Viscosity', min: 0, max: 1, step: 0.01 },
+    { g: 'Body', k: 'tension', label: 'Surface tension', min: 0, max: 1, step: 0.01 },
+    { g: 'Body', k: 'tack', label: 'Tack', min: 0, max: 1, step: 0.01 },
+    { g: 'Body', k: 'gravity', label: 'Gravity', min: 0, max: 2, step: 0.05, unit: 'x' },
+    { g: 'Surface', k: 'clot', label: 'Clot rate', min: 0, max: 1, step: 0.01 },
+    { g: 'Surface', k: 'strings', label: 'Filaments', toggle: true },
+    { g: 'Surface', k: 'gloss', label: 'Wet gloss', toggle: true },
+    { g: 'Surface', k: 'stains', label: 'Dried stains', toggle: true }
+  ];
+
+  MAX = 620; H = 22; RHO0 = 5.2; KS = 0.32; KN = 0.95;
+
+  state = { mode: null, p: null, panel: true, tick: 0 };
+
+  // ------------------------------------------------------------------ life --
+  componentDidMount() {
+    const mode = this.props.model ?? 'drip';
+    this.parts = []; this.spill = 0; this.clotted = 0; this.blood = 1; this.f = 0;
+    this._resize();
+    this.setState({ mode: mode, p: this.presetFor(mode) }, () => this.prime());
+    this._ro = new ResizeObserver(() => this._resize());
+    if (this.stageRef.current) this._ro.observe(this.stageRef.current);
+    this._key = (e) => {
+      if (e.key === 'F1') { e.preventDefault(); this.setState(s => ({ panel: !s.panel })); }
+    };
+    window.addEventListener('keydown', this._key);
+    this._loop = () => {
+      this.tickSim(); this.draw();
+      this._raf = requestAnimationFrame(this._loop);
+    };
+    this._raf = requestAnimationFrame(this._loop);
+    this._hud = setInterval(() => this.setState(s => ({ tick: s.tick + 1 })), 400);
+  }
+
+  componentDidUpdate(prev) {
+    if (prev.model !== this.props.model && this.props.model) this.pickMode(this.props.model);
+  }
+
+  componentWillUnmount() {
+    if (this._ro) this._ro.disconnect();
+    if (this._raf) cancelAnimationFrame(this._raf);
+    if (this._hud) clearInterval(this._hud);
+    window.removeEventListener('keydown', this._key);
+  }
+
+  presetFor(key) {
+    const base = (this.MODES.find(m => m.key === key) || this.MODES[0]).p;
+    const p = Object.assign({ strings: true, gloss: true, stains: true }, base);
+    if (this.props.viscosity != null) p.viscosity = this.props.viscosity;
+    if (this.props.tack != null) p.tack = this.props.tack;
+    if (this.props.gloss != null) p.gloss = this.props.gloss;
+    return p;
+  }
+
+  mode() { return this.state.mode ?? 'drip'; }
+  P() { return this.state.p ?? this.presetFor('drip'); }
+  modeDef() { return this.MODES.find(m => m.key === this.mode()) || this.MODES[0]; }
+
+  pickMode(key) {
+    this.setState({ mode: key, p: this.presetFor(key) }, () => this.prime());
+  }
+
+  reset = () => {
+    this.parts = []; this.spill = 0; this.clotted = 0; this.blood = 1; this._acc = 0;
+    if (this.stain) this.stain.getContext('2d').clearRect(0, 0, this.stain.width, this.stain.height);
+  };
+
+  // The stage opens on a spill already in progress — an empty floor tells you
+  // nothing about how the blood behaves.
+  prime() {
+    if (!this.W) return;
+    this.reset();
+    const m = this.mode(), w = this.wound, P = this.P();
+    // laid on a lattice at rest spacing — dropping them in a heap would make the
+    // relaxation explode and fling blood at the walls
+    const wide = m === 'seep' ? 62 : m === 'spurt' ? 128 : 96;
+    const tall = m === 'seep' ? 52 : m === 'spurt' ? 26 : 34;
+    const cx = w.x + (m === 'spurt' ? 78 : 0), s = 8.6;
+    for (let row = 0; row * s < tall; row++) {
+      const y = this.floor - 4 - row * s;
+      const span = wide * Math.sqrt(Math.max(0, 1 - Math.pow(row * s / tall, 2)));
+      for (let x = cx - span; x <= cx + span; x += s) {
+        this.parts.push({
+          x: x + (row % 2) * s * 0.5 + (Math.random() - 0.5), y: y,
+          px: 0, py: 0, vx: 0, vy: 0, r: 6 + Math.random() * 0.6, still: 0, age: 60
+        });
+      }
+    }
+    for (let i = 0; i < 14; i++) {
+      const t = i / 14;
+      this.parts.push({
+        x: w.x + (Math.random() - 0.5) * 6 + (m === 'spurt' ? t * 190 : 0),
+        y: w.y + t * (this.floor - w.y) * (m === 'spurt' ? 0.55 : 0.9),
+        px: 0, py: 0, vx: m === 'spurt' ? 6 : 0, vy: 2 + t * 4, r: 6, still: 0, age: 20
+      });
+    }
+    const stainCtx = this.stain.getContext('2d');
+    for (let i = 0; i < 26; i++) {
+      const x = w.x + (Math.random() - 0.5) * wide * 3.4 + (m === 'spurt' ? 90 : 0);
+      this.dry(stainCtx, { x: x, y: this.floor - 2, r: 4 + Math.random() * 5 }, this.dpr);
+    }
+    this.blood = 0.93; this.spill = 0.12; this.clotted = 26;
+    for (let k = 0; k < 90; k++) this.tickSim(true);
+    // beads in the air last, so the opening frame shows blood on its way down
+    const drops = m === 'spurt' ? 5 : 3;
+    for (let i = 0; i < drops; i++) {
+      const t = 0.16 + i * (0.62 / drops);
+      const cluster = m === 'seep' ? 5 : 4;
+      for (let k = 0; k < cluster; k++) {
+        this.parts.push({
+          x: w.x + (Math.random() - 0.5) * 7 + (m === 'spurt' ? t * 210 : 0),
+          y: w.y + 26 + t * (this.floor - w.y - 40) + (Math.random() - 0.5) * 6,
+          px: 0, py: 0,
+          vx: m === 'spurt' ? 5.5 : (Math.random() - 0.5) * 0.4,
+          vy: 2 + t * 7, r: 6, still: 0, age: 30
+        });
+      }
+    }
+    for (let k = 0; k < 7; k++) {
+      this.parts.push({
+        x: w.x + (Math.random() - 0.5) * 8, y: w.y + 4 + Math.random() * 12,
+        px: 0, py: 0, vx: 0, vy: 0.5, r: 6, still: 0, age: 4
+      });
+    }
+    for (let k = 0; k < 6; k++) this.tickSim(true);
+    this.draw();
+  }
+
+  preset = () => { this.setState({ p: this.presetFor(this.mode()) }); };
+
+  // --------------------------------------------------------------- surface --
+  _resize() {
+    const st = this.stageRef.current, cv = this.canvasRef.current;
+    if (!st || !cv) return;
+    const w = st.clientWidth, h = st.clientHeight;
+    if (w < 8 || h < 8) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    if (this.W === w && this.Hh === h && this.dpr === dpr) return;
+    this.W = w; this.Hh = h; this.dpr = dpr;
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    const make = () => {
+      const c = document.createElement('canvas');
+      c.width = cv.width; c.height = cv.height; return c;
+    };
+    const old = this.stain;
+    this.ink = make(); this.goo = make(); this.stain = make();
+    if (old) this.stain.getContext('2d').drawImage(old, 0, 0, this.stain.width, this.stain.height);
+    this.wound = { x: Math.round(w * 0.34), y: Math.round(h * 0.26) };
+    this.floor = h - 74;
+    // resizing the backing store wipes it, so put the current state straight back
+    if (this.parts) this.draw();
+  }
+
+  // ------------------------------------------------------------------- sim --
+  spawn(vx, vy, r) {
+    if (this.parts.length >= this.MAX || this.blood <= 0) return;
+    const w = this.wound;
+    this.parts.push({
+      x: w.x + (Math.random() - 0.5) * 5, y: w.y + (Math.random() - 0.5) * 4,
+      px: 0, py: 0, vx: vx, vy: vy, r: r, still: 0, age: 0
+    });
+    this.blood = Math.max(0, this.blood - 0.00035);
+    this.spill += 0.0006;
+  }
+
+  emit() {
+    const P = this.P(), m = this.mode();
+    this._acc = (this._acc || 0);
+    if (m === 'drip') {
+      this._acc += P.rate * 0.28;
+      while (this._acc >= 1) { this._acc--; this.spawn((Math.random() - 0.5) * 0.5, 0.3 + P.pressure * 1.2, 6); }
+    } else if (m === 'spurt') {
+      const period = 74, ph = (this.f % period) / period;
+      this.beatPhase = ph;
+      if (ph < 0.13) {
+        const n = Math.max(1, Math.round(3 * P.rate));
+        for (let i = 0; i < n; i++) {
+          const jet = (0.35 + 0.65 * Math.sin(Math.PI * (ph / 0.13))) * (1.6 + 4.6 * P.pressure);
+          const a = -0.30 + (Math.random() - 0.5) * 0.34;
+          this.spawn(Math.cos(a) * jet, Math.sin(a) * jet, 5.4 + Math.random() * 1.4);
+        }
+      }
+    } else {
+      this._acc += P.rate * 0.5;
+      while (this._acc >= 1) { this._acc--; this.spawn((Math.random() - 0.5) * 0.3, 0.15 + P.pressure, 6.6); }
+    }
+  }
+
+  buildGrid() {
+    const n = this.parts.length, h = this.H;
+    const cols = Math.ceil(this.W / h) + 3, rows = Math.ceil(this.Hh / h) + 3;
+    if (!this._head || this._head.length !== cols * rows) this._head = new Int32Array(cols * rows);
+    if (!this._next || this._next.length < n) this._next = new Int32Array(Math.max(n, this.MAX));
+    this._head.fill(-1);
+    this.cols = cols; this.rows = rows;
+    for (let i = 0; i < n; i++) {
+      const p = this.parts[i];
+      const cx = Math.min(cols - 1, Math.max(0, (p.x / h | 0) + 1));
+      const cy = Math.min(rows - 1, Math.max(0, (p.y / h | 0) + 1));
+      const c = cy * cols + cx;
+      this._next[i] = this._head[c]; this._head[c] = i;
+    }
+  }
+
+  pairs(fn) {
+    const h = this.H, cols = this.cols, rows = this.rows, parts = this.parts;
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      const cx = Math.min(cols - 1, Math.max(0, (p.x / h | 0) + 1));
+      const cy = Math.min(rows - 1, Math.max(0, (p.y / h | 0) + 1));
+      for (let gy = cy - 1; gy <= cy + 1; gy++) {
+        if (gy < 0 || gy >= rows) continue;
+        for (let gx = cx - 1; gx <= cx + 1; gx++) {
+          if (gx < 0 || gx >= cols) continue;
+          let j = this._head[gy * cols + gx];
+          while (j >= 0) {
+            if (j > i) {
+              const q = parts[j];
+              const dx = q.x - p.x, dy = q.y - p.y;
+              const d2 = dx * dx + dy * dy;
+              if (d2 < h * h && d2 > 0.0001) {
+                const d = Math.sqrt(d2);
+                fn(p, q, dx / d, dy / d, 1 - d / h, d, i, j);
+              }
+            }
+            j = this._next[j];
+          }
+        }
+      }
+    }
+  }
+
+  tickSim(warm) {
+    if (!this.W) return;
+    this.f++;
+    if (!warm) this.emit();
+    const parts = this.parts, P = this.P();
+    if (!parts.length) return;
+    const g = 0.26 * P.gravity;
+    const sigma = 0.10 + 1.5 * P.viscosity, beta = 0.02 + 0.45 * P.viscosity;
+    const coh = 0.02 + 0.17 * P.tension;
+    const w = this.wound;
+    const hold = (this.mode() === 'spurt' ? 0.05 : 0.14) + 0.30 * P.tack;
+
+    for (const p of parts) {
+      p.vy += g; p.age++;
+      const sp0 = Math.hypot(p.vx, p.vy);
+      // blood hangs on to the lip of the wound until its own weight tears it
+      // off — but nothing under pressure is held back by a lip
+      if (sp0 < 3.2) {
+        const dx = w.x - p.x, dy = w.y - p.y, d = Math.hypot(dx, dy);
+        if (d < 30 && d > 0.001) {
+          const k = hold * (1 - d / 30);
+          p.vx += (dx / d) * k; p.vy += (dy / d) * k;
+        }
+      }
+      if (sp0 > 16) { p.vx *= 16 / sp0; p.vy *= 16 / sp0; }
+    }
+    this.buildGrid();
+
+    // viscosity impulses + cohesion, on relative approach speed
+    this.pairs((a, b, nx, ny, q) => {
+      const u = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;
+      if (u > 0) {
+        const I = q * (sigma * u + beta * u * u) * 0.5;
+        a.vx -= I * nx; a.vy -= I * ny; b.vx += I * nx; b.vy += I * ny;
+      }
+      const c = coh * q;
+      a.vx += c * nx; a.vy += c * ny; b.vx -= c * nx; b.vy -= c * ny;
+    });
+
+    for (const p of parts) { p.px = p.x; p.py = p.y; p.x += p.vx; p.y += p.vy; }
+    this.buildGrid();
+
+    // double-density relaxation (Clavet) — the volume and the goo
+    for (const p of parts) { p.rho = 0; p.rhoN = 0; }
+    this.pairs((a, b, nx, ny, q) => {
+      const q2 = q * q;
+      a.rho += q2; b.rho += q2;
+      a.rhoN += q2 * q; b.rhoN += q2 * q;
+    });
+    const ks = this.KS * (0.6 + 0.8 * P.tension), kn = this.KN;
+    for (const p of parts) { p.pr = ks * (p.rho - this.RHO0); p.prN = kn * p.rhoN; }
+    this.pairs((a, b, nx, ny, q) => {
+      const pr = (a.pr + b.pr) * 0.5, prN = (a.prN + b.prN) * 0.5;
+      let D = (pr * q + prN * q * q) * 0.5;
+      if (D > 2.2) D = 2.2; else if (D < -2.2) D = -2.2;
+      a.x -= D * nx; a.y -= D * ny; b.x += D * nx; b.y += D * ny;
+    });
+
+    // pointer smear
+    if (this._drag) {
+      const m = this._drag;
+      for (const p of parts) {
+        const dx = p.x - m.x, dy = p.y - m.y, d = Math.hypot(dx, dy);
+        if (d < 52) {
+          const k = (1 - d / 52) * 0.85;
+          p.x += m.dx * k; p.y += m.dy * k; p.still = 0;
+        }
+      }
+      m.dx *= 0.5; m.dy *= 0.5;
+    }
+
+    const fric = 0.14 + 0.80 * P.tack;
+    const stainCtx = this.stain.getContext('2d');
+    const dpr = this.dpr;
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i];
+      const hit = p.y > this.floor - p.r;
+      if (hit) {
+        const speed = Math.hypot(p.x - p.px, p.y - p.py);
+        if (speed > 5.5 && P.stains) this.splat(stainCtx, p, speed, dpr);
+        p.y = this.floor - p.r;
+      }
+      // tack is what stops a pool creeping outward for ever: near the ground the
+      // fluid keeps only a fraction of the sideways travel the relaxation gave it
+      if (p.y > this.floor - p.r * 3.4) p.x -= (p.x - p.px) * fric;
+      if (p.x < 22) p.x = 22;
+      if (p.x > this.W - 22) p.x = this.W - 22;
+      if (p.y < 8) p.y = 8;
+      p.vx = p.x - p.px; p.vy = p.y - p.py;
+      if (hit) { p.vx *= 1 - fric; p.vy *= 0.4; }
+      const sp = Math.hypot(p.vx, p.vy);
+      p.still = sp < 0.34 ? p.still + 1 : 0;
+      const hold = 90 + (1 - P.clot) * 1600;
+      if (p.still > hold || (parts.length > this.MAX - 4 && p.still > 24)) {
+        if (P.stains) this.dry(stainCtx, p, dpr);
+        this.clotted++;
+        parts.splice(i, 1);
+      }
+    }
+  }
+
+  splat(ctx, p, speed, dpr) {
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.globalAlpha = Math.min(0.30, 0.05 + speed * 0.016);
+    ctx.fillStyle = this.FRESH;
+    const w = Math.min(30, p.r + speed * 1.6);
+    ctx.beginPath();
+    ctx.ellipse(p.x, this.floor - 1, w, p.r * 0.55, 0, 0, Math.PI * 2);
+    ctx.fill();
+    for (let k = 0; k < 3; k++) {
+      const off = (Math.random() - 0.5) * speed * 6;
+      ctx.globalAlpha *= 0.7;
+      ctx.beginPath();
+      ctx.ellipse(p.x + off, this.floor - 2 - Math.random() * 4, 1.4 + Math.random() * 2, 1.1, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  dry(ctx, p, dpr) {
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.globalAlpha = 0.34;
+    const gr = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * 1.9);
+    gr.addColorStop(0, this.DEEP);
+    gr.addColorStop(0.62, 'rgba(94,15,8,0.55)');
+    gr.addColorStop(1, 'rgba(94,15,8,0)');
+    ctx.fillStyle = gr;
+    ctx.beginPath();
+    ctx.ellipse(p.x, Math.min(p.y, this.floor - 1), p.r * 1.9, p.r * 1.25, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ---------------------------------------------------------------- render --
+  draw() {
+    const cv = this.canvasRef.current;
+    if (!cv || !this.W) return;
+    const dpr = this.dpr, W = this.W, H = this.Hh, P = this.P();
+    const ctx = cv.getContext('2d');
+    const ink = this.ink.getContext('2d'), goo = this.goo.getContext('2d');
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // ground rule
+    ctx.strokeStyle = 'rgba(20,20,15,0.16)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(28, this.floor + 0.5); ctx.lineTo(W - 28, this.floor + 0.5); ctx.stroke();
+    ctx.font = '8.5px "IBM Plex Mono", monospace';
+    ctx.fillStyle = 'rgba(20,20,15,0.30)';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('GROUND', 28, this.floor + 7);
+
+    // dried record under everything
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'multiply';
+    if (P.stains) ctx.drawImage(this.stain, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    this.wound_draw(ctx);
+
+    // ---- ink: one solid union, so overlapping parcels have no seams
+    ink.setTransform(1, 0, 0, 1, 0, 0);
+    ink.clearRect(0, 0, this.ink.width, this.ink.height);
+    ink.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ink.fillStyle = this.IN;
+    ink.strokeStyle = this.IN;
+    ink.lineCap = 'round';
+
+    if (P.strings && this.parts.length) {
+      this.buildGrid();
+      this.pairs((a, b, nx, ny, q, d) => {
+        if (q > 0.62) return;
+        const w = Math.max(0.6, (a.r + b.r) * 0.5 * (q * 2.4) * (0.5 + 0.9 * this.P().tension));
+        ink.lineWidth = w;
+        ink.beginPath(); ink.moveTo(a.x, a.y); ink.lineTo(b.x, b.y); ink.stroke();
+      });
+    }
+
+    for (const p of this.parts) {
+      const sp = Math.min(Math.hypot(p.vx, p.vy), 14);
+      const stretch = 1 + sp * 0.075;
+      const a = Math.atan2(p.vy, p.vx);
+      const R = p.r * 1.42;
+      ink.beginPath();
+      ink.ellipse(p.x, p.y, R * stretch, R / Math.sqrt(stretch), a, 0, Math.PI * 2);
+      ink.fill();
+    }
+
+    // ---- goo: blur the union into a skin, shade it, then light it
+    goo.setTransform(1, 0, 0, 1, 0, 0);
+    goo.clearRect(0, 0, this.goo.width, this.goo.height);
+    goo.globalCompositeOperation = 'source-over';
+    goo.filter = 'blur(' + (2.2 * dpr).toFixed(2) + 'px)';
+    goo.drawImage(this.ink, 0, 0);
+    goo.globalCompositeOperation = 'multiply';
+    goo.globalAlpha = 0.72;
+    goo.drawImage(this.ink, 3.5 * dpr, 4.5 * dpr);
+    goo.globalAlpha = 1;
+    goo.globalCompositeOperation = 'destination-in';
+    goo.drawImage(this.ink, 0, 0);
+    goo.filter = 'none';
+
+    if (P.gloss) {
+      goo.globalCompositeOperation = 'source-atop';
+      goo.setTransform(dpr, 0, 0, dpr, 0, 0);
+      for (const p of this.parts) {
+        const R = p.r * 1.42;
+        const hx = p.x - R * 0.34, hy = p.y - R * 0.42;
+        const gr = goo.createRadialGradient(hx, hy, 0, hx, hy, R * 0.85);
+        gr.addColorStop(0, 'rgba(255,226,214,0.72)');
+        gr.addColorStop(0.45, 'rgba(233,120,100,0.26)');
+        gr.addColorStop(1, 'rgba(233,120,100,0)');
+        goo.fillStyle = gr;
+        goo.beginPath();
+        goo.ellipse(hx, hy, R * 0.72, R * 0.5, -0.5, 0, Math.PI * 2);
+        goo.fill();
+      }
+      goo.setTransform(1, 0, 0, 1, 0, 0);
+      goo.globalCompositeOperation = 'source-over';
+    }
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(this.goo, 0, 0);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  wound_draw(ctx) {
+    const w = this.wound;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(20,20,15,0.34)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 3]);
+    ctx.beginPath();
+    ctx.arc(w.x, w.y, 17, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(20,20,15,0.24)';
+    ctx.beginPath();
+    ctx.moveTo(w.x + 20, w.y); ctx.lineTo(w.x + 44, w.y); ctx.stroke();
+    ctx.font = '8.5px "IBM Plex Mono", monospace';
+    ctx.fillStyle = 'rgba(20,20,15,0.42)';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText('WOUND', w.x + 48, w.y);
+    ctx.fillStyle = this.DEEP;
+    ctx.beginPath();
+    ctx.ellipse(w.x, w.y, 8, 3.4, -0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // -------------------------------------------------------------- pointers --
+  local(e) {
+    const cv = this.canvasRef.current, r = cv.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+  onDown = (e) => {
+    const pt = this.local(e);
+    this._drag = { x: pt.x, y: pt.y, dx: 0, dy: 0 };
+    e.currentTarget.setPointerCapture && e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  onMove = (e) => {
+    if (!this._drag) return;
+    const pt = this.local(e);
+    this._drag.dx = pt.x - this._drag.x;
+    this._drag.dy = pt.y - this._drag.y;
+    this._drag.x = pt.x; this._drag.y = pt.y;
+  };
+  onUp = () => { this._drag = null; };
+
+  // ---------------------------------------------------------------- panel ---
+  setP(k, v) { this.setState(s => ({ p: Object.assign({}, s.p, { [k]: v }) })); }
+
+  sliderDown(def) {
+    return (e) => {
+      const el = e.currentTarget, rect = el.getBoundingClientRect();
+      const set = (cx) => {
+        const t = Math.max(0, Math.min(1, (cx - rect.left) / rect.width));
+        const raw = def.min + t * (def.max - def.min);
+        this.setP(def.k, Math.round(raw / def.step) * def.step);
+      };
+      set(e.clientX);
+      const move = (ev) => set(ev.clientX);
+      const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    };
+  }
+
+  renderVals() {
+    const P = this.P(), md = this.modeDef();
+    const groups = [];
+    for (const def of this.PARAMS) {
+      let g = groups.find(x => x.name === def.g);
+      if (!g) { g = { name: def.g, rows: [] }; groups.push(g); }
+      if (def.toggle) {
+        const on = !!P[def.k];
+        g.rows.push({
+          label: def.label, isSlider: false, isToggle: true,
+          knobLeft: on ? '14px' : '2px', knobOpacity: on ? 1 : 0.28,
+          display: on ? 'ON' : 'OFF',
+          toggle: () => this.setP(def.k, !on)
+        });
+      } else {
+        const v = P[def.k];
+        const t = (v - def.min) / (def.max - def.min);
+        g.rows.push({
+          label: def.label, isSlider: true, isToggle: false,
+          pct: (t * 100).toFixed(1) + '%',
+          display: def.unit === 'x' ? v.toFixed(2) + '\u00d7' : v.toFixed(2),
+          onDown: this.sliderDown(def)
+        });
+      }
+    }
+
+    const modeList = this.MODES.map(m => {
+      const on = m.key === this.mode();
+      return {
+        tag: m.tag, name: m.name,
+        tagInk: on ? '#8E1B12' : 'rgba(20,20,15,0.30)',
+        ink: on ? '#14140F' : 'rgba(20,20,15,0.42)',
+        rule: on ? '#14140F' : 'transparent',
+        pick: () => this.pickMode(m.key)
+      };
+    });
+
+    const panel = this.state.panel;
+    return {
+      stageRef: this.stageRef, canvasRef: this.canvasRef,
+      onDown: this.onDown, onMove: this.onMove, onUp: this.onUp,
+      modeList: modeList,
+      modeNote: md.note,
+      modeTag: md.tag + ' \u00b7 ' + md.name.toUpperCase(),
+      modelText: md.name.toUpperCase(),
+      volumeText: ((this.blood ?? 1) * 100).toFixed(1) + '%',
+      spillText: (this.spill ?? 0).toFixed(3),
+      countText: String((this.parts || []).length),
+      clotText: String(this.clotted ?? 0),
+      groups: groups,
+      panelOpacity: panel ? 1 : 0,
+      panelTransform: panel ? 'translateX(0)' : 'translateX(14px)',
+      panelEvents: panel ? 'auto' : 'none',
+      panelDot: panel ? '#8E1B12' : 'rgba(20,20,15,0.28)',
+      togglePanel: () => this.setState(s => ({ panel: !s.panel })),
+      footerText: 'SPH \u00b7 DOUBLE DENSITY',
+      reset: this.reset,
+      preset: this.preset
+    };
+  }
+}
+
+</script>
+</body>
+</html>

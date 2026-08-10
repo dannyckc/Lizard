@@ -24,7 +24,7 @@ const INK := CreatureView.INK
 ## goes down through them. `layer` is -1 for the networks, which are not part of
 ## the stack and are toggled on the view instead.
 const ROWS: Array[Dictionary] = [
-	{"name": "Skin", "layer": TissueGrid.SKIN, "ink": CreatureView.COL_BODY_HEAD},
+	{"name": "Skin", "layer": TissueGrid.SKIN, "ink": AnatomyView.COL_HIDE},
 	{"name": "Fat", "layer": TissueGrid.FAT, "ink": CreatureView.COL_FAT},
 	{"name": "Muscle", "layer": TissueGrid.MUSCLE, "ink": CreatureView.COL_MUSCLE},
 	{"name": "Skeleton", "layer": TissueGrid.BONE, "ink": CreatureView.COL_BONE},
@@ -47,7 +47,7 @@ const COMPOSITION: Array[int] = [
 ## Not a `const`: a packed array is built by a constructor, which is one step more
 ## than a constant expression is allowed to be.
 static var COMPOSITION_INKS := PackedColorArray([
-	CreatureView.COL_BODY_HEAD,
+	AnatomyView.COL_HIDE,
 	CreatureView.COL_FAT,
 	CreatureView.COL_MUSCLE,
 	CreatureView.COL_BONE,

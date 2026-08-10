@@ -104,24 +104,24 @@ func _report() -> void:
 		var counts: Array = [0, 0, 0, 0, 0, 0, 0]
 		for j in view._draw_list.size():
 			counts[lat.kind[view._draw_list[j]]] += 1
-		print("--- %s draw list: %d cells, lod %d ---"
-			% ["peeled" if mode == 1 else "intact", view._draw_list.size(), view._lod])
+		print("--- %s draw list: %d cells ---"
+			% ["peeled" if mode == 1 else "intact", view._draw_list.size()])
 		for t in 7:
 			if counts[t] > 0:
 				print("  %s: %d" % [AnatomyLattice.TISSUE_NAMES[t], counts[t]])
-		# Facing survival and normal distribution for what is listed.
+		# Normal distribution for what is listed. Top-down, a cell's own outward
+		# direction is effectively its z component blended through the station
+		# frame; approximate with |z| here to classify.
 		var facing: int = 0
 		var edge_on: int = 0
 		for j in view._draw_list.size():
-			var i: int = view._draw_list[j]
-			var out: Vector3 = lat.normal[i]
-			# Top-down: lit is effectively the z component blended through the
-			# station frame; approximate with |z| here to classify.
-			if out.z > -AnatomyView.FACING_CUT:
+			var out: Vector3 = lat.normal[view._draw_list[j]]
+			if out.z > 0.0:
 				facing += 1
 			if absf(out.z) < 0.35:
 				edge_on += 1
 		print("  facing up: %d · near edge-on from above: %d" % [facing, edge_on])
+		print("  mesh: %d verts, %d facets" % [view._mesh.v_count, view._mesh.count])
 		print("  scale %.2f · cell on page %.2f px"
 			% [view._scale, AnatomyLattice.CELL * view._scale])
 

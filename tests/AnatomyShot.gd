@@ -59,6 +59,8 @@ func _process(_delta: float) -> bool:
 			if "--nonet" in args:
 				v.show_vessels = false
 				v.show_nerves = false
+			if "--chew" in args:
+				_chew(player)
 		return false
 	if frames < 40:
 		return false
@@ -91,6 +93,26 @@ func _process(_delta: float) -> bool:
 		view.spin = 0.9 * float(shots.size())
 		view.tilt = 0.5
 	return false
+
+
+## Chews the specimen: craters in the flank and the head, and a hind leg eaten
+## clean off at the socket — so the crater, the wound rim and the severed stump
+## are all on the picture.
+func _chew(target: Creature) -> void:
+	var points: Array[Vector2] = [target.body.head.pos]
+	var torso: int = mini(4, target.body.last_index - 1)
+	points.append(target.spine.points[torso]
+		+ target.spine.perps[torso] * target.body.widths[torso])
+	for point in points:
+		for _repeat in 8:
+			target.apply_bite(BiteMark.mouthful(point, Vector2.RIGHT, 11.0, 4.0))
+	var patch: TissueGrid.Patch = target.anatomy.tissue.patch("RR")
+	var shed: Array = []
+	for row in BodyPlan.LIMB_ROWS:
+		for _repeat in 8:
+			target.anatomy.tissue.bite(BiteMark.mouthful(
+				patch.centre_of(row), Vector2.RIGHT, 0.8, 6.0), shed)
+	target.anatomy.update(target)
 
 
 func view_has_marks() -> bool:
