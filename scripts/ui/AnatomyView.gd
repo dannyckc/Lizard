@@ -11,15 +11,24 @@
 ## beside it are these same cells, because the physique weighed these same
 ## cells: there is no second anatomy anywhere.
 ##
-## Each tissue is drawn as the structure it is, not as a common cell shape. Skin
-## and fat are watertight sheets subdivided into a Voronoi-style tessellation,
-## anchored in the body's own frame so the pattern survives every bend. Muscle
-## is elongated fibres along its own contraction direction, parted into bellies
-## at the plan's actuator boundaries. Bone, the cord and the great vessels are
-## continuous volumes drawn from their TissueForm chains — centreline plus
-## thickness, never cell by cell — and the two supply networks carry their
-## space-colonised branch trees, with everything finer living in the per-region
-## density fields. One census underneath all of it, five representations on top.
+## Each tissue is drawn as the structure it is, not as a common cell shape. The
+## flesh is drawn as the *hull of the visible solid*: every cell face that
+## actually touches air — or touches something peeled away — is a quad, and the
+## corners of those quads are shared between every cell that meets them, wandered
+## once per corner by a hash of where the corner is in the body's own frame. That
+## makes the surface a closed Voronoi-style tessellation of the real cells: it is
+## watertight from every angle by construction, it bends with the body because
+## the corners are facts about the body, and its cellular pattern is the actual
+## cells' own positions and shapes rather than a print applied on top. Skin, fat
+## and organs carry a region mottle over it — patches of neighbouring cells toned
+## together, seeded in the canonical frame. Muscle is the same closed form with
+## its grain inked on top: elongated fibre strands along its own contraction
+## direction, parted into bellies at the plan's actuator boundaries. Bone, the
+## cord and the great vessels are continuous volumes drawn from their TissueForm
+## chains — centreline plus thickness, never cell by cell — and the two supply
+## networks carry their space-colonised branch trees, with everything finer
+## living in the per-region density fields. One census underneath all of it,
+## five representations on top.
 ##
 ## Four ways to look inside, and all four are subtractions rather than styles:
 ## a tissue toggled off has its cells lifted away and whatever they enclosed is
@@ -165,14 +174,41 @@ const SHADES: int = 32
 # Every tissue used to be stamped with the same square, which is why the specimen
 # read as generic cells rather than as skin, fat, muscle and bone. Each tissue now
 # gets the mark its own structure has; the constants below are those shapes.
-## How far a skin, fat or organ cell's corners wander from the square, as a share
-## of the mark's own half-size. The wander is hashed off the corner's *canonical*
-## position, quantised to the half-cell grid — so the two cells sharing a corner
-## move it identically and the tessellation stays watertight, and so the pattern
-## is a fact about the animal's own frame that bending and walking cannot churn.
-## Kept under SPLAT_GROW - 1, which is what guarantees the jittered marks still
-## overlap at least as much as the square ones did.
+## How far a corner of the hull wanders from its grid position, as a share of the
+## half-cell (and, on the splat paths, of the mark's own half-size). The wander is
+## hashed off the corner's *canonical* position — so every cell and every face
+## sharing a corner moves it identically and the tessellation stays watertight,
+## and so the pattern is a fact about the animal's own frame that bending and
+## walking cannot churn. One magnitude for every tissue, because a corner on the
+## boundary between two tissues belongs to both.
 const VORONOI_JITTER: float = 0.34
+## How much a hull face is grown about its own centre. The two cells meeting at a
+## station boundary pose their shared corners through neighbouring affines, which
+## agree exactly only within one station interval — this closes the hairline that
+## disagreement could open, and the sub-pixel seam the rasteriser leaves between
+## abutting triangles, for under a fifth of a cell of overlap.
+const FACE_GROW: float = 1.16
+## The Voronoi mottle: skin, fat and organs are toned in regions a few cells
+## across — big enough to read on a page where one cell is two pixels — seeded on
+## a coarse grid of the canonical frame, so a region is a patch of real
+## neighbouring cells that bends with the flesh it is part of. The spans are how
+## many shade bands a region may wander from the tissue's own, either way.
+const REGION_GRID: float = AnatomyLattice.CELL * 3.0
+const TONE_SKIN: int = 7
+const TONE_FAT: int = 4
+const TONE_ORGAN: int = 4
+## Muscle grain: fibre strands inked over the closed muscle surface, elongated
+## along the contraction direction, slid along their own length so they read as
+## bundled fibres rather than rungs. Decoration over a closed form — a gap
+## between strands shows muscle, never the fat behind it. Length and slide are
+## in cells; width is the share of a cell a strand covers across its grain.
+const STRAND_MIN: float = 0.9
+const STRAND_VAR: float = 0.6
+const STRAND_WIDTH: float = 0.17
+const STRAND_SLIDE: float = 0.8
+## How near the eye a strand is nudged past its own face, in world pixels — under
+## half a cell, so it can never climb over a genuinely nearer cell.
+const STRAND_LIFT: float = 0.9
 ## Muscle marks are fibres: elongated along the direction the tissue contracts
 ## in — the body's long axis on the trunk, down the limb on a leg — staggered
 ## along their own grain so they read as bundled strands rather than as a brick
@@ -341,6 +377,24 @@ var _cb := PackedFloat32Array()
 ## their cellular mottle, or TONE_SEPTUM where the mark is the boundary between
 ## two muscle bellies.
 var _tone := PackedByteArray()
+# --- the hull, at full detail ---------------------------------------------------
+# Where a cell is big enough on the page to be worth its own mark, the specimen
+# is drawn as the exposed faces of the visible solid rather than as one splat per
+# cell: each quad here is a face of a real cell that touches air or touches
+# something peeled away, plus the fibre strands inked over the muscle. Baked with
+# the draw list; per-frame cost is posing corners that already exist.
+## Which draw-list entry each quad belongs to.
+var _quad_cell := PackedInt32Array()
+## 0..5: face toward -x +x -y +y -z +z of the canonical frame, culled by which
+## way that face points this frame. 6: a fibre strand, culled by its cell's own
+## smooth normal like a splat.
+var _quad_dir := PackedByteArray()
+## Four corners per quad, as canonical offsets from the cell's own centre —
+## jittered, grown and ready to pose through the station affine.
+var _quad_off := PackedVector3Array()
+## The quad's banked band nudge, biased by 128.
+var _quad_tone := PackedByteArray()
+var _quad_count: int = 0
 ## The tissues' derived form — bone centrelines, conduit splines, supply trees,
 ## density fields. Rebuilt only when the lattice is; see TissueForm.
 var _form := TissueForm.new()
@@ -780,7 +834,17 @@ func _lod_step() -> int:
 ##
 ## Baked with the draw list rather than per frame: all of it is fact about the
 ## animal, and turning the specimen does not change it.
+##
+## At full detail the splats keep only the limbs: a limb poses its own long axis
+## through the station run — a shear, not a rigid turn — so its cells' canonical
+## faces do not tile its posed footprint, and a splat per cell with a coverage
+## floor is the honest mark for it. The trunk and head are drawn as the hull of
+## the visible solid instead — see `_bake_quads`.
 func _bake_marks(lat: AnatomyLattice, grid: TissueGrid) -> void:
+	if _lod == 1 and not xray:
+		_bake_quads(lat, grid)
+	else:
+		_quad_count = 0
 	var n: int = _draw_list.size()
 	_tan_a.resize(n)
 	_tan_b.resize(n)
@@ -856,6 +920,163 @@ func _bake_marks(lat: AnatomyLattice, grid: TissueGrid) -> void:
 				_cb[v + 2] = 1.0
 				_cb[v + 3] = 1.0
 				_tone[j] = 1
+
+
+## The hull of the visible solid, one quad per exposed face — the full-detail
+## face of the specimen.
+##
+## A face is exposed when what stands on its far side is not being drawn: open
+## air, a tissue toggled off, a cell the ledger has taken, or the far side of
+## the section plane. Every corner is shared through the canonical grid by every
+## face that meets it, and wandered once by a hash of its own position — so the
+## surface is a closed tessellation of the actual cells, watertight from any
+## angle *by construction*, bending with the body because the corners are facts
+## about the body. There is no minimum mark size, no growing, and no facing
+## floor anywhere in it: coverage is exact because the geometry is the
+## geometry, which is the whole difference from the splats it replaces.
+##
+## Muscle adds its grain over the closed form — fibre strands elongated along
+## the contraction direction, parted at the septa — and skin, fat and the
+## organs carry the region mottle. All of it is fact about the animal and the
+## filters, so all of it is baked here and merely posed per frame.
+func _bake_quads(lat: AnatomyLattice, grid: TissueGrid) -> void:
+	_bake_septa(grid)
+	_quad_cell.resize(0)
+	_quad_dir.resize(0)
+	_quad_off.resize(0)
+	_quad_tone.resize(0)
+	var hidden: int = AnatomyLattice.OPEN_BIT
+	for t in AnatomyLattice.TISSUES:
+		if not tissue_shown(t):
+			hidden |= 1 << t
+	var sliced: bool = slice_axis >= 0
+	var plane: float = slice_plane()
+	var half: float = AnatomyLattice.CELL * 0.5
+	var jit: float = VORONOI_JITTER * half
+	var kinds: PackedByteArray = lat.kind
+	var gone: PackedByteArray = lat.gone
+	var where: PackedVector3Array = lat.pos
+	var neighbours: PackedInt32Array = lat.neighbor
+	var corner: Array[Vector3] = [Vector3(), Vector3(), Vector3(), Vector3()]
+	var patch: PackedByteArray = lat.patch_of
+	for j in _draw_list.size():
+		var i: int = _draw_list[j]
+		# Limbs stay splats — their pose is a shear of the canonical frame, and a
+		# sheared cell's faces do not tile its posed footprint. See `_bake_marks`.
+		if patch[i] != 0:
+			continue
+		var t: int = kinds[i]
+		var p: Vector3 = where[i]
+		var h: int = _hash_at(p, half)
+
+		# The quad's ink adjustment: region mottle on the sheets, the septum or a
+		# faint per-cell grain on muscle, substructure on the organs.
+		var tone: int = 0
+		var septum: bool = false
+		match t:
+			AnatomyLattice.SKIN:
+				tone = _region_tone(p, TONE_SKIN)
+			AnatomyLattice.FAT:
+				tone = _region_tone(p, TONE_FAT)
+			AnatomyLattice.ORGAN:
+				tone = _region_tone(p, TONE_ORGAN)
+				match int(lat.part[i]):
+					AnatomyLattice.PART_ATRIUM, AnatomyLattice.PART_CEREBRUM:
+						tone += 2
+					AnatomyLattice.PART_VENTRICLE, AnatomyLattice.PART_BRAINSTEM:
+						tone -= 2
+			AnatomyLattice.MUSCLE:
+				septum = _on_septum(lat, i)
+				tone = -7 if septum else ((h >> 7) % 3 - 1)
+		var tone_byte: int = clampi(128 + tone, 0, 255)
+
+		var base: int = i * 6
+		for k in 6:
+			var nb: int = neighbours[base + k]
+			if nb >= 0 and (hidden & (1 << int(kinds[nb]))) == 0 and gone[nb] == 0 \
+					and not (sliced and where[nb][slice_axis] > plane):
+				continue
+			var axis: int = k >> 1
+			var sign: float = -1.0 if (k & 1) == 0 else 1.0
+			var ua: int = (axis + 1) % 3
+			var va: int = (axis + 2) % 3
+			var centre := Vector3.ZERO
+			for m in 4:
+				var off := Vector3.ZERO
+				off[axis] = sign * half
+				off[ua] = -half if m == 0 or m == 3 else half
+				off[va] = -half if m <= 1 else half
+				# Hashed before the wander, at the corner's own grid position —
+				# corners of cells land exactly on the cell grid, so every face
+				# meeting this corner hashes the same site and moves together.
+				var ch: int = _hash_at(p + off, AnatomyLattice.CELL)
+				off.x += (float(ch & 255) / 255.0 - 0.5) * 2.0 * jit
+				off.y += (float((ch >> 8) & 255) / 255.0 - 0.5) * 2.0 * jit
+				off.z += (float((ch >> 16) & 127) / 127.0 - 0.5) * 2.0 * jit
+				corner[m] = off
+				centre += off
+			centre *= 0.25
+			_quad_cell.append(j)
+			_quad_dir.append(k)
+			_quad_tone.append(tone_byte)
+			for m in 4:
+				_quad_off.append(centre + (corner[m] - centre) * FACE_GROW)
+
+		# The grain: a strand over most muscle cells, never over a septum.
+		if t != AnatomyLattice.MUSCLE or septum or (h & 3) == 3:
+			continue
+		var out: Vector3 = lat.normal[i]
+		var fibre := Vector3(1.0, 0.0, 0.0) if lat.patch_of[i] == 0 \
+			else Vector3(0.0, 0.0, -1.0)
+		var a: Vector3 = fibre - out * out.dot(fibre)
+		if a.length_squared() < 0.000001:
+			a = _spare_tangent(out)
+		a = a.normalized()
+		var b: Vector3 = out.cross(a).normalized()
+		var span: float = AnatomyLattice.CELL \
+			* (STRAND_MIN + STRAND_VAR * float((h >> 4) & 7) / 7.0)
+		var slide: float = (float((h >> 9) & 15) / 15.0 - 0.5) \
+			* AnatomyLattice.CELL * STRAND_SLIDE
+		var wide: float = AnatomyLattice.CELL * STRAND_WIDTH
+		# Mostly darker than the meat, the odd strand lifted — sheen on a grain.
+		var strand_tone: int = 4 if ((h >> 13) & 7) == 0 else -3 - ((h >> 11) & 3)
+		_quad_cell.append(j)
+		_quad_dir.append(6)
+		_quad_tone.append(clampi(128 + strand_tone, 0, 255))
+		_quad_off.append(a * (slide - span) - b * wide)
+		_quad_off.append(a * (slide + span) - b * wide)
+		_quad_off.append(a * (slide + span) + b * wide)
+		_quad_off.append(a * (slide - span) + b * wide)
+	_quad_count = _quad_cell.size()
+
+
+## Which tone band the Voronoi region standing at a canonical point carries:
+## nearest of the jittered seeds on the coarse grid around it. The seeds are
+## fixed in the body's own frame, so a region is a patch of real neighbouring
+## cells a few of them across — big enough to read on a page where one cell is
+## two pixels, and immune to the pose because the cells themselves are.
+func _region_tone(p: Vector3, span: int) -> int:
+	var bx: int = floori(p.x / REGION_GRID - 0.5)
+	var by: int = floori(p.y / REGION_GRID - 0.5)
+	var bz: int = floori(p.z / REGION_GRID - 0.5)
+	var best: float = INF
+	var won: int = 0
+	for ox in 2:
+		for oy in 2:
+			for oz in 2:
+				var sx: float = float(bx + ox)
+				var sy: float = float(by + oy)
+				var sz: float = float(bz + oz)
+				var h: int = _hash_at(Vector3(sx, sy, sz) * REGION_GRID, REGION_GRID)
+				var seed := Vector3(
+					sx + 0.2 + 0.6 * float(h & 1023) / 1023.0,
+					sy + 0.2 + 0.6 * float((h >> 10) & 1023) / 1023.0,
+					sz + 0.2 + 0.6 * float((h >> 20) & 511) / 511.0) * REGION_GRID
+				var d: float = (seed - p).length_squared()
+				if d < best:
+					best = d
+					won = h
+	return (won * 48271) % (2 * span + 1) - span
 
 
 ## Any direction not along the normal will do to start; the pair that comes out
@@ -1062,16 +1283,26 @@ func _draw() -> void:
 	_draw_cells(lat, grid)
 
 	var state: BodyState = creature.anatomy.state
-	if show_vessels:
+	# The supply overlays are things inside the animal, and they draw only when
+	# the inside is genuinely open to view — peeled, cut or thinned — never as
+	# lines through an intact wrap. The trunk runs lie against the spine under
+	# the muscle, so they wait for the deep interior; the limb runs sit just
+	# under the surface and show as soon as the skin is off.
+	var opened: bool = xray or slice_axis >= 0 \
+		or not (layer_shown(AnatomyLattice.SKIN) and layer_shown(AnatomyLattice.FAT))
+	var deep_open: bool = opened and (xray or slice_axis >= 0 \
+		or not (layer_shown(AnatomyLattice.MUSCLE) and layer_shown(AnatomyLattice.BONE)))
+	if show_vessels and opened:
 		_draw_network(grid, state.plan.vessels, state.vessels, COL_VESSEL, 3, 46.0, true,
-			VESSEL_OFFSET)
+			VESSEL_OFFSET, deep_open)
 		_draw_branches(lat, state.vessels, TissueForm.VESSELS, COL_VESSEL)
-	if show_nerves:
-		_draw_network(grid, state.plan.nerves, state.nerves, COL_NERVE, 2, 150.0, false, 0.0)
+	if show_nerves and opened:
+		_draw_network(grid, state.plan.nerves, state.nerves, COL_NERVE, 2, 150.0, false, 0.0,
+			deep_open)
 		_draw_branches(lat, state.nerves, TissueForm.NERVES, COL_NERVE)
-	if show_vessels:
+	if show_vessels and opened:
 		_draw_organ(grid, lat, BodyPlan.HEART, COL_VESSEL, "HEART", true)
-	if show_nerves:
+	if show_nerves and opened:
 		_draw_organ(grid, lat, BodyPlan.BRAIN, COL_NERVE, "BRAIN", false)
 	_draw_hover(lat)
 
@@ -1108,11 +1339,15 @@ func _draw_empty() -> void:
 ## it or smooths it away: the mark is centred on the cell's own posed position
 ## and is the size of the cell. What changed is the shape of the mark.
 func _draw_cells(lat: AnatomyLattice, grid: TissueGrid) -> void:
+	# At full detail the trunk and head are the hull of the visible solid — every
+	# quad a real face of a real cell — with the splat pass keeping the limbs.
+	# Coarse and X-ray keep splats throughout. See `_bake_quads` / `_bake_marks`.
+	var fine: bool = _lod == 1 and not xray
 	var listed: int = _draw_list.size()
 	# The chains draw into the same buffers as the marks, one quad a segment, so
-	# the room is the two together — and a specimen stripped to nothing but its
-	# skeleton is all chains and no marks.
-	var room: int = listed + _form.sample_total
+	# the room is everything together — and a specimen stripped to nothing but
+	# its skeleton is all chains and no marks.
+	var room: int = listed + _form.sample_total + (_quad_count if fine else 0)
 	if room == 0:
 		_shown_count = 0
 		return
@@ -1130,10 +1365,13 @@ func _draw_cells(lat: AnatomyLattice, grid: TissueGrid) -> void:
 	# because they are page offsets per world pixel of the body.
 	var half: float = AnatomyLattice.CELL * 0.5 * SPLAT_GROW \
 		* (LOD_GROW if _lod > 1 else 1.0)
-	# The edge-on floor grows with the thinning: a mark covering for a dropped
-	# neighbour needs the extra reach exactly where its surface is rolling away,
-	# or the hide of a big animal comes up flecked with pinholes.
-	var floor_page: float = SPLAT_MIN * 0.5 * (LOD_GROW if _lod > 1 else 1.0)
+	# The edge-on floor is the mark's coverage duty: kept marks stand one thinned
+	# cell apart on the page, and a mark rolled edge-on still has to reach its
+	# neighbours or the flank comes up as parallel slivers with paper between
+	# them. Said as the spacing itself rather than as a fixed width, so it holds
+	# at every scale the splat paths are still used at.
+	var floor_page: float = maxf(SPLAT_MIN,
+		AnatomyLattice.CELL * _scale * float(_lod) * 1.1) * 0.5
 	var alpha: float = 1.0
 	if xray:
 		# Thinner marks, but fewer of them where the sieve has been at work, so
@@ -1151,9 +1389,15 @@ func _draw_cells(lat: AnatomyLattice, grid: TissueGrid) -> void:
 	# body to hide and every mark has to be kept.
 	var cut: float = -2.0 if xray else FACING_CUT
 	var n: int = 0
+	if fine:
+		n = _pass_hull(lat, grid, worn)
 	for j in listed:
 		var i: int = _draw_list[j]
 		var pk: int = lat.patch_of[i]
+		# At full detail the trunk went down as its hull; only limb cells still
+		# take a splat here.
+		if fine and pk == 0:
+			continue
 		if pk >= _af_o.size() or _af_o[pk] == null:
 			continue
 		var out: Vector3 = lat.normal[i]
@@ -1261,6 +1505,107 @@ func _draw_cells(lat: AnatomyLattice, grid: TissueGrid) -> void:
 				_points[v], _points[v + 1], _points[v + 1], _points[v + 2],
 				_points[v + 2], _points[v + 3], _points[v + 3], _points[v]])
 		draw_multiline(_lattice_lines, COL_LATTICE, 0.5, true)
+
+
+## The hull pass: every baked quad posed, culled and inked — see `_bake_quads`.
+##
+## Faces cull by which way their own canonical axis points this frame — one
+## signed coefficient the station affine already holds — which drops the far
+## half of a closed body exactly, for one compare apiece. What survives tiles
+## the silhouette with no floors and no growing, because the front-facing faces
+## of a closed solid *are* its silhouette. Strands cull by their cell's smooth
+## normal exactly as splats did, and ride just proud of their own face.
+##
+## Shading stays smooth: the band is read off the cell's carved outward normal,
+## not the face's axis, so the body rounds exactly as the splats rounded while
+## the geometry underneath is watertight.
+func _pass_hull(lat: AnatomyLattice, grid: TissueGrid, worn: Array) -> int:
+	var half: float = AnatomyLattice.CELL * 0.5
+	var n: int = 0
+	var last_j: int = -1
+	var ok: bool = false
+	var page := Vector2.ZERO
+	var deep: float = 0.0
+	var ax := Vector2.ZERO
+	var ay := Vector2.ZERO
+	var xd_c: float = 0.0
+	var yd_c: float = 0.0
+	var lit: float = 0.0
+	var i: int = -1
+	var t: int = 0
+	var row: int = 0
+	var band: int = 0
+	var wp: TissueGrid.Patch = null
+	for q in _quad_count:
+		var j: int = _quad_cell[q]
+		if j != last_j:
+			# One cell's pose, shading band and wear, reused by every quad it
+			# carries — the quads of one cell are consecutive by construction.
+			last_j = j
+			i = _draw_list[j]
+			var pk: int = lat.patch_of[i]
+			ok = pk < _af_o.size() and _af_o[pk] != null
+			if ok:
+				var o: PackedVector2Array = _af_o[pk]
+				var s: float = clampf(lat.station[i], 0.0, float(o.size() - 1))
+				var c: int = mini(int(s), o.size() - 1)
+				var f: float = s - float(c)
+				var side: float = lat.lat[i]
+				var ahead: float = lat.fore[i]
+				var up: float = lat.lift[i]
+				var xd: PackedFloat32Array = _dp_f[pk]
+				var yd: PackedFloat32Array = _dp_l[pk]
+				xd_c = xd[c]
+				yd_c = yd[c]
+				ax = (_af_f[pk] as PackedVector2Array)[c]
+				ay = (_af_l[pk] as PackedVector2Array)[c]
+				page = o[c] + (_af_s[pk] as PackedVector2Array)[c] * f \
+					+ ay * side + ax * ahead + _af_h * up
+				deep = (_dp_o[pk] as PackedFloat32Array)[c] \
+					+ (_dp_s[pk] as PackedFloat32Array)[c] * f \
+					+ yd_c * side + xd_c * ahead + _dp_h * up
+				var out: Vector3 = lat.normal[i]
+				lit = out.x * xd_c + out.y * yd_c + out.z * _dp_h
+				t = lat.kind[i]
+				row = t * SHADES
+				band = clampi(int((lit + 1.0) * (0.5 * float(SHADES))), 0, SHADES - 1)
+				wp = worn[pk]
+		if not ok:
+			continue
+		var dir: int = int(_quad_dir[q])
+		var dq: float = deep
+		if dir < 6:
+			# The face's own outward direction, against the eye.
+			var coeff: float = _dp_h
+			if dir < 2:
+				coeff = xd_c
+			elif dir < 4:
+				coeff = yd_c
+			if (dir & 1) == 0:
+				coeff = -coeff
+			if coeff <= 0.0:
+				continue
+			dq += coeff * half
+		else:
+			if lit < FACING_CUT:
+				continue
+			dq += STRAND_LIFT
+		var ink: Color = _shade[row + clampi(band + int(_quad_tone[q]) - 128,
+			0, SHADES - 1)]
+		if wp != null:
+			ink = _worn(lat, grid, wp, i, ink, t)
+		var v: int = n * 4
+		var c4: int = q * 4
+		for m in 4:
+			var off: Vector3 = _quad_off[c4 + m]
+			_points[v + m] = page + ax * off.x + ay * off.y + _af_h * off.z
+			_colors[v + m] = ink
+		_cell_page[n] = page
+		_cell_deep[n] = dq
+		_shown[n] = i
+		_depths[n] = Vector2(dq, float(n))
+		n += 1
+	return n
 
 
 ## Keeps a patch from collapsing as its surface turns edge-on, by widening it
@@ -1521,9 +1866,11 @@ func _layer_full(grid: TissueGrid, p: TissueGrid.Patch, cell: int, layer: int) -
 
 
 ## A face's own colour with the form of the body on it: lifted toward the paper
-## where it is turned toward the eye, dropped toward the ink where away.
+## where it is turned toward the eye, dropped toward the ink where away. The
+## floor keeps half the modelling even straight overhead, or the top-down
+## specimen is a flat silhouette and its cellular pattern has nothing to show on.
 func _relieved(color: Color, lit: float) -> Color:
-	var lift: float = (0.25 + 0.75 * _relief) * RELIEF * clampf(lit, -1.0, 1.0)
+	var lift: float = (0.5 + 0.5 * _relief) * RELIEF * clampf(lit, -1.0, 1.0)
 	if lift >= 0.0:
 		return color.lerp(Color(PAPER, color.a), lift)
 	return color.lerp(Color(INK, color.a), -lift)
@@ -1533,11 +1880,15 @@ func _relieved(color: Color, lit: float) -> Color:
 
 ## One supply network, laid along the ledger cells it actually passes through.
 ## Width and alpha carry what *arrives* rather than what survives locally, so a
-## sound run still fades out behind a cut upstream of it.
+## sound run still fades out behind a cut upstream of it. `deep_open` is whether
+## the trunk's own interior is on view — the body runs lie under the muscle
+## against the spine, and are skipped while that cover is intact.
 func _draw_network(grid: TissueGrid, runs: Array[BodyPlan.Conduit],
 		network: AnatomyNetwork, tint: Color, pulses: int, speed: float,
-		beat: bool, offset: float) -> void:
+		beat: bool, offset: float, deep_open: bool) -> void:
 	for run in runs:
+		if not deep_open and run.patch_key == TissueGrid.BODY_KEY:
+			continue
 		var p: TissueGrid.Patch = grid.patch(run.patch_key)
 		if p == null or not p.live or run.cells.size() < 2:
 			continue
@@ -1651,7 +2002,9 @@ func _depth_of(runs: Array[BodyPlan.Conduit], run: BodyPlan.Conduit) -> int:
 ##
 ## Every branch vertex is a lattice cell, posed through the same affine as the
 ## marks — the tree bends with the flesh it supplies, and a vertex whose cell
-## has been eaten breaks the branch there.
+## has been eaten breaks the branch there. A vertex whose cell's tissue is
+## filtered off breaks it the same way: a branch runs inside flesh, and where
+## the flesh has been lifted away the branch is not left hanging in the air.
 func _draw_branches(lat: AnatomyLattice, network: AnatomyNetwork, net: int,
 		tint: Color) -> void:
 	var paths: Array = _form.branches[net]
@@ -1661,6 +2014,12 @@ func _draw_branches(lat: AnatomyLattice, network: AnatomyNetwork, net: int,
 	var field: PackedFloat32Array = _form.density[net]
 	if field.size() < BodyPlan.REGIONS:
 		return
+	var hidden: int = 0
+	for t in AnatomyLattice.TISSUES:
+		if not tissue_shown(t):
+			hidden |= 1 << t
+	var sliced: bool = slice_axis >= 0
+	var plane: float = slice_plane()
 	for reg in BodyPlan.REGIONS:
 		_branch_lines.resize(0)
 		for b in paths.size():
@@ -1670,7 +2029,8 @@ func _draw_branches(lat: AnatomyLattice, network: AnatomyNetwork, net: int,
 			var live: bool = false
 			var prev := Vector2.ZERO
 			for idx in path:
-				if lat.gone[idx] != 0:
+				if lat.gone[idx] != 0 or (hidden & (1 << int(lat.kind[idx]))) != 0 \
+						or (sliced and lat.pos[idx][slice_axis] > plane):
 					live = false
 					continue
 				var at3: Vector3 = _cell_at(lat, idx)

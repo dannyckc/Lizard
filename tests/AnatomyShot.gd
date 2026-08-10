@@ -42,6 +42,8 @@ func _process(_delta: float) -> bool:
 			if "--peel" in args:
 				v.set_layer_shown(AnatomyLattice.SKIN, false)
 				v.set_layer_shown(AnatomyLattice.FAT, false)
+			if "--skinoff" in args:
+				v.set_layer_shown(AnatomyLattice.SKIN, false)
 			if "--bones" in args:
 				v.set_layer_shown(AnatomyLattice.SKIN, false)
 				v.set_layer_shown(AnatomyLattice.FAT, false)
@@ -54,6 +56,9 @@ func _process(_delta: float) -> bool:
 				v.slice_at = 0.9
 			if "--wire" in args:
 				v.show_lattice = true
+			if "--nonet" in args:
+				v.show_vessels = false
+				v.show_nerves = false
 		return false
 	if frames < 40:
 		return false
