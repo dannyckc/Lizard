@@ -221,9 +221,14 @@ const TUBE_MIN: float = 0.6
 ## palest thing on the slab and its tubes run against bone-coloured neighbours —
 ## vertebra against rib, carpal against carpal — so without a rim the skeleton
 ## reads as one pale mass; with it every element is its own outlined piece.
-const BONE_RIM: float = 0.9
+##
+## The rim is a hairline, not a border: it shows as `BONE_RIM` of ink outside
+## the tube, which is what a `BONE_EDGE`-width line centred on a mesh edge
+## shows outside *its* facet — so a tube's outline and the skull's facet lines
+## read as one and the same stroke.
+const BONE_RIM: float = 0.3
 const BONE_RIM_BACK: float = 0.6
-const COL_BONE_RIM := Color("241d15", 0.85)
+const COL_BONE_RIM := Color(INK, 0.42)
 ## The hairline bone facets take instead of the ordinary one — the skull is
 ## skinned as mesh rather than as tubes, and it wants the same contrast the
 ## tubes get from their rim.
@@ -1569,7 +1574,7 @@ func _draw_facet_edges(lat: AnatomyLattice, faces: int) -> void:
 	if _edge_lines.size() >= 2:
 		draw_multiline(_edge_lines, FACET_EDGE, 0.6, true)
 	if _bone_edge_lines.size() >= 2:
-		draw_multiline(_bone_edge_lines, BONE_EDGE, 0.7, true)
+		draw_multiline(_bone_edge_lines, BONE_EDGE, 0.6, true)
 
 
 ## The census under the skin: a mark on every cell the mesh was actually skinned

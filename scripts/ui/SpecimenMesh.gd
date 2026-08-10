@@ -94,6 +94,14 @@ const CONE: float = 0.8
 ## triangle. A ring with real flesh missing is still dropped — that is what the
 ## floor of three is for — and the cells go on to `loose` as they always did.
 const RING_ENOUGH: float = 0.25
+## Most consecutive empty bands a stitch may reach across. A short gap is the
+## lattice being coarser than the rings — a station whose cells all went to a
+## chain — and is skinned over; a long one is a place the shown flesh genuinely
+## stops, and skinning across it invents a solid the animal has not got. With
+## only the two named organs on show, the brain and the heart are exactly such
+## a pair of separate masses, and bridging them drew a bar of flesh from the
+## skull into the chest.
+const BRIDGE: int = 2
 
 # --- vertices, in the lattice's own posing coordinates -------------------------
 var v_patch := PackedByteArray()
@@ -136,6 +144,11 @@ var _band_s := PackedFloat32Array()
 var _band_lift := PackedFloat32Array()
 var _band_r := PackedFloat32Array()
 var _band_cut := PackedByteArray()
+## Which named organ a band's cells belong to: an organ while every winner
+## agrees on one, `BodyPlan.NO_ORGAN` the moment any winner is flesh — so two
+## bands of *different* organs are recognisably separate masses and never
+## stitched to one another. 255 while the band is empty.
+var _band_org := PackedByteArray()
 ## Where each patch's rings start along its own long axis, and how far apart they
 ## stand — a cell wherever the animal is small enough for that, stretched on a
 ## big one so the mesh stays the same size whatever is on the slab.
@@ -153,6 +166,7 @@ func _init() -> void:
 	_band_lift.resize(BANDS)
 	_band_r.resize(BANDS)
 	_band_cut.resize(BANDS)
+	_band_org.resize(BANDS)
 	_axis_lo.resize(AnatomyLattice.PATCH_KEYS.size())
 	_axis_step.resize(AnatomyLattice.PATCH_KEYS.size())
 
@@ -236,6 +250,7 @@ func _skin(lat: AnatomyLattice, surface: PackedInt32Array, shell: int,
 	_band_lift.fill(0.0)
 	_band_r.fill(0.0)
 	_band_cut.fill(0)
+	_band_org.fill(255)
 
 	# Hoisted: a property read per cell per array is thousands of property reads.
 	var patch_of: PackedByteArray = lat.patch_of
@@ -244,6 +259,7 @@ func _skin(lat: AnatomyLattice, surface: PackedInt32Array, shell: int,
 	var ahead: PackedFloat32Array = lat.fore
 	var up: PackedFloat32Array = lat.lift
 	var where: PackedVector3Array = lat.pos
+	var organs: PackedByteArray = lat.organ_of
 
 	# Where each patch begins and ends along its own long axis, and how finely it
 	# can therefore be ringed. Rings are cut on the *axis* rather than on the
@@ -349,6 +365,11 @@ func _skin(lat: AnatomyLattice, surface: PackedInt32Array, shell: int,
 				_band_s[here] += station[i]
 				_band_lift[here] += up[i]
 				_band_r[here] += _best_r[row + sector]
+				var org: int = organs[i]
+				if _band_org[here] == 255:
+					_band_org[here] = org
+				elif _band_org[here] != org:
+					_band_org[here] = BodyPlan.NO_ORGAN
 				# Whether this piece of surface is the rim of a crater. Asked once
 				# per winning cell rather than once per facet, and it is the only
 				# question in the build that reads the neighbour table.
@@ -391,14 +412,18 @@ func _skin(lat: AnatomyLattice, surface: PackedInt32Array, shell: int,
 
 	# The skin itself: a quad between every pair of rings that follow one another.
 	#
-	# *Follow*, not neighbour. A band with no cells in it is a place the lattice
-	# had nothing to say, not a place the animal stops — a station whose cells all
-	# went to a chain, or a stretch where the rings are cut finer than the cells
-	# are. Stitching strictly to `band + 1` tore the tube open at every one of
-	# them and then sealed both raw ends into cones, which is how a continuous
-	# tail came out as a string of separate pieces. So the ring after this one is
-	# the next one that exists, and the two ends of the run are the only places
-	# anything is sealed.
+	# *Follow*, not neighbour — up to a point. A short stretch of empty bands is
+	# a place the lattice had nothing to say, not a place the animal stops — a
+	# station whose cells all went to a chain, or a stretch where the rings are
+	# cut finer than the cells are. Stitching strictly to `band + 1` tore the
+	# tube open at every one of them and then sealed both raw ends into cones,
+	# which is how a continuous tail came out as a string of separate pieces. So
+	# the ring after this one is the next one that exists — unless the gap is
+	# longer than `BRIDGE`, or the two rings are two different named organs,
+	# either of which says these are separate masses of what is being shown:
+	# skinning across from the brain to the heart drew a solid bar of neither
+	# down the animal's neck. A run's two ends are the only places anything is
+	# sealed, and a split makes two runs with two ends each.
 	for pk in AnatomyLattice.PATCH_KEYS.size():
 		var bands: int = bands_of(pk)
 		var sectors: int = sectors_of(pk)
@@ -406,27 +431,42 @@ func _skin(lat: AnatomyLattice, surface: PackedInt32Array, shell: int,
 		var band_base: int = _band_base(pk)
 		var run: Array[int] = []
 		for band in bands:
-			if _band_n[band_base + band] > 0:
-				run.append(band)
-		if run.is_empty():
-			continue
-		for j in range(run.size() - 1):
-			var near: int = bucket_base + run[j] * sectors
-			var far: int = bucket_base + run[j + 1] * sectors
-			for sector in sectors:
-				var next: int = (sector + 1) % sectors
-				var a: int = _vert_of[near + sector]
-				var b: int = _vert_of[near + next]
-				var c: int = _vert_of[far + next]
-				var d: int = _vert_of[far + sector]
-				if a < 0 or b < 0 or c < 0 or d < 0:
-					continue
-				_face(a, b, c, d, _best_i[near + sector], shell, 0,
-					_best_raw[near + sector])
-		# ...and the seals, at the two ends of the run and nowhere else.
-		_seal(pk, run[0], -1, bucket_base + run[0] * sectors, sectors, shell)
-		var last: int = run[run.size() - 1]
-		_seal(pk, last, 1, bucket_base + last * sectors, sectors, shell)
+			if _band_n[band_base + band] == 0:
+				continue
+			if not run.is_empty():
+				var prev: int = run[run.size() - 1]
+				var a_org: int = _band_org[band_base + prev]
+				var b_org: int = _band_org[band_base + band]
+				if band - prev - 1 > BRIDGE or (a_org != b_org \
+						and a_org != BodyPlan.NO_ORGAN and b_org != BodyPlan.NO_ORGAN):
+					_stitch_run(pk, run, bucket_base, sectors, shell)
+					run = []
+			run.append(band)
+		_stitch_run(pk, run, bucket_base, sectors, shell)
+
+
+## One continuous stretch of occupied rings: quads between each pair in turn,
+## sealed at its two ends and nowhere else.
+func _stitch_run(pk: int, run: Array[int], bucket_base: int, sectors: int,
+		shell: int) -> void:
+	if run.is_empty():
+		return
+	for j in range(run.size() - 1):
+		var near: int = bucket_base + run[j] * sectors
+		var far: int = bucket_base + run[j + 1] * sectors
+		for sector in sectors:
+			var next: int = (sector + 1) % sectors
+			var a: int = _vert_of[near + sector]
+			var b: int = _vert_of[near + next]
+			var c: int = _vert_of[far + next]
+			var d: int = _vert_of[far + sector]
+			if a < 0 or b < 0 or c < 0 or d < 0:
+				continue
+			_face(a, b, c, d, _best_i[near + sector], shell, 0,
+				_best_raw[near + sector])
+	_seal(pk, run[0], -1, bucket_base + run[0] * sectors, sectors, shell)
+	var last: int = run[run.size() - 1]
+	_seal(pk, last, 1, bucket_base + last * sectors, sectors, shell)
 
 
 ## Fills the sectors of one ring that found no cell of their own.

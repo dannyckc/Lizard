@@ -90,7 +90,13 @@ const REFERENCE_MUSCLE_CELLS: float = 172.0
 ## of*, and a quarter of the body stopped being counted as hide. The muscle
 ## ruler grows most because that is where most of it went — which is the same
 ## fact as a lizard's legs having muscle in them at last.
-const REFERENCE_LATTICE_UNITS: float = 3792.9384
+##
+## The units ruler moved again when the carve stopped dropping sections too
+## shallow to hold a cell centre, which is what put the last slices of every
+## tail back in the census (3804.94 units -> 3822.34 on the default build). The
+## new cells are vertebra and sheath at the very tip of the tail: no muscle
+## joined them, so the muscle ruler holds still.
+const REFERENCE_LATTICE_UNITS: float = 3810.2835
 const REFERENCE_LATTICE_MUSCLE: float = 1146.7139
 
 ## Least a girdle may be reduced to by having its muscle eaten. Not zero: a leg

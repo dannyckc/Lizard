@@ -596,11 +596,21 @@ func _carve_body(plan: BodyPlan, profile: PackedFloat32Array, clip: float,
 
 		var y_span: int = ceili(oa / CELL)
 		var z_span: int = ceili(ob / CELL)
+		# The ellipse the membership test reads, floored at the innermost ring of
+		# grid centres. Cell centres stand half a cell off the axis, so a section
+		# genuinely shallower than that — a tail's last few slices — holds no
+		# centre at all and emitted nothing: the tail ended slices short of its
+		# own tip while the ledger and the conduits threading it ran on to the
+		# end. The width gate above already said this slice is real animal, so
+		# the cells nearest the axis stand for it — carved as the hull they are,
+		# wearing their sheath, exactly like every other place too thin to layer.
+		var ta: float = maxf(oa, CELL * 0.72)
+		var tb: float = maxf(ob, CELL * 0.72)
 		for iy in range(-y_span, y_span):
 			var y: float = (float(iy) + 0.5) * CELL
 			for iz in range(-z_span, z_span):
 				var z: float = (float(iz) + 0.5) * CELL
-				var e: float = (y / oa) * (y / oa) + (z / ob) * (z / ob)
+				var e: float = (y / ta) * (y / ta) + (z / tb) * (z / tb)
 				if e > 1.0:
 					continue
 				var rho: float = sqrt(e)
