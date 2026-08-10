@@ -138,8 +138,9 @@ var move_dir: Vector2 = Vector2.RIGHT
 ## Speed as a 0..1 fraction of top speed. Drives stride, step timing and sway.
 var speed_norm: float = 0.0
 
-## Shared feel shaping rather than species traits. Species keep their weight in
-## acceleration and turn-rate parameters; these only decide how controls settle.
+## Shared feel shaping rather than species traits. A species' weight is in the
+## push its own muscle derives and its turn-rate parameter; these only decide
+## how controls settle.
 ##
 ## Braking harder than driving is not a cheat: a body pulling up props on every
 ## leg it has where one getting going can only push with the pair underneath it.
@@ -1471,6 +1472,16 @@ func _integrate_motion(delta: float) -> void:
 	# deliberately absent, and only here: `physique.strength` already has it, and
 	# applying it twice would make an injured creature slow to accelerate *and*
 	# slow to accelerate again.
+	#
+	# What the push is *not* multiplied by is the feet the gait happens to have
+	# down this tick, and the omission is a contract rather than an oversight.
+	# The head takes part in the gait solve — every socket is tracked against it,
+	# see Limb.track_socket — so the solved feet know where the animal is looking,
+	# and a thrust gated on them would let a glance perturb a straight run by a
+	# fraction of a pixel, which is precisely the leak ControlsTest exists to
+	# refuse. The feet's share of the cycle is priced instead where it is already
+	# a law of the body: the duty factor inside `leg_speed`, which is the ceiling
+	# the fade below spends the push against.
 	var rate: float = locomotion.accel * haul * purchase
 	var reversing: bool = not is_zero_approx(speed) and not is_zero_approx(desired_speed) \
 		and signf(speed) != signf(desired_speed)
@@ -1479,9 +1490,25 @@ func _integrate_motion(delta: float) -> void:
 		# This answers a reversal promptly without erasing the body's weight by
 		# jumping directly between equal and opposite top speeds.
 		speed = move_toward(speed, 0.0, rate * BRAKE_MULTIPLIER * delta)
+	elif absf(desired_speed) < absf(speed):
+		# Pulling up. Stronger than getting going and exempt from the fade below,
+		# because both are what braking is: muscle resisting stretch holds more
+		# than muscle shortening ever delivers, and props dig in harder the faster
+		# the body leans onto them.
+		speed = move_toward(speed, desired_speed, rate * BRAKE_MULTIPLIER * delta)
 	else:
-		if absf(desired_speed) < absf(speed):
-			rate *= BRAKE_MULTIPLIER
+		# Getting going. The push fades as the speed spends the muscle — the
+		# force–velocity law, see Locomotion.push_left, and it is what makes the
+		# top speed an arrival rather than an assignment: steep off the mark,
+		# flattening through the middle, earning the last tenth over seconds.
+		# Quoted against `flat_out` — everything this animal will ever ask of
+		# itself, the same denominator its exertion is quoted against — so the
+		# force fades exactly as the effort rises and the two are one statement.
+		# What a spent animal has left of the push is `stamina.push` — exactly
+		# 1.0 until the store has actually been run down, and the second half of
+		# what being blown means: the target comes down with `hold` above, and
+		# the force that was chasing it sags with the same breath.
+		rate *= locomotion.push_left(speed, flat_out()) * stamina.push
 		speed = move_toward(speed, desired_speed, rate * delta)
 
 	move_dir = Vector2.RIGHT.rotated(heading)

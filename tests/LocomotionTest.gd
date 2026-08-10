@@ -531,7 +531,12 @@ func _check_walking_under_a_tall_animal(player: Creature, target: Creature) -> v
 	# Limb.girth_of), so a body threading it brushes them and the corridor is a
 	# mild obstacle in its own right. The clean height contrast is the
 	# planted-against-raised pair below, where nothing changes but the height.
-	_check(blocked["aside"] > 5.0,
+	# A shade over four pixels rather than five since the push began fading with
+	# speed — see Locomotion.push_left. A walker grinding past the foot rebuilds
+	# its speed through the fade after every graze, so it leans on the obstacle
+	# a little less often at mid-speed; the shove itself is unchanged, because a
+	# blocked body is a body at no speed with the whole of its push in hand.
+	_check(blocked["aside"] > 3.5,
 		"a planted foot barely turned the Lizard aside (%.1f px)" % blocked["aside"])
 
 	# ...and the identical walk with that foot held clear of the lizard's back is

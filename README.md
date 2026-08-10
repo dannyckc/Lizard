@@ -2127,6 +2127,63 @@ Bite force is sized off the head rather than off the body because the head is th
 part that does the biting and the part you can see doing it: a broad skull reads
 as a hard bite before any number is involved.
 
+### Getting up to speed
+
+Acceleration is **not a parameter any more**, and top speed never quite was one.
+What a species still writes down is behaviour — a travelling speed and how far
+past it it will commit (`move_speed`, `sprint_multiplier`), both requests the
+legs may decline — and how hard the body gets up to any of it is read off the
+body:
+
+```
+push    = 0.12 g × power × tendon advantage × stance drive × fibre   (≤ 0.55 g — traction)
+thrust  = push × (1 − speed / flat out) × breath
+```
+
+`power` is the same strength-over-mass reading the physique already makes, so
+the square-cube law prices the getaway: an Elephant pushes at a twentieth of a
+gravity because its muscle grew with the square of what its bulk grew with the
+cube of, and a Cat at a third of one because it is small, over-muscled and
+standing in a stance built to spend it. The push works the ground through the
+tendon's own lever (a runner's insertion swings fast and presses lightly — the
+same gearing that shortens its swing), is tilted by fibre composition (the one
+place `fast_twitch` buys quickness, and slow fibre gives it up for the store),
+and is capped at what a foot can lean on before it slips — so muscle laid on
+past traction is wheelspin, not thrust.
+
+The second line is the force–velocity relation, and it is what makes a sprint
+**build** rather than arrive: muscle already shortening fast has little left to
+press with, so the thrust fades as the speed rises and dies entirely at flat out
+— the same denominator effort is quoted against, which makes "no force spare at
+effort one" true by construction. Speed therefore accumulates like the momentum
+it is — steep off the mark, flattening through the middle, earning the last
+tenth over seconds — and a blown animal's `breath` sags the force at the same
+moment stamina lowers what it is chasing. Off the shipped presets, from a
+standstill to nine tenths of a flat sprint:
+
+| | push | reaches sprint in |
+|---|---|---|
+| Cat | 0.31 g | 0.8 s |
+| Cheetah | 0.36 g | 1.1 s |
+| Lizard | 0.12 g | 1.6 s |
+| Kangaroo | 0.36 g | 1.7 s |
+| T. rex | 0.20 g | 2.1 s |
+| Elephant | 0.04 g | 3.1 s |
+
+The Cat and the Cheetah are gone while the T. rex is still leaning into its
+first strides, and nothing anywhere says so: the ordering is muscle against
+weight through levers, and it re-derives itself when the creation menu rebuilds
+the animal. Braking is exempt from the fade — muscle resisting stretch is
+stronger than muscle shortening, which is why a creature stops harder than it
+starts — and what the fade is deliberately *not* priced off is the measured leg
+ceiling: the solved feet know where the head is looking, so a thrust read off
+them would let a glance perturb a straight run, which is the isolation
+`ControlsTest` pins. The legs still have the last word on what is asked; the
+fade only shapes how hard what remains is chased.
+
+`tests/SprintProbe.gd` prints the whole of the table above, per preset and per
+fibre extreme, and is where `Locomotion.PUSH_REFERENCE` is argued about.
+
 ### Stamina
 
 A fourth quantity, on the same terms: **not a stat**. What an animal can keep
@@ -2419,6 +2476,7 @@ The parameters worth reaching for first:
 | A wider mouthful | `bite_radius` up (the gape's forward reach, capped against the skull) and `jaw_gape_deg` up |
 | Heavier for the same silhouette | `density` up — and remember the width sliders already move mass |
 | Strong for its size (drags more, is dragged less) | `muscle_power` up |
+| Quicker off the mark | nothing directly — the push is muscle through the levers. Raise `muscle_power` against `density`, slide `fast_twitch` toward fast fibre (the store pays for it), or gear the tendons for speed knowing they then press more lightly. See *Getting up to speed* |
 | Padded — heavier, and harder to reach the muscle of | `fat_reserve` up |
 | Jaws that will not be shaken off | `jaw_power` up — this is grip, not penetration |
 | How fast the jaws can be worked while latched | `chew_interval` down / up — a floor on player-driven chewing, not a rate |
@@ -2591,20 +2649,24 @@ godot --headless --path . --script tests/TraversalTest.gd # under, over, onto or
 godot --headless --path . --script tests/LatticeTest.gd   # the 3D cell lattice, one census
 ```
 
-Three diagnostic harnesses sit beside the tests and are not part of the suite.
+Four diagnostic harnesses sit beside the tests and are not part of the suite.
 `tests/LatticeAudit.gd` prints every preset's census region by region and tissue
 by tissue, plus where its locomotor muscle stands, whether anything is hollow
 that should not be and what the specimen would draw — it is how "the cheetah has
 no leg muscles" is checkable rather than arguable. `tests/StaminaProbe.gd` walks
 and then sprints each preset until its store is empty, printing what its engine,
 its heart and its own weight came to and how long the sprint lasted.
-`tests/AnatomyShot.gd` must run windowed: it opens the anatomy drawer on a named
-preset, times the frame with the specimen up and saves pictures of it from three
-angles.
+`tests/SprintProbe.gd` accelerates each preset from a standstill, walking and
+then flat out, printing the push its muscle derives and the shape of the ramp —
+it is where the propulsion constants are argued about, the way StaminaProbe is
+for the aerobic ones. `tests/AnatomyShot.gd` must run windowed: it opens the
+anatomy drawer on a named preset, times the frame with the specimen up and saves
+pictures of it from three angles.
 
 ```
 godot --headless --path . --script tests/LatticeAudit.gd
 godot --headless --path . --script tests/StaminaProbe.gd
+godot --headless --path . --script tests/SprintProbe.gd
 godot --path . --resolution 1440x810 --disable-vsync \
     --script tests/AnatomyShot.gd -- --preset Elephant [--peel|--xray|--wire|--field]
 ```

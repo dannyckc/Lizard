@@ -282,17 +282,14 @@ extends Resource
 ## value over it says nothing at all. They are quoted a little above what each
 ## build's legs deliver, which leaves the anatomy in charge while keeping the
 ## number in the creation menu from being a fiction.
-@export_range(20.0, 600.0, 5.0) var move_speed: float = 90.0
-## How hard this species pushes off the ground, in gravities.
 ##
-## In g rather than in pixels per second squared, because that is the form the
-## number can be argued about in: a fifth of a gravity is a figure a real animal
-## can be held to, while 800 px/s² was only ever "four times the reference
-## Lizard's top speed", and it read as one — every creature in the file was at
-## full pelt within a fifth of a second of the key going down. The posture's drive
-## and the body's power still multiply it, and traction still caps the product;
-## see Locomotion.PUSH_CEILING.
-@export_range(0.02, 0.8, 0.01) var acceleration: float = 0.12
+## How hard the species gets up to it stopped being a parameter altogether: the
+## push is the girdle muscle read through its own tendons and stance, spent
+## through whichever feet are on the ground, and fading as the speed uses the
+## muscle up — see Locomotion.PUSH_REFERENCE and Locomotion.push_left. A species
+## cannot be quick off the mark by assertion any more; it has to be built out of
+## the legs that would make it so.
+@export_range(20.0, 600.0, 5.0) var move_speed: float = 90.0
 ## The turn a body's own muscle can put into it, before the feet are asked.
 ##
 ## Torque over rotational inertia — Locomotion works the rest out from the mass,
@@ -459,7 +456,6 @@ const SCHEMA: Array = [
 
 	{"group": "Movement"},
 	{"prop": "move_speed", "label": "Move speed", "min": 20.0, "max": 600.0, "step": 5.0},
-	{"prop": "acceleration", "label": "Ground push (g)", "min": 0.02, "max": 0.8, "step": 0.01},
 	{"prop": "turn_speed_deg", "label": "Turn speed (deg/s)", "min": 20.0, "max": 720.0, "step": 5.0},
 	{"prop": "turn_speed_falloff", "label": "Turn falloff @ speed", "min": 0.0, "max": 0.9, "step": 0.01},
 	{"prop": "turn_responsiveness", "label": "Turn response", "min": 1.0, "max": 20.0, "step": 0.1},
@@ -570,11 +566,12 @@ const PRESETS: Dictionary = {
 		# The foreleg's share is the smaller half of the same tissue and is spent
 		# on landings rather than on take-offs.
 		"fore_spring": 0.35, "hind_spring": 0.55,
-		# No acceleration or turn rate of its own: this animal is light and it is
-		# strong for its size, and those two facts are already written below as
-		# `density` and `muscle_power`. Quoting a number here as well would be
-		# saying the same thing twice and then arguing with itself.
-		"move_speed": 85.0, "acceleration": 0.08,
+		# No turn rate of its own: this animal is light and it is strong for its
+		# size, and those two facts are already written below as `density` and
+		# `muscle_power`. How it gets away is those two through its own levers —
+		# see Locomotion.PUSH_REFERENCE — and quoting a number here as well would
+		# be saying the same thing twice and then arguing with itself.
+		"move_speed": 85.0,
 		"turn_responsiveness": 14.0, "turn_pivot": 40.0,
 		"sprint_multiplier": 1.80,
 		"density": 0.68, "muscle_power": 1.56, "jaw_power": 1.1, "fat_reserve": 0.8,
@@ -681,12 +678,12 @@ const PRESETS: Dictionary = {
 		# it holds. So nothing here says an Elephant cannot jump, and nothing here
 		# says its tendons are poor: it cannot spend them.
 		"fore_spring": 0.30, "hind_spring": 0.30,
-		# ...and no acceleration or turn rate here either, for the opposite reason:
-		# nothing needed to say this animal is slow off the mark. It is twenty-three
-		# times the Lizard's weight and its muscle only grew with the square of
-		# what its bulk grew with the cube of, so it accelerates at under half the
-		# Lizard's rate and comes round slower still on a body half as long again.
-		"move_speed": 65.0, "acceleration": 0.14,
+		# ...and no turn rate here either, for the opposite reason: nothing needed
+		# to say this animal is slow off the mark. It is twenty-three times the
+		# Lizard's weight and its muscle only grew with the square of what its
+		# bulk grew with the cube of, so it accelerates at under half the Lizard's
+		# rate and comes round slower still on a body half as long again.
+		"move_speed": 65.0,
 		"turn_speed_falloff": 0.70,
 		"turn_responsiveness": 5.0, "turn_pivot": 110.0,
 		"sprint_multiplier": 1.30, "reverse_speed_factor": 0.40,
@@ -757,7 +754,7 @@ const PRESETS: Dictionary = {
 		# most of why this build's legs turn over the way they do.
 		"fore_insertion": 0.28, "hind_insertion": 0.25,
 		"fore_spring": 0.40, "hind_spring": 0.65,
-		"move_speed": 130.0, "acceleration": 0.09,
+		"move_speed": 130.0,
 		"turn_speed_falloff": 0.50, "turn_responsiveness": 13.0, "turn_pivot": 44.0,
 		"sprint_multiplier": 2.00, "reverse_speed_factor": 0.45,
 		"density": 0.57, "muscle_power": 1.89, "jaw_power": 1.0, "fat_reserve": 0.4,
@@ -827,7 +824,7 @@ const PRESETS: Dictionary = {
 		# body far too heavy for it to be worth much. What comes out is a creature
 		# that can get itself off the ground and has no business doing it often.
 		"fore_spring": 0.18, "hind_spring": 0.22,
-		"move_speed": 205.0, "acceleration": 0.18,
+		"move_speed": 205.0,
 		"turn_speed_falloff": 0.60, "turn_responsiveness": 7.0, "turn_pivot": 90.0,
 		"sprint_multiplier": 1.35, "reverse_speed_factor": 0.45,
 		"density": 1.01, "muscle_power": 1.46, "jaw_power": 7.0, "fat_reserve": 0.9,
@@ -889,7 +886,7 @@ const PRESETS: Dictionary = {
 		# this a hop rather than a stride — and the reason the same animal is a
 		# poor walker: a store is cheap to bounce on and expensive to carry.
 		"fore_spring": 0.25, "hind_spring": 0.95,
-		"move_speed": 170.0, "acceleration": 0.09,
+		"move_speed": 170.0,
 		"turn_speed_deg": 60.0,
 		"turn_speed_falloff": 0.55, "turn_responsiveness": 9.0, "turn_pivot": 60.0,
 		"sprint_multiplier": 2.35, "reverse_speed_factor": 0.40,

@@ -108,9 +108,11 @@ const PERSPECTIVE: float = 0.22
 
 ## Per-posture tuning. Each row is a complete description; nothing falls back.
 ##
-## `tilt_deg` is the trait. The rest are leanings, quoted as multipliers on
-## parameters the species already sets, so a Cat's own acceleration is still the
-## Cat's — the posture only says that a semi-upright build gets more out of it.
+## `tilt_deg` is the trait. The rest are leanings, quoted as multipliers on what
+## the body already derives, so a Cat's own push is still the Cat's muscle
+## through the Cat's levers — the posture only says that a semi-upright build
+## gets more out of it: a limb out to the side has ground to press against that a
+## pillar stacked under a shoulder has not.
 const TABLE: Array[Dictionary] = [
 	{
 		# Legs out to the sides, belly close to the floor, body flattened

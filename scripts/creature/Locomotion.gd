@@ -18,7 +18,11 @@
 ##     That single ratio — `power` — is what makes a heavy animal slow to get
 ##     going and slow to turn, and it is the same one `Physique` already derives.
 ##     Fat is in the mass and not in the muscle, so a padded animal is duller for
-##     free.
+##     free. And the force is spent out of the speed: muscle shortening fast has
+##     little left to press with, so the push fades as the body works up toward
+##     the whole of what it can ask of itself, and the top speed is an arrival
+##     rather than an assignment — see `push_left`. There is no acceleration
+##     parameter any more, for the same reason there is no stride parameter.
 ##   * **A leg is a pendulum.** How long a limb takes to swing through goes as the
 ##     square root of its length, so a long leg is a slow leg however strong the
 ##     animal wearing it. That, and not a step-duration slider, is why an
@@ -163,16 +167,45 @@ const DUTY_MAX: float = 0.86
 const DUTY_PACE: float = 0.22
 const DUTY_SPRINT: float = 0.28
 
+## Ground push of the reference build, in gravities, while its feet are pressing.
+##
+## The one constant of proportionality in the propulsion, and it replaces the
+## per-species `acceleration` parameter outright — a number there could not know
+## how much muscle stood behind the animal's girdles or what levers it worked
+## through, so left in charge it was the whole of why a Cat got away like a Cat:
+## somebody had typed it. Now the reference build pushes with this, and every
+## other creature pushes with this times what its own body multiplies it to —
+## `power` for the muscle against the weight, the tendon's `advantage` for the
+## lever it reaches the ground through, the posture's drive for the stance it is
+## spent from, and the fibre for how quickly the force can arrive. Sized to the
+## default build's authored figure, which is the only thing an arbitrary constant
+## in a made-up gravity can honestly be pinned to — see SWING_PERIOD, whose
+## number is an answer to the same question.
+const PUSH_REFERENCE: float = 0.12
+## How far fibre composition moves the push either way of the mixed default.
+## Wider than TWITCH_SPAN, and the difference is what is being asked of the
+## muscle: a swing is one limb thrown through an arc, and composition trims the
+## rate of an action the pendulum mostly owns — but acceleration is sustained
+## mechanical *power*, force delivered at speed, and power is where fast fibre
+## earns its name. Exactly a no-op at 0.5, where every preset stands, so the axis
+## is the creation menu's to spend: slide it toward slow fibre and the same legs
+## get away duller and hold out longer — see Stamina.FIBRE_TILT, which is the
+## other end of the same trade.
+const PUSH_TWITCH: float = 0.25
+
 ## Hardest a body may push against the ground, in gravities.
 ##
 ## Traction, and it is the one ceiling on acceleration that is not about muscle.
 ## A foot pushes a body forward by leaning on friction, and past somewhere near
 ## its own weight it stops leaning and starts slipping — which is why no animal,
 ## however strong for its size, gets away from a standstill much quicker than
-## this. Without it `drive` and `power` multiply: a Cheetah's posture gain of 1.35
-## on a power of 2.28 turned a modest per-species push into 1.64 g, and 1.64 g
-## against its own top speed is a creature at full pelt inside a fifth of a
-## second. That is not a strong animal, it is a body with no mass.
+## this. Muscle laid on past this line is wasted rather than banked: the census
+## still weighs it and the stamina still feeds it, but the ground will not take
+## the extra force, which is exactly what a wheel-spinning launch is. Without it
+## `drive` and `power` multiply: a Cheetah's posture gain of 1.35 on a power of
+## 2.28 turned a modest per-species push into 1.64 g, and 1.64 g against its own
+## top speed is a creature at full pelt inside a fifth of a second. That is not a
+## strong animal, it is a body with no mass.
 const PUSH_CEILING: float = 0.55
 
 ## Least a forelimb may be, against the hind leg it would have to stand beside,
@@ -305,12 +338,17 @@ func update(posture: Posture, physique: Physique, p: CreatureParams, scale: floa
 	forelimbs_bear = bears_on_forelimbs(p)
 	bearing_limbs = 4 if forelimbs_bear else 2
 
-	# Ground push, in gravities and then in pixels. Quoted against the world's own
-	# pull rather than as a raw rate because that is the only way the number can be
-	# argued about: 0.2 g is a figure a real animal can be held to, and 800 px/s²
-	# is a figure that happened to be four times a Lizard's top speed. Capped at
-	# what a foot can lean on before it slips — see PUSH_CEILING — so the posture
-	# gain and the power ratio can no longer multiply into a launch.
+	# Ground push, in gravities and then in pixels — and no longer in a parameter.
+	# What a foot presses with is the muscle standing behind it: `power` is that
+	# muscle against the weight it has to move, the posture's drive is the stance
+	# it is spent from, and the fibre scales how quickly the force can be brought
+	# on. Quoted against the world's own pull rather than as a raw rate because
+	# that is the only way the number can be argued about: 0.2 g is a figure a
+	# real animal can be held to, and 800 px/s² is a figure that happened to be
+	# four times a Lizard's top speed. Capped at what a foot can lean on before it
+	# slips — see PUSH_CEILING — so the posture gain and the power ratio cannot
+	# multiply into a launch, and a build that lays on muscle past that line is
+	# spinning its wheels rather than banking it.
 	#
 	# The muscle reaches the ground through a lever — tendon onto bone, bone about
 	# joint — so what the foot presses with is the muscle's force times the
@@ -318,10 +356,16 @@ func update(posture: Posture, physique: Physique, p: CreatureParams, scale: floa
 	# advantage and gear are one ratio read from its two ends, which is why the
 	# same build that pushes harder here swings slower in `swing_time`, and why
 	# neither shows up in the jump — a lever trades force for speed, never work.
+	#
+	# This is the push while the feet are pressing, not a rate the body is owed:
+	# what one tick actually delivers is this through the feet that are down and
+	# the force the speed has left the muscle — see `push_left`, and
+	# Creature._integrate_motion where the two are read.
 	var leverage: float = articulation.hind.advantage if not forelimbs_bear \
 		else (articulation.fore.advantage + articulation.hind.advantage) * 0.5
-	accel = minf(p.acceleration * posture.drive * power * leverage, PUSH_CEILING) \
-		* Gravity.PULL * scale
+	var fibre: float = lerpf(1.0 - PUSH_TWITCH, 1.0 + PUSH_TWITCH, twitch)
+	accel = minf(PUSH_REFERENCE * posture.drive * power * leverage * fibre,
+		PUSH_CEILING) * Gravity.PULL * scale
 
 	# Torque over rotational inertia. A rod's inertia goes as its mass times the
 	# square of its length while the muscle turning it grows with neither, so a
@@ -623,6 +667,49 @@ func cycle_floor(swing_at_rest: float, pace: float, aloft_share: float = 1.0) ->
 func leg_speed(travel: float, swing_at_rest: float, aloft_share: float = 1.0) -> float:
 	return maxf(travel, 0.0) / maxf(hurried_swing(swing_at_rest, 1.0)
 		/ maxf(minf(1.0 - duty_at(1.0), maxf(aloft_share, 0.05)), 0.05), SWING_FLOOR)
+
+
+## How much of its standing push the muscle has left at this speed, 0..1.
+##
+## Muscle trades force for the speed it is already shortening at — the
+## force–velocity relation, and it is the whole of why nothing accelerates at its
+## own top speed. A leg drives the body by pushing the ground backward past it,
+## so the faster the body is travelling the faster the same muscle is already
+## contracting just to keep the foot planted, and the less force it has spare to
+## press with; at the whole of what the animal can ask of itself there is
+## nothing left at all. Linear between the two ends, which is what whole-animal
+## thrust actually measures as in sprint work: the per-fibre curve is
+## hyperbolic, but a gait recruits across joints and gears, and what reaches the
+## ground falls off close to straight.
+##
+## This is what makes a top speed *emerge* rather than arrive. Push over mass
+## says how hard a standing body gets away; this says the getaway spends itself,
+## so speed builds like the momentum it is — steeply off the mark, flattening
+## through the middle, crawling at the top — and the time the build-up takes is
+## the ceiling over the push, which is the animal's own muscle against its own
+## envelope rather than a rate anybody chose. A body asked for less than the
+## whole of itself arrives with force to spare; one asked for everything spends
+## the last seconds of its sprint earning the final tenth.
+##
+## `top` is Creature.flat_out — the denominator exertion is already quoted
+## against, and deliberately that one. The two are one statement read at two
+## places: effort is how much of flat out the body is doing, this is the force
+## it has left to do any more, and quoting them against the same whole is what
+## makes "no force spare at effort one" true by construction rather than by
+## tuning. It is not the measured leg ceiling, and may not be: the gait's
+## reading rides on the solved feet, and the solved feet know where the head is
+## looking — see Limb.track_socket — so a fade priced off it would let the aim
+## perturb a straight run, which is the leak ControlsTest refuses. The measured
+## ceiling still caps what is *asked*, exactly as before; this only shapes how
+## hard what remains is chased. At or below zero means the envelope is not known
+## and the honest answer is all of it.
+##
+## Braking never reads this: a muscle resisting stretch is stronger than one
+## shortening, which is why an animal can stop harder than it starts.
+func push_left(speed: float, top: float) -> float:
+	if top <= 0.0:
+		return 1.0
+	return clampf(1.0 - absf(speed) / top, 0.0, 1.0)
 
 
 ## How fast the feet can walk a standing body around, in radians per second.
