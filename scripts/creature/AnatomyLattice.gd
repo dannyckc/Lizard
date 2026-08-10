@@ -11,6 +11,14 @@
 ## skin cells off and the fat cells are physically underneath, because they are
 ## laid out underneath.
 ##
+## One thing the grid cannot hold a cell for is the skin over a part thinner than
+## the grid — a lizard's forearm is three cells across and its hide is a pixel
+## deep. Such a cell keeps the tissue it is mostly made of and is marked
+## `sheathed`; the census counts it as that tissue and the specimen draws it as
+## skin. The alternative, and what this file used to do, was to give the whole
+## cell to skin, which reported a leg of seventy cells with no bone in it and
+## left half the animal's mass as hide.
+##
 ## The cell size never changes. A bigger animal is *more* cells; a fatter one
 ## grows extra shells of fat cells (and genuinely swells for it); a leg built to
 ## carry a heavy trunk is thicker in muscle cells laid around its own bone. That
@@ -98,16 +106,35 @@ const SKIN_MIN: float = 1.1
 ## reserve, so a padded animal carries visibly more shells of fat cells exactly
 ## where the plan says a body stores it.
 const FAT_SHARE: float = 0.20
-## How much of the fat laid beyond an ordinary reserve swells the body outward
-## rather than packing inward. This is what makes extra fat extra volume: the
-## outline the cells fill grows with the reserve, so the cells are additional
-## rather than replacements.
+## How far the outline moves outward per unit of reserve laid beyond an ordinary
+## one — and how far it moves, and nothing else.
+##
+## It used to decide how much of the reserve packed *inward* as well, because the
+## fat was a shell measured down from a surface that had itself moved: the three
+## tenths that did not swell the animal pushed the fat–muscle boundary into the
+## flesh instead, so a fattened creature quietly lost muscle and, since strength
+## is counted off muscle cells, quietly lost strength for being fed. The flesh
+## boundary is now stated in its own right and does not move at all — see
+## `_carve_body` — which leaves this free to mean only what its name says.
 const FAT_SWELL: float = 0.7
+## Least of its own section a body keeps as flesh, however much fat the plan puts
+## on it. The floor under the flesh ellipse — see `_carve_body` — so a heavily
+## padded column still has an animal inside it.
+const FLESH_MIN: float = 0.35
 ## Radii of the axial skeleton and its passengers, as shares of the local
 ## half-depth with pixel floors. The vertebral ring encloses the cord; the aorta
 ## lies beneath the vertebrae.
+##
+## The floor under the vertebral radius is the small-animal case, and it used to
+## be set half a cell too low to work. A column of radius 2.6 is two cells wide;
+## the cord inside it took both of them and the bone ring around it resolved to
+## nothing, which is why every tail in the file came out boneless. Raised by the
+## half cell that lets the ring find cells of its own, the cord takes the middle
+## and the bone takes the ring at every station of the animal. The *share* is
+## untouched: on anything big enough for the share to bind, the spine was already
+## the right size and is still exactly the size it was.
 const VERT_SHARE: float = 0.30
-const VERT_MIN: float = 2.6
+const VERT_MIN: float = 3.2
 const CORD_SHARE: float = 0.13
 const CORD_MIN: float = 1.5
 const AORTA_SHARE: float = 0.13
@@ -115,6 +142,12 @@ const AORTA_MIN: float = 1.8
 ## How far up the cross-section the vertebral axis rides, as a fraction of the
 ## local half-depth. A spine is dorsal.
 const SPINE_RISE: float = 0.30
+## Most of the narrower half-section the axial column may fill, and how much of
+## the vertebral radius the cord inside it may take. Together they are what keeps
+## a spine a spine all the way down a tail: cut to fit rather than dropped where
+## it stops fitting, with bone left around the cord at every station.
+const AXIS_FILL: float = 0.62
+const CORD_IN: float = 0.6
 ## Shell thickness of the hooped bone, as a share of the local radius with a
 ## floor: ribs are a thin cage, girdle bars are stouter.
 const RIB_SHARE: float = 0.14
@@ -140,6 +173,13 @@ const HEART_DROP: float = 0.18
 ## neurovascular bundle beside it.
 const LIMB_BONE_MIN: float = 1.9
 const LIMB_BONE_SHARE: float = 0.30
+## Most of its own section a limb's bone core may fill. What keeps the skeleton
+## internal on a limb the grid cannot layer: whatever the bone would like to be,
+## it is cut back to leave the outer two-thirds of the section to the flesh, so
+## there is always something wrapped around it — and on a limb this thin that
+## margin is the difference between a leg with muscle on it and a bare bone in a
+## bag of skin. A third of the section is also about what a real limb's shaft is.
+const LIMB_BONE_FILL: float = 0.35
 const BUNDLE_R: float = 1.6
 ## Cells of cover an internal structure needs over it before it is laid at all —
 ## what makes the skeleton internal *by construction* rather than by assertion.
@@ -150,10 +190,6 @@ const BURY: float = 0.75
 ## Fraction of surviving enclosure below which a conduit cell is cut — the same
 ## floor TissueGrid reads its conduits with.
 const CONDUIT_CUT: float = TissueGrid.CONDUIT_FLOOR
-## Cells a structure needs before it is worth insisting it has an inside, and
-## how much of such a structure the insistence gives back — see `_keep_a_core`.
-const CORE_MIN: int = 4
-const CORE_SHARE: float = 0.25
 
 ## Patch order: index-stable addressing for `patch_of`.
 const PATCH_KEYS: Array[String] = ["body", "FL", "FR", "RL", "RR"]
@@ -180,6 +216,21 @@ var normal: PackedVector3Array = PackedVector3Array()
 ## Outside-in order within the cell's own (ledger cell, tissue) group: 0.0 is
 ## the outermost cell of the group and the first to go.
 var rank: PackedFloat32Array = PackedFloat32Array()
+## 1 where a cell stands on the boundary carrying a tissue that is not skin —
+## a piece of the animal whose skin is thinner than the grid can hold a cell of.
+##
+## At two and a half pixels to the cell a lizard's forearm is three cells across,
+## its tail tip is two, and its skin is a pixel deep. There is no way to lay a
+## skin shell, a muscle wrap and a bone core inside that, and the animal has all
+## three regardless. So the cell carries the tissue it is *mostly* made of — the
+## carve already decided that, by depth — and the skin over it is a film the
+## lattice cannot resolve. The census counts the tissue and the specimen draws the
+## film, so the hull is as watertight as it ever was and the leg underneath it is
+## no longer a hollow tube of integument.
+##
+## A cell is never both: the carve marks a cell skin when its centre lies inside
+## the skin's own depth, and this is only ever set on cells it did not.
+var sheathed: PackedByteArray = PackedByteArray()
 ## Six neighbours per cell (-x +x -y +y -z +z), -1 where the body ends.
 var neighbor: PackedInt32Array = PackedInt32Array()
 ## What stands around each cell, as a bitmask: one bit per tissue found among its
@@ -306,18 +357,52 @@ func _build(plan: BodyPlan, p: CreatureParams, scale: float, depth_ratio: float,
 	var clip: float = 1.0 if p.tail_enabled else BodyPlan.tail_t(p.rear_limb_t)
 	var length: float = full_len * clip
 
-	_carve_body(plan, profile, clip, length, depth_ratio, fat_reserve)
+	# Where the four limbs meet the trunk, settled before either is carved so the
+	# body and the legs cannot disagree about it — see `_socket_of`.
+	var sockets: Array[Vector4] = []
 	for key in BodyPlan.LIMB_KEYS:
-		_carve_limb(plan, p, key, profile, clip, length, depth_ratio, scale,
+		sockets.append(_socket_of(plan, p, key, profile, clip, length,
+			depth_ratio, scale, load))
+	_carve_body(plan, profile, clip, length, depth_ratio, fat_reserve, sockets)
+	for i in BodyPlan.LIMB_KEYS.size():
+		_carve_limb(plan, p, BodyPlan.LIMB_KEYS[i], sockets[i], scale,
 			fat_reserve, load)
 	_finish(plan)
+
+
+## Where one limb hangs off the trunk and how thick it is where it does: the
+## socket's own point in the body's frame in `x, y, z`, and the limb's proximal
+## radius in `w`.
+##
+## Asked once and handed to both carves, because both need it and they have to
+## agree. The trunk needs it to know where *not* to lay a hide-and-fat shell —
+## a shoulder is a muscular junction, and a leg whose muscle stops at the trunk's
+## own skin is a leg lying against the animal rather than attached to it.
+func _socket_of(plan: BodyPlan, p: CreatureParams, key: String,
+		profile: PackedFloat32Array, clip: float, length: float,
+		depth_ratio: float, scale: float, load: Vector2) -> Vector4:
+	var front: bool = key.begins_with("F")
+	var bone_len: float = (p.arm_length if front else p.leg_length) * scale
+	var half: float = Limb.girth_of(bone_len, scale,
+		load.x if front else load.y) * 0.5
+	var belly: float = Limb.belly_of(
+		deg_to_rad(p.fore_swing_deg if front else p.hind_swing_deg),
+		p.fore_fold_range if front else p.hind_fold_range)
+	var upper_share: float = p.fore_upper_share if front else p.hind_upper_share
+	var socket_col: int = int(plan.limb_socket_col[key])
+	var f_s: float = (float(socket_col - BodyPlan.HEAD_COLS) + 0.5) \
+		/ float(BodyPlan.TORSO_COLS)
+	var a_s: float = _profile_at(profile, f_s * clip)
+	return Vector4(f_s * length, BodyPlan.limb_side(key) * a_s * 0.72,
+		-a_s * depth_ratio * 0.15, half * Limb.shape_at(0.0, belly, upper_share))
 
 
 ## The trunk, the head cap and the tail cap: one continuous solid of cells laid
 ## slice by slice along the long axis, exactly the run of cross-sections
 ## TissueGrid tessellates — so every cell lands in a ledger column that exists.
 func _carve_body(plan: BodyPlan, profile: PackedFloat32Array, clip: float,
-		length: float, depth_ratio: float, fat_reserve: float) -> void:
+		length: float, depth_ratio: float, fat_reserve: float,
+		sockets: Array[Vector4]) -> void:
 	var head_r: float = profile[0]
 	var tip_r: float = maxf(_profile_at(profile, clip), 0.8)
 	var x0: int = floori(-head_r / CELL)
@@ -377,11 +462,74 @@ func _carve_body(plan: BodyPlan, profile: PackedFloat32Array, clip: float,
 		var oa: float = maxf(a + swell, a * 0.55)
 		var ob: float = maxf(b + swell * depth_ratio, b * 0.55)
 		var mean_r: float = sqrt(maxf(oa * ob, 0.0001))
-		var skin_t: float = maxf(SKIN_MIN, mean_r * SKIN_SHARE)
-		var vert_r: float = maxf(VERT_MIN, b * VERT_SHARE)
-		var cord_r: float = maxf(CORD_MIN, b * CORD_SHARE)
-		var aorta_r: float = maxf(AORTA_MIN, b * AORTA_SHARE)
-		var aorta_z: float = spine_z - vert_r - aorta_r * 0.8
+		# Quoted off the lean section rather than the swollen one: how thick an
+		# animal's hide is follows the animal's own build, not what it had for
+		# breakfast. Read off the swollen radius it crept outward as the reserve
+		# rose, which pushed the flesh boundary in behind it and cost the creature
+		# muscle for being fed — a small leak beside the one above, and the same
+		# mistake.
+		var skin_t: float = maxf(SKIN_MIN, section_r * SKIN_SHARE)
+		# Where this section's *flesh* ends — the ellipse the muscle reaches out
+		# to, with the skin and the fat stacked between it and the open air.
+		#
+		# It is stated here, once, rather than being implied by a shell depth
+		# subtracted from the surface, and that is what makes fattening honest.
+		# Nothing about it mentions the reserve: the flesh boundary is a fact about
+		# the animal underneath, so the muscle inside it is the same muscle at
+		# every reserve, and a fed animal is a bigger animal rather than a
+		# differently-composed one. Worked the other way round — a shell measured
+		# inward from a surface that had itself moved outward — the two disagreed
+		# by whatever the section's depth ratio was, the fat ate inward through the
+		# difference, and the animal lost a quarter of its strength for being fat.
+		#
+		# An ellipse carries the plan's across-the-body fat profile exactly,
+		# because that profile is quoted at the flank and at the midline and those
+		# are precisely its two axes.
+		var flesh_a: float = maxf(a - skin_t - FAT_SHARE * section_r
+			* plan.fat_at(BodyPlan.BODY_KEY, col, 1.0), a * FLESH_MIN)
+		var flesh_b: float = maxf(b - skin_t - FAT_SHARE * section_r
+			* plan.fat_at(BodyPlan.BODY_KEY, col, 0.0), b * FLESH_MIN)
+		# The axial column, fitted to the section it has to run through.
+		#
+		# A spine is the one structure on the animal that does not stop. It used to,
+		# because the vertebral ring is the annulus just outside the cord, which is
+		# exactly the band a thinning section runs out of burial depth for first —
+		# so every tail in the file kept its cord and its aorta and lost every one
+		# of its vertebrae, and the skeleton in the anatomy drawer ended at the hips.
+		#
+		# So the column is cut to fit rather than dropped: it may fill at most
+		# `AXIS_FILL` of the narrower half-section, and it rides at whatever height
+		# leaves it inside. Where that leaves room for flesh over it there is flesh;
+		# where it does not, the covering is a sheath. Either way the vertebrae run
+		# the whole length of the animal, which is what makes it an animal with a
+		# back rather than a torso with a rubber tube behind it.
+		var axis_room: float = minf(oa, ob) * AXIS_FILL
+		# ...with a floor of one cell's reach under the vertebrae alone, so the
+		# column claims the cell on its own axis for as long as there is any animal
+		# left to claim it in. Without it the last vertebra is wherever the section
+		# happened to shrink past the nearest cell, the column stopped short of the
+		# tail's own end, and the cap beyond it came out as a separate splinter of
+		# bone floating clear of the spine. A tail tip is very nearly all vertebra
+		# in any case; this is that, rather than a concession to the grid.
+		var vert_r: float = minf(maxf(VERT_MIN, b * VERT_SHARE),
+			maxf(axis_room, CELL * 0.75))
+		var cord_r: float = minf(maxf(CORD_MIN, b * CORD_SHARE), vert_r * CORD_IN)
+		# Whether there is a canal here at all: room for the cord to take cells of
+		# its own and still leave the bone a ring the grid can find cells in.
+		#
+		# Where there is not, the axis is bone and the cord runs inside it too fine
+		# for the lattice to resolve — which is exactly what a caudal vertebra is,
+		# and is still carried by the damage ledger's own conduits either way.
+		# Left to compete for the same two cells the cord simply won, so the middle
+		# third of every tail came out as cord threaded through no vertebrae at
+		# all, with the spine picking up again further down where the section had
+		# shrunk enough to tip the balance back. That was the visible break in the
+		# skeleton, and it was a rounding contest rather than an anatomy.
+		var canal: bool = vert_r - cord_r >= CELL * 0.5
+		var aorta_r: float = minf(maxf(AORTA_MIN, b * AORTA_SHARE), axis_room)
+		spine_z = clampf(spine_z, vert_r - ob, ob - vert_r)
+		var aorta_z: float = clampf(spine_z - vert_r - aorta_r * 0.8,
+			aorta_r - ob, ob - aorta_r)
 		var hoop_t: float = maxf(GIRDLE_MIN, mean_r * GIRDLE_SHARE) \
 			if hoop == PART_GIRDLE else maxf(RIB_MIN, mean_r * RIB_SHARE)
 		var heart_rx: float = maxf(HEART_RX_MIN, a * HEART_RX_SHARE)
@@ -393,6 +541,30 @@ func _carve_body(plan: BodyPlan, profile: PackedFloat32Array, clip: float,
 		# frame out of the lattice along with everything else, exactly as the
 		# flesh itself runs out.
 		var buried: float = skin_t + CELL * BURY
+
+		# Which of the four sockets, if any, this slice runs through, and how wide
+		# the limb is where it does. Gathered per slice rather than per cell: three
+		# of the four are nowhere near any given cross-section.
+		var joint_y: float = 0.0
+		var joint_z: float = 0.0
+		var joint_r: float = 0.0
+		for socket in sockets:
+			var along: float = x - socket.x
+			if absf(along) > socket.w:
+				continue
+			# The junction is the limb's own column carried on up into the trunk,
+			# so at this slice it is a band of whatever width the column still has
+			# here. It has to reach the whole way out through the body wall: a
+			# socket sits well inside the flank, the trunk's cells win every grid
+			# site they share with a leg, and a junction that stopped short of the
+			# surface left the limb's first real cell on the far side of the
+			# trunk's own hide with the two never touching.
+			var here: float = sqrt(maxf(socket.w * socket.w - along * along, 0.0))
+			if here <= joint_r:
+				continue
+			joint_y = socket.y
+			joint_z = socket.z
+			joint_r = here
 
 		var y_span: int = ceili(oa / CELL)
 		var z_span: int = ceili(ob / CELL)
@@ -411,10 +583,32 @@ func _carve_body(plan: BodyPlan, profile: PackedFloat32Array, clip: float,
 				var u_lat: float = clampf(y / oa, -1.0, 1.0)
 				var row: int = clampi(int((u_lat + 1.0) * 0.5 * float(BodyPlan.BODY_ROWS)),
 					0, BodyPlan.BODY_ROWS - 1)
-				var fat_here: float = FAT_SHARE * mean_r \
-					* plan.fat_at(BodyPlan.BODY_KEY, col, u_lat) * fat_reserve
+				# How deep the fat lies on this particular ray: the gap between
+				# where the animal's surface is and where its flesh starts, both
+				# measured out from the axis along the ray this cell sits on. Every
+				# test below that asks to be *under* the fat reads it, so the skull,
+				# the ribs and the girdles all sit inside the flesh boundary rather
+				# than inside a shell that moves when the creature eats.
+				var flesh_rho: float = sqrt((y / flesh_a) * (y / flesh_a)
+					+ (z / flesh_b) * (z / flesh_b))
+				var fat_here: float = 0.0 if flesh_rho <= 1.0 or rho <= 0.0001 \
+					else maxf(reach - radial / flesh_rho - skin_t, 0.0)
 				var organ_here: int = plan.organ_at(BodyPlan.BODY_KEY, col, row)
 				var off_spine: float = Vector2(y, z - spine_z).length()
+				# Whether this cell stands in a socket, where the trunk lays no
+				# hide and no fat. A shoulder is a muscular junction: the flesh of
+				# the limb runs into the flesh of the body through it, and that is
+				# what attaches a leg to an animal.
+				#
+				# Without it the trunk wrapped its own skin-and-fat shell clean
+				# across the socket, so the limb's muscle stopped at the body's
+				# hide and the body's muscle began again on the other side of it —
+				# one animal drawn as a torso with four separate legs laid against
+				# it, which is exactly how the specimen read. The outermost of
+				# these cells still faces air and is still covered: it wears a
+				# sheath, like everywhere else too thin to spare a cell for skin.
+				var joint: bool = joint_r > 0.0 and z <= joint_z \
+					and absf(y - joint_y) <= joint_r
 
 				var deep_enough: bool = depth >= buried
 				var t: int = MUSCLE
@@ -431,10 +625,19 @@ func _carve_body(plan: BodyPlan, profile: PackedFloat32Array, clip: float,
 					# The cord's forward end, rising into the brainstem.
 					t = NERVE
 					pt = PART_CORD
-				elif not in_head and off_spine <= cord_r and deep_enough:
+				elif not in_head and canal and off_spine <= cord_r:
 					t = NERVE
 					pt = PART_CORD
-				elif depth < skin_t:
+				elif not in_head and off_spine <= vert_r:
+					# The vertebral ring, ahead of the skin test rather than behind
+					# it: the axial column is the innermost thing in the section, so
+					# it is laid first and the skin fills in around whatever is left.
+					# Behind the skin test, a tail thin enough for its skin depth to
+					# cover its own axis kept the cord and lost the bone around it,
+					# which is a cord threaded down a tube of hide.
+					t = BONE
+					pt = PART_VERTEBRA
+				elif depth < skin_t and not joint:
 					t = SKIN
 				elif in_head and absf(u_lat) <= BodyPlan.SKULL_SPAN \
 						and deep_enough and depth >= skin_t + fat_here \
@@ -442,9 +645,6 @@ func _carve_body(plan: BodyPlan, profile: PackedFloat32Array, clip: float,
 							+ maxf(SKULL_MIN, head_r * SKULL_SHARE):
 					t = BONE
 					pt = PART_SKULL
-				elif not in_head and off_spine <= vert_r and deep_enough:
-					t = BONE
-					pt = PART_VERTEBRA
 				elif not in_head and not in_tail_cap and deep_enough \
 						and Vector2(y, z - aorta_z).length() <= aorta_r:
 					t = VESSEL
@@ -467,7 +667,7 @@ func _carve_body(plan: BodyPlan, profile: PackedFloat32Array, clip: float,
 					# chest's contents — which is exactly what a ribcage is.
 					t = BONE
 					pt = hoop
-				elif depth < skin_t + fat_here:
+				elif depth < skin_t + fat_here and not joint:
 					t = FAT
 
 				var out_n := Vector3(0.0, y, z)
@@ -495,9 +695,8 @@ func _in_heart(x: float, y: float, z: float, length: float, rx: float,
 ## One limb: a column of cells from the socket to the floor, in the same
 ## canonical frame, with its own internal bone core, the muscle wrapped round
 ## it, and the neurovascular bundle running beside the bone.
-func _carve_limb(plan: BodyPlan, p: CreatureParams, key: String,
-		profile: PackedFloat32Array, clip: float, length: float,
-		depth_ratio: float, scale: float, fat_reserve: float, load: Vector2) -> void:
+func _carve_limb(plan: BodyPlan, p: CreatureParams, key: String, socket: Vector4,
+		scale: float, fat_reserve: float, load: Vector2) -> void:
 	var front: bool = key.begins_with("F")
 	var bone_len: float = (p.arm_length if front else p.leg_length) * scale
 	var girth: float = Limb.girth_of(bone_len, scale, load.x if front else load.y)
@@ -511,18 +710,13 @@ func _carve_limb(plan: BodyPlan, p: CreatureParams, key: String,
 		deg_to_rad(p.fore_swing_deg if front else p.hind_swing_deg),
 		p.fore_fold_range if front else p.hind_fold_range)
 	var foot_r: float = Limb.foot_of(bone_len, scale)
-	var side: float = BodyPlan.limb_side(key)
 	var patch_i: int = PATCH_KEYS.find(key)
 	var reg: int = int(plan.limb_region[key])
 	var upper_share: float = p.fore_upper_share if front else p.hind_upper_share
 
-	var socket_col: int = int(plan.limb_socket_col[key])
-	var f_s: float = (float(socket_col - BodyPlan.HEAD_COLS) + 0.5) \
-		/ float(BodyPlan.TORSO_COLS)
-	var a_s: float = _profile_at(profile, f_s * clip)
-	var sx: float = f_s * length
-	var sy: float = side * a_s * 0.72
-	var sz: float = -a_s * depth_ratio * 0.15
+	var sx: float = socket.x
+	var sy: float = socket.y
+	var sz: float = socket.z
 	var upper_len: float = bone_len * upper_share
 	var lower_len: float = bone_len - upper_len
 	var toe_z: float = sz - bone_len
@@ -552,8 +746,15 @@ func _carve_limb(plan: BodyPlan, p: CreatureParams, key: String,
 			s = span + tl * span
 		if r < CELL * 0.35:
 			continue
-		_carve_limb_slice(patch_i, reg, sx, sy, z, r, s, bone_r,
-			FAT_SHARE * r * BodyPlan.FAT_LIMB * fat_reserve, down < bone_len * 0.92)
+		# A limb fattens the same way the trunk does: outward, off a flesh radius
+		# that does not move. A leg has no silhouette of its own to swell within,
+		# so the reserve simply thickens it — which is what a fat animal's legs
+		# do. Laid the other way, as a shell deepening inward from a shaft that
+		# stayed the same width, every reserve of fat quietly replaced the leg's
+		# muscle with lard and the animal's own legs got weaker as it ate.
+		_carve_limb_slice(patch_i, reg, sx, sy, z,
+			r + FAT_SHARE * r * BodyPlan.FAT_LIMB * (fat_reserve - 1.0) * FAT_SWELL,
+			r, s, bone_r, down < bone_len * 0.92)
 
 	# The foot: a pad of cells around the toe, no bone — the plan gives feet
 	# none — mapped onto the ledger's foot cap columns.
@@ -594,21 +795,34 @@ func _carve_limb(plan: BodyPlan, p: CreatureParams, key: String,
 					Vector3(dx, dy, dzf).normalized() if d > 0.001 else Vector3(0, 0, -1))
 
 
+## `r` is how wide the limb is with its reserve on it; `lean` how wide the leg
+## underneath is. Everything structural is priced off the second, so the bone and
+## the muscle are the same bone and muscle at every reserve, and only the fat
+## between them and the skin answers to it.
 func _carve_limb_slice(patch_i: int, reg: int, sx: float, sy: float, z: float,
-		r: float, s: float, bone_r: float, fat_t: float, boned: bool) -> void:
+		r: float, lean: float, s: float, bone_r: float, boned: bool) -> void:
 	var reach: int = ceili(r / CELL)
 	var col: int = clampi(int(s), 0, BodyPlan.LIMB_BONE_COLS - 1)
 	var iz: int = floori(z / CELL)
-	var skin_t: float = maxf(SKIN_MIN * 0.8, r * SKIN_SHARE)
-	# The bone core is laid only where the limb is thick enough to bury it — a
-	# leg two cells across is skin and muscle with its bone carried by the
-	# ledger alone, because a skeleton that shows on the surface is not inside
-	# the animal. A full cell of flesh over the core is what guarantees the
-	# covering cell actually exists on the grid.
-	var deep_bone: bool = boned and r - bone_r >= CELL
+	var skin_t: float = maxf(SKIN_MIN * 0.8, lean * SKIN_SHARE)
+	var flesh_r: float = maxf(lean - skin_t - FAT_SHARE * lean * BodyPlan.FAT_LIMB,
+		lean * FLESH_MIN)
+	var fat_t: float = maxf(r - flesh_r - skin_t, 0.0)
+	# The bone core runs the whole length of the limb, because that is what a limb
+	# is: a bone with flesh on it. It used to be laid only where the section could
+	# bury it under a full cell of cover, which on anything smaller than a camel
+	# meant nowhere at all — a lizard's arm came out as seventy cells of skin with
+	# five of muscle in it and no skeleton whatever, and that is not a slim leg,
+	# it is a sock.
+	#
+	# What the burial rule was protecting is still protected, and by the honest
+	# route: the core is sized to a share of its own section, so there is always
+	# flesh laid around it, and where the section is too thin for that flesh to be
+	# a whole cell the covering is a sheath rather than a cell — see `sheathed`.
+	var core_r: float = minf(bone_r, lean * LIMB_BONE_FILL)
 	# Whether there is room for the neurovascular bundle to be cells of its own;
 	# on a thin limb the conduits run inside the muscle it does have.
-	var roomy: bool = r >= bone_r + BUNDLE_R * 2.0 + skin_t
+	var roomy: bool = lean >= bone_r + BUNDLE_R * 2.0 + skin_t
 	for ix in range(floori(sx / CELL) - reach, floori(sx / CELL) + reach + 1):
 		var x: float = (float(ix) + 0.5) * CELL
 		for iy in range(floori(sy / CELL) - reach, floori(sy / CELL) + reach + 1):
@@ -624,7 +838,7 @@ func _carve_limb_slice(patch_i: int, reg: int, sx: float, sy: float, z: float,
 				0, BodyPlan.LIMB_ROWS - 1)
 			var t: int = MUSCLE
 			var pt: int = PART_NONE
-			if deep_bone and radial <= bone_r:
+			if boned and radial <= core_r:
 				t = BONE
 				pt = PART_LIMB_BONE
 			elif roomy and boned \
@@ -695,22 +909,35 @@ func _finish(plan: BodyPlan) -> void:
 			var other = _grid.get(at + offsets[k])
 			neighbor[i * 6 + k] = other if other != null else -1
 
-	# The hull is skin: skin is the outer boundary of the animal, and no cell of
-	# any other tissue may face open air. That is what makes the skin a genuine
-	# closed wrap — every exposed face on the whole solid belongs to a skin cell,
-	# so there is no seam anywhere for the fat and muscle under it to show
-	# through, at any filter and from any angle.
-	var carved: PackedByteArray = kind.duplicate()
+	# The hull is skin: the animal is covered everywhere, there is no seam anywhere
+	# for the flesh under it to show through, and that holds at any filter and from
+	# any angle. What changed is what the claim costs.
+	#
+	# It used to be paid for by rewriting the census. Every cell with a face on
+	# open air *became* skin, whatever the carve had made it — and on anything the
+	# grid cannot layer that is the whole structure. A lizard's forearm is three
+	# cells across, so every cell in it has a face on air, so every cell in it
+	# became skin: the census reported a leg of seventy cells with no bone in it
+	# and five of muscle. That is not a drawing detail. It is what the girdle's
+	# drive is counted off, what the scales weigh and what the anatomy panel
+	# prints, so the animal really did have hollow legs and half its mass really
+	# was hide. The same rule took the vertebrae out of every tail in the file.
+	#
+	# The carve has already answered the question properly, by depth: a cell whose
+	# centre lies inside the skin's own shell is skin, and one deeper than that is
+	# whatever it is mostly made of. So the hull rule no longer overrules it. A
+	# non-skin cell left standing on the boundary is marked `sheathed` instead —
+	# covered by a skin the lattice is too coarse to hold a cell of, drawn as skin,
+	# and counted as itself.
+	sheathed = PackedByteArray()
+	sheathed.resize(count)
 	for i in count:
 		if kind[i] == SKIN:
 			continue
 		for k in 6:
 			if neighbor[i * 6 + k] < 0:
-				kind[i] = SKIN
-				part[i] = PART_NONE
-				organ_of[i] = BodyPlan.NO_ORGAN
+				sheathed[i] = 1
 				break
-	_keep_a_core(carved)
 
 	# What each cell touches, now that every cell knows what it is. Written once
 	# and read by everything that has to decide what is on the surface of a
@@ -789,43 +1016,6 @@ func _finish(plan: BodyPlan) -> void:
 	standing_total = built_total
 	standing_units = built_units
 	_synced = -2
-
-
-## Nothing on an animal is made of skin all the way through.
-##
-## The hull rule above is right about every structure thick enough to have an
-## inside, and wrong about the ones that are not: a vestigial forelimb three
-## pixels across is every one of it its own boundary, so the rule takes the last
-## of its bone and leaves a stick of integument. This puts the core back — the
-## cells nearest the structure's own axis keep the tissue the carve gave them —
-## for any part the conversion emptied outright.
-##
-## It runs per patch rather than per column because a limb is the thing that is
-## too thin, and a limb is a patch. On everything thick enough to be hollow it
-## does nothing at all, which is every animal in the file above the smallest
-## arms.
-func _keep_a_core(carved: PackedByteArray) -> void:
-	for pk in PATCH_KEYS.size():
-		var mine: Array[int] = []
-		var solid: bool = false
-		for i in count:
-			if int(patch_of[i]) != pk:
-				continue
-			if kind[i] != SKIN:
-				solid = true
-				break
-			mine.append(i)
-		if solid or mine.size() < CORE_MIN:
-			continue
-		# Deepest first — `rank` still holds the raw outside-in measure here, which
-		# is 0 on the axis and 1 at the surface.
-		var order: Array[Vector2] = []
-		for i in mine:
-			order.append(Vector2(rank[i], float(i)))
-		order.sort()
-		for j in maxi(int(float(mine.size()) * CORE_SHARE), 1):
-			var i: int = int(order[j].y)
-			kind[i] = carved[i]
 
 
 static func _profile_at(profile: PackedFloat32Array, t: float) -> float:

@@ -95,23 +95,44 @@ func _check_cells_are_a_constant_grid(player: Creature) -> void:
 		"the volume is not the cell count times the cell size")
 
 
-## Skin forms the outer boundary: every cell with a face on open air is skin,
-## and skin is nowhere buried under other tissue... on the outside of it.
+## Skin forms the outer boundary: every cell with a face on open air is covered,
+## either by being skin or by wearing a sheath.
+##
+## The second is the case the lattice cannot hold a cell for. Where the animal is
+## thinner than the grid — a lizard's forearm, the last inch of a tail — the skin
+## over it is a film under a pixel deep, and a cell given wholly to it would be a
+## limb made entirely of hide with nothing inside. So the cell keeps the tissue it
+## is mostly made of and is marked `sheathed`, and it is the mark that carries the
+## covering: the specimen draws such a cell as skin while the skin is on. What may
+## never happen is a cell facing air with neither, which would be a real hole in
+## the animal, and that is what is checked here.
 func _check_the_hull_is_skin(player: Creature) -> void:
 	var lat: AnatomyLattice = _lattice(player)
 	var bare: int = 0
+	var sheathed: int = 0
 	for i in lat.count:
 		if lat.kind[i] == AnatomyLattice.SKIN:
 			continue
 		for k in 6:
 			if lat.neighbor[i * 6 + k] < 0:
-				bare += 1
+				if lat.sheathed[i] != 0:
+					sheathed += 1
+				else:
+					bare += 1
 				break
-	_check(bare == 0, "%d cells of other tissue face open air" % bare)
+	_check(bare == 0, "%d cells of other tissue face open air uncovered" % bare)
+	# ...and the sheath is the exception it claims to be, not the rule: the great
+	# majority of the animal's boundary is still cells of real skin.
+	var hide: int = lat.tissue_cells(AnatomyLattice.SKIN)
+	_check(sheathed < hide,
+		"%d sheathed boundary cells against only %d of skin" % [sheathed, hide])
+	notes.append("%d of the boundary is sheathed, %d is skin" % [sheathed, hide])
 
 
-## The skeleton is internal — no bone cell touches air, on any build — and it is
-## wrapped in flesh: nearly every bone cell has muscle or fat lying against it.
+## The skeleton is internal — no bone cell is left uncovered, on any build — and
+## it is wrapped in flesh: nearly every bone cell has muscle or fat lying against
+## it. On a limb or a tail tip the grid cannot hold a cell for the covering, and
+## there the bone wears a sheath instead; what it may never do is lie open.
 func _check_the_skeleton_is_internal(player: Creature) -> void:
 	for preset in ["Lizard", "Elephant", "T. rex"]:
 		player.params.apply_preset(preset)
@@ -133,22 +154,26 @@ func _check_the_skeleton_is_internal(player: Creature) -> void:
 			for k in 6:
 				var n: int = lat.neighbor[i * 6 + k]
 				if n < 0:
-					exposed += 1
+					if lat.sheathed[i] == 0:
+						exposed += 1
 					break
 				if lat.kind[n] == AnatomyLattice.MUSCLE or lat.kind[n] == AnatomyLattice.FAT:
 					soft = true
 			if soft:
 				fleshed += 1
 		_check(bones > 0, "a %s has no skeleton in its lattice" % preset)
-		_check(exposed == 0, "a %s carries %d bone cells on its surface" % [preset, exposed])
+		_check(exposed == 0,
+			"a %s carries %d uncovered bone cells on its surface" % [preset, exposed])
 		_check(fleshed > bones / 2,
 			"a %s's skeleton is not wrapped in flesh (%d of %d cells touch muscle or fat)"
 				% [preset, fleshed, bones])
 		_check(parts.has(AnatomyLattice.PART_VERTEBRA) and parts.has(AnatomyLattice.PART_SKULL),
 			"a %s's skeleton is missing its vertebrae or its skull" % preset)
-		if preset != "Lizard":
-			_check(parts.has(AnatomyLattice.PART_LIMB_BONE),
-				"a %s's legs are thick enough to bury a bone and have none" % preset)
+		# Every animal in the file, and no longer only the ones with thick enough
+		# legs to bury a bone in. A limb is a bone with flesh on it at any size,
+		# and one carrying none was the census reporting a sock.
+		_check(parts.has(AnatomyLattice.PART_LIMB_BONE),
+			"a %s's legs have no bone in them" % preset)
 	_apply(player)
 	notes.append("the skeleton is internal on every build tried")
 
@@ -188,7 +213,10 @@ func _check_tissues_stack_outside_in(player: Creature) -> void:
 			var i: int = cells[j]
 			if lat.pos[i].z < 0.0:
 				break
-			var t: int = lat.kind[i]
+			# What the cell reads as from outside, which on a boundary cell the
+			# grid could not spare for skin is skin — see AnatomyLattice.sheathed.
+			var t: int = AnatomyLattice.SKIN if lat.sheathed[i] != 0 \
+				else int(lat.kind[i])
 			if j == 0 and t != AnatomyLattice.SKIN:
 				order_held = false
 			if t == AnatomyLattice.FAT and first_fat < 0:
@@ -275,11 +303,12 @@ func _check_conduits_are_threads(player: Creature) -> void:
 			continue
 		for k in 6:
 			if lat.neighbor[i * 6 + k] < 0:
-				exposed += 1
+				if lat.sheathed[i] == 0:
+					exposed += 1
 				break
 	_check(cord > 0, "there is no spinal cord in the lattice")
 	_check(aorta > 0, "there is no great vessel in the lattice")
-	_check(exposed == 0, "%d conduit cells face open air" % exposed)
+	_check(exposed == 0, "%d conduit cells face open air uncovered" % exposed)
 	var length: float = maxf(body_hi - body_lo, 1.0)
 	# Not the whole length: the cord runs as far down the tail as there is body
 	# deep enough to bury it, and on the smallest build that is about half —

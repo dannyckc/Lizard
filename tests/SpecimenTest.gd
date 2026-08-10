@@ -115,7 +115,16 @@ func _check_layers(view: AnatomyView) -> void:
 		var mine: int = 0
 		var strays: Dictionary = {}
 		for j in view._shown_count:
-			var kind: int = int(lat.kind[view._shown[j]])
+			# What the cell is being shown *as*. Where the animal is too thin for
+			# the lattice to hold a cell of skin, the outermost cell wears its skin
+			# as a sheath and is drawn as skin while the skin is on — so with the
+			# skin isolated it is one of the skin's own cells, and with anything
+			# else isolated it is the tissue underneath. Either way it is the
+			# tissue asked for, and neither reading is a stray.
+			var cell: int = view._shown[j]
+			var kind: int = AnatomyLattice.SKIN \
+				if t == AnatomyLattice.SKIN and lat.sheathed[cell] != 0 \
+				else int(lat.kind[cell])
 			if kind == t:
 				mine += 1
 			else:

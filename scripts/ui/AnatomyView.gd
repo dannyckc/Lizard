@@ -234,6 +234,17 @@ const PICK_BUCKET: float = 14.0
 const LOOSE_MOST: int = 1800
 const LOOSE_MIN: float = 0.6
 const LOOSE_BAND: int = 15
+## How wide a loose cell is drawn, in cells.
+##
+## A cell is a cube, and what a cube covers on the page is not the width of one
+## of its faces — turned to the eye it reaches a good deal further, out to its
+## own diagonal. Drawn a face wide, a run of cells stepping diagonally through
+## the lattice touched only at the corners and read as a row of separate beads,
+## which is what a lizard's forearm looked like with a single tissue isolated:
+## the flesh is a continuous strand a cell or two thick, and the picture broke it
+## into dots. The half-diagonal is what a box actually covers, and it is what
+## makes a strand read as a strand.
+const LOOSE_WIDE: float = 0.7071
 ## Page size of a cell below which the facet hairlines and the cell overlay stop
 ## being drawn — past that they are ink rather than information — and the size
 ## they come back at, apart so a fit easing onto the line does not flicker.
@@ -727,6 +738,25 @@ func tissue_shown(t: int) -> bool:
 	return layer_shown(t)
 
 
+## What tissue a cell counts as *to the eye*, which is not always what it is
+## made of — see `AnatomyLattice.sheathed`.
+##
+## Where the animal is thinner than the lattice can layer, the outermost cell
+## carries the tissue it is mostly made of and wears its skin as a film the grid
+## cannot hold a cell of. So while the skin is on the specimen, such a cell is
+## skin: it is drawn in hide, it is what the silhouette is made of, and peeling
+## the muscle off a lizard's leg does not strip the leg. Lift the skin and the
+## same cell is the muscle or the bone it has always been, and shows as that —
+## which is the whole of what peeling a layer is supposed to do.
+##
+## One rule, asked in the two places that decide the picture: what is on the
+## surface, and what colour it is.
+func _seen_as(lat: AnatomyLattice, i: int, skinned: bool) -> int:
+	if skinned and lat.sheathed.size() == lat.count and lat.sheathed[i] != 0:
+		return AnatomyLattice.SKIN
+	return int(lat.kind[i])
+
+
 ## Where the section plane currently stands, in the lattice's own frame.
 func slice_plane() -> float:
 	if slice_axis < 0:
@@ -848,11 +878,17 @@ func _shell_surface(lat: AnatomyLattice, hidden: int,
 	var where: PackedVector3Array = lat.pos
 	var chain_of: PackedInt32Array = _form.sample_of
 	var chained: bool = chain_of.size() == lat.count
+	# A sheathed cell is skin while the skin is up — see `_seen_as`. Hoisted to a
+	# flag and an array so the test inside the walk is one read and one compare.
+	var sheath: PackedByteArray = lat.sheathed
+	var skinned: bool = tissue_shown(AnatomyLattice.SKIN) \
+		and sheath.size() == lat.count
 	# A cell is in the plane when the plane passes through the cell itself: the
 	# kept side, within one cell of the cut. That band is the cut face.
 	var near_plane: float = plane - AnatomyLattice.CELL
 	for i in lat.count:
-		if (hidden & (1 << int(kinds[i]))) != 0:
+		if (hidden & (1 << (AnatomyLattice.SKIN if skinned and sheath[i] != 0
+				else int(kinds[i])))) != 0:
 			continue
 		if gone[i] != 0 or (sliced and where[i][slice_axis] > plane):
 			lifted.append(i)
@@ -1220,6 +1256,9 @@ func _draw_cells(lat: AnatomyLattice, grid: TissueGrid) -> void:
 	var normals: PackedVector3Array = lat.normal
 	var patch_of: PackedByteArray = lat.patch_of
 	var station: PackedFloat32Array = lat.station
+	var sheath: PackedByteArray = lat.sheathed
+	var skinned: bool = tissue_shown(AnatomyLattice.SKIN) \
+		and sheath.size() == lat.count
 	var thin: bool = xray
 	var n: int = 0
 	for q in faces:
@@ -1238,7 +1277,10 @@ func _draw_cells(lat: AnatomyLattice, grid: TissueGrid) -> void:
 		var deep: float = (deep_a + _v_deep[b] + _v_deep[c] + _v_deep[d]) * 0.25
 
 		var cell: int = _mesh.f_cell[q]
-		var t: int = kinds[cell]
+		# The tissue this facet is *seen* as, which on anything the lattice cannot
+		# layer is the sheath rather than what is under it — see `_seen_as`.
+		var t: int = AnatomyLattice.SKIN if skinned and sheath[cell] != 0 \
+			else int(kinds[cell])
 		var cut: bool = _mesh.f_flat[q] != 0
 
 		# Which way this facet is turned. Front or back comes off the source
@@ -1594,9 +1636,12 @@ func _loose_pass(lat: AnatomyLattice, n: int, drawing: bool) -> int:
 	# rather than growing without limit. It is the fringe: thinning it drops
 	# detail from the places that had least of it to begin with.
 	var step: int = _loose_step()
-	var half: float = maxf(AnatomyLattice.CELL * _scale * 0.5, LOOSE_MIN)
+	var half: float = maxf(AnatomyLattice.CELL * _scale * LOOSE_WIDE, LOOSE_MIN)
 	var kinds: PackedByteArray = lat.kind
 	var regions: PackedByteArray = lat.region
+	var sheath: PackedByteArray = lat.sheathed
+	var skinned: bool = tissue_shown(AnatomyLattice.SKIN) \
+		and sheath.size() == lat.count
 	var i: int = 0
 	while i < total:
 		var cell: int = cells[i]
@@ -1614,7 +1659,8 @@ func _loose_pass(lat: AnatomyLattice, n: int, drawing: bool) -> int:
 		_points[v + 2] = mid + Vector2(half, half)
 		_points[v + 3] = mid + Vector2(-half, half)
 		if drawing:
-			var t: int = kinds[cell]
+			var t: int = AnatomyLattice.SKIN if skinned and sheath[cell] != 0 \
+				else int(kinds[cell])
 			var ink: Color = _shade[(t * 2) * SHADES + LOOSE_BAND]
 			var reg: int = regions[cell]
 			if _wash_amt[reg] > 0.0:

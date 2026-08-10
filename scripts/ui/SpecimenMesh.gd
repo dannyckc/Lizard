@@ -78,10 +78,22 @@ const OUT: float = 0.5
 ## ring's own mean radius. A snout and a tail tip are cones; nothing else is.
 const CONE: float = 0.8
 ## Least sectors of a ring that must have found a cell of their own before the
-## ring is worth closing at all, as a share of the ring. Below it the flesh at
-## that station is too little — or too far gone — to be a ring, and no facet is
-## laid rather than one invented out of two cells.
-const RING_ENOUGH: float = 0.45
+## ring is worth closing at all, as a share of the ring, with an absolute floor
+## of three: below three points there is no loop to draw.
+##
+## It used to be nearly half the ring, and that was a statement about the wrong
+## thing. A tail tip and an ankle are genuinely three or four cells around, so
+## their rings never met the share, so the last stations of every tail and the
+## bottom of every leg were dropped out of the mesh and drawn as loose cells —
+## which is why the specimen's tail ended in a shower of beads with a sealed cone
+## some way above it. The flesh was there and the surface was not.
+##
+## Three points *are* a cross-section when the animal is two cells wide, and the
+## sectors they leave empty are filled from their neighbours rather than opened
+## (see `_close_ring`), so what comes out is a tapering tube rather than a
+## triangle. A ring with real flesh missing is still dropped — that is what the
+## floor of three is for — and the cells go on to `loose` as they always did.
+const RING_ENOUGH: float = 0.25
 
 # --- vertices, in the lattice's own posing coordinates -------------------------
 var v_patch := PackedByteArray()
@@ -352,17 +364,30 @@ func _skin(lat: AnatomyLattice, surface: PackedInt32Array, shell: int,
 				_vert_of[row + sector] = _vertex(pk, _band_s[here], across,
 					0.0 if pk == 0 else along, along if pk == 0 else _band_lift[here])
 
-	# The skin itself: a quad between every pair of neighbouring rings.
+	# The skin itself: a quad between every pair of rings that follow one another.
+	#
+	# *Follow*, not neighbour. A band with no cells in it is a place the lattice
+	# had nothing to say, not a place the animal stops — a station whose cells all
+	# went to a chain, or a stretch where the rings are cut finer than the cells
+	# are. Stitching strictly to `band + 1` tore the tube open at every one of
+	# them and then sealed both raw ends into cones, which is how a continuous
+	# tail came out as a string of separate pieces. So the ring after this one is
+	# the next one that exists, and the two ends of the run are the only places
+	# anything is sealed.
 	for pk in AnatomyLattice.PATCH_KEYS.size():
 		var bands: int = bands_of(pk)
 		var sectors: int = sectors_of(pk)
 		var bucket_base: int = _bucket_base(pk)
 		var band_base: int = _band_base(pk)
-		for band in range(bands - 1):
-			if _band_n[band_base + band] == 0 or _band_n[band_base + band + 1] == 0:
-				continue
-			var near: int = bucket_base + band * sectors
-			var far: int = near + sectors
+		var run: Array[int] = []
+		for band in bands:
+			if _band_n[band_base + band] > 0:
+				run.append(band)
+		if run.is_empty():
+			continue
+		for j in range(run.size() - 1):
+			var near: int = bucket_base + run[j] * sectors
+			var far: int = bucket_base + run[j + 1] * sectors
 			for sector in sectors:
 				var next: int = (sector + 1) % sectors
 				var a: int = _vert_of[near + sector]
@@ -373,16 +398,10 @@ func _skin(lat: AnatomyLattice, surface: PackedInt32Array, shell: int,
 					continue
 				_face(a, b, c, d, _best_i[near + sector], shell, 0,
 					_best_raw[near + sector])
-		# ...and the seals, wherever a ring stands next to nothing.
-		for band in bands:
-			var here: int = band_base + band
-			if _band_n[here] == 0:
-				continue
-			for dir in [-1, 1]:
-				var beside: int = band + dir
-				if beside >= 0 and beside < bands and _band_n[band_base + beside] > 0:
-					continue
-				_seal(pk, band, dir, bucket_base + band * sectors, sectors, shell)
+		# ...and the seals, at the two ends of the run and nowhere else.
+		_seal(pk, run[0], -1, bucket_base + run[0] * sectors, sectors, shell)
+		var last: int = run[run.size() - 1]
+		_seal(pk, last, 1, bucket_base + last * sectors, sectors, shell)
 
 
 ## Fills the sectors of one ring that found no cell of their own.

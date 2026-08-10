@@ -79,14 +79,19 @@ const REFERENCE_MUSCLE_CELLS: float = 172.0
 ## The same two rulers for the 3D cell lattice the census is now counted off:
 ## the default build's density-weighted standing cells, and its muscle cells
 ## alone. Chosen so the default build weighs and pulls *exactly* what it did
-## under the ledger census it replaced — its cells are 3814.54 units and 932
-## muscle, quoted against slightly smaller rulers because the old census also
-## sat a fraction over its own reference — so no calibrated behaviour anywhere
-## downstream moves. Re-measure with tests/LatticeProbe.gd if the carve changes;
-## these last moved when the limbs grew their muscle bellies (Limb.shape_at),
-## which put real flesh on every leg in the file and so more cells on all of them.
-const REFERENCE_LATTICE_UNITS: float = 3802.5081
-const REFERENCE_LATTICE_MUSCLE: float = 928.5294
+## under the ledger census it replaced — it reads 3804.94 units and 1151 muscle,
+## quoted against slightly smaller rulers because the old census also sat the
+## same fraction over its own reference — so no calibrated behaviour anywhere
+## downstream moves. Re-measure with tests/LatticeProbe.gd if the carve changes.
+##
+## These last moved when the hull rule stopped rewriting thin structures into
+## skin (AnatomyLattice.sheathed). Nothing about the animal's size changed and
+## the cell count did not move at all; what moved is what those cells are *made
+## of*, and a quarter of the body stopped being counted as hide. The muscle
+## ruler grows most because that is where most of it went — which is the same
+## fact as a lizard's legs having muscle in them at last.
+const REFERENCE_LATTICE_UNITS: float = 3792.9384
+const REFERENCE_LATTICE_MUSCLE: float = 1146.7139
 
 ## Least a girdle may be reduced to by having its muscle eaten. Not zero: a leg
 ## with nothing driving it is dragged rather than deleted, and every consumer of
