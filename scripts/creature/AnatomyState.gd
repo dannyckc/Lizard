@@ -110,7 +110,12 @@ func set_fat_reserve(value: float) -> void:
 func update(creature: Node, delta: float = 0.0) -> void:
 	tissue.update(creature)
 	tissue.resolve_attachment()
-	state.update(tissue, delta)
+	# Whether the animal is still driving its own heart, handed down with the
+	# tissue because it is the one thing about a body that its cells cannot say:
+	# a carcass is made of exactly what it was made of a moment before. It goes
+	# in here rather than being read out by anything downstream, so that a
+	# stopped heart is a fact about the circulation and never a flag on a view.
+	state.update(tissue, delta, creature.alive)
 
 
 ## Finds the anatomical region overlapped most deeply by a circular bite.

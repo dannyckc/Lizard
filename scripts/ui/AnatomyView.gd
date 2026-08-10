@@ -25,6 +25,23 @@
 ## trees, with everything finer living in the per-region density fields. One
 ## census underneath all of it, three representations on top.
 ##
+## Which of the three a piece of the animal is drawn by is decided by what that
+## piece *is*, and between them they have to cover the census: a tissue that is
+## being shown and drawn by none of them is a hole in the picture that is not a
+## hole in the animal, which is the one failure this file cannot be allowed. So a
+## cell that belongs to a continuous structure is drawn by that structure's tube
+## and left out of the skin; flesh is skinned into rings; and whatever is left —
+## a place where the animal is two cells wide, a tissue too scattered to make a
+## ring of, a bone the lattice has only a scrap of — is drawn as the cells it is.
+##
+## The depth stack and the two supply networks are shown on different terms, and
+## the difference is what they are rather than a preference. Skin, fat, muscle,
+## bone and organ are what the animal is built out of, so they stand in front of
+## each other and the outermost one shown is the one seen. A vascular tree is not
+## a layer of anything — it threads all five — so it is an overlay: switched on,
+## it is drawn whole and over the top, because "what is still reaching this leg"
+## is a fair question to ask of an animal with its hide on.
+##
 ## What is happening to the animal is said on the mesh itself rather than beside
 ## it. Flesh the ledger has worn down carries its tissue's spent shade; a facet
 ## standing against something the teeth took carries the raw colour of an open
@@ -41,15 +58,18 @@
 ## cut cells flat on it; and the panel can isolate one tissue outright. What
 ## shows underneath is always the cells that were genuinely laid underneath —
 ## bone inside muscle inside fat inside skin, organs behind bone, the two supply
-## lines threading the middle of it.
+## lines threading the middle of it. Switching an overlay off is not one of the
+## four: a hidden nerve does not bore a channel down the muscle it runs through.
 ##
 ## The specimen is presented upright, snout at the top, by rotating the whole
 ## body into the mean direction of its own spine — a rigid transform that
 ## re-orients without straightening, so the pose stays exactly the pose. And it
 ## can be walked around: the trackball seizes the point of the containing sphere
-## under the pointer and carries it with the hand. `orient` is the whole of the
-## eye's position; `spin`, `tilt` and `roll` are readings off it. Framing is the
-## same sphere and therefore does not move while the specimen turns.
+## under the pointer and carries it with the hand, and the wheel leans in on what
+## is under it. `orient` is the whole of the eye's position; `spin`, `tilt` and
+## `roll` are readings off it, and the guide in the corner is the animal's own
+## three axes put through the same projection. Framing is the same sphere and
+## therefore does not move while the specimen turns.
 class_name AnatomyView
 extends Control
 
@@ -62,16 +82,24 @@ const INK := CreatureView.INK
 const COL_NERVE := CreatureView.COL_DBG_NERVE
 const COL_VESSEL := CreatureView.COL_DBG_VESSEL
 const COL_LATTICE := Color(INK, 0.22)
-## The specimen's hide.
+## The specimen's hide: the page's own black, the same ink the field draws a
+## creature's silhouette in.
 ##
-## In the field a creature's skin is drawn in the page's own ink, because there
-## it is a silhouette on paper and a silhouette wants to be solid. On the slab it
-## is a lit surface, and a surface inked at the darkest value the palette has
-## cannot be lit: every facet of it comes back black and the animal reads as a
-## hole rather than as a body. So the specimen's skin is the same ink brought up
-## to a hide tone — the one value in this file that is about the light rather
-## than about the animal.
-const COL_HIDE := Color("8c7b69")
+## Which makes the skin the darkest thing on the slab and every layer under it
+## lighter than the wrap it came out of — peel the hide and the body brightens,
+## which is the right way round for a dissection. It costs the one thing a black
+## surface cannot do, which is take a light by being scaled: see `_bake_shades`,
+## where a tissue this dark is lit toward a sheen instead so that the facets
+## still read as planes rather than as one hole in the paper.
+const COL_HIDE := Color("000000")
+## What a tissue too dark to be lit by scaling is carried toward instead, and how
+## far a fully lit facet of it gets. Low enough that the hide still reads as
+## black beside anything else on the slab.
+const SHEEN := Color("57514a")
+const SHEEN_LIFT: float = 0.62
+## Luminance a fully lit facet must reach before the scale is doing any work at
+## all. Under it the sheen takes over.
+const SHEEN_UNDER: float = 0.10
 ## What an opened wound is: the raw colour of flesh the teeth have just been
 ## through, which no intact tissue anywhere on the palette comes near.
 const COL_RAW := Color("8e1b14")
@@ -124,6 +152,18 @@ const VESSEL_OFFSET: float = 2.6
 ## Where the trackball stops being a sphere and becomes the sheet that carries
 ## on from it — Bell's hyperbolic skirt.
 const BALL_EDGE: float = 0.70710678
+## How far the wheel may carry the specimen either side of the fit the stage
+## worked out for it, and what one notch of the wheel is worth. The fit is still
+## what decides the framing; this is leaning in and back from it.
+const ZOOM_MIN: float = 0.55
+const ZOOM_MAX: float = 3.2
+const ZOOM_STEP: float = 1.09
+## The orientation guide: how long an arm of it is at full length, how far in
+## from the corner it stands, and how far a foreshortened arm has to fall before
+## its letter is dropped as unreadable.
+const AXIS_ARM: float = 19.0
+const AXIS_INSET: float = 31.0
+const AXIS_FAINT: float = 0.30
 ## Orbit under which the projection is the plain top-down one.
 const FLAT: float = 0.002
 ## How far every shell of an X-ray is thinned to, so the body reads through.
@@ -187,6 +227,13 @@ const DEAD_DRAIN: float = 0.55
 ## Page cells of the pick grid. The hover test walks one bucket instead of every
 ## facet on the specimen — see `_pick`.
 const PICK_BUCKET: float = 14.0
+## The loose cells — flesh too thin at that station to be made a ring of. Most
+## the pass will lay down before it starts thinning them, the smallest a cell may
+## be drawn on the page, and the shade band they take: a box has no plane of its
+## own to catch the light with, so it is given the light a flat face would get.
+const LOOSE_MOST: int = 1800
+const LOOSE_MIN: float = 0.6
+const LOOSE_BAND: int = 15
 ## Page size of a cell below which the facet hairlines and the cell overlay stop
 ## being drawn — past that they are ink rather than information — and the size
 ## they come back at, apart so a fit easing onto the line does not flicker.
@@ -203,6 +250,10 @@ const CALIBRE_FALL: float = 0.45
 ## Width of the space-colonisation branchlets, which stand in for everything
 ## finer than the named runs. Everything finer than *them* is the density field.
 const BRANCH_WIDTH: float = 0.7
+## Pieces one span of a conduit or a branchlet is drawn in. Both are polylines
+## between cell centres, and a cell centre is a place on a grid — see
+## `_smooth_run`.
+const SMOOTH_STEPS: int = 4
 
 var creature: Creature = null
 ## Which of the five tissue layers are still on the specimen.
@@ -222,6 +273,11 @@ var xray: bool = false
 ## body's own bounds it stands.
 var slice_axis: int = SLICE_OFF
 var slice_at: float = 1.0
+## How far the wheel has leaned in past the fit. Multiplies the scale and
+## nothing else — the ball the eye turns and the ball the animal is measured
+## against are both untouched, so leaning in cannot make the specimen drift or
+## turn differently under the hand.
+var zoom: float = 1.0
 
 ## Where the specimen is being looked at from, in the animal's own frame.
 var orient: Basis = Basis():
@@ -335,6 +391,9 @@ var _edge_lines := PackedVector2Array()
 var _lattice_lines := PackedVector2Array()
 var _run := PackedVector2Array()
 var _run_gone := PackedByteArray()
+var _curve := PackedVector2Array()
+var _curve_gone := PackedByteArray()
+var _path := PackedVector2Array()
 var _order: Array[String] = []
 
 # --- the mesh ------------------------------------------------------------------
@@ -441,9 +500,24 @@ func reset_fit() -> void:
 	_census_of = -1
 
 
-## Puts the eye back over the animal's back, looking straight down.
+## Puts the eye back over the animal's back, looking straight down — and back to
+## the stage's own fit, because leaning in is part of where the eye is.
 func reset_orbit() -> void:
 	orient = Basis()
+	set_zoom(1.0)
+
+
+## Leans the eye in or back. The scale is re-derived here rather than waited for,
+## so a wheel notch has landed by the time anything reads the view again.
+func set_zoom(value: float) -> void:
+	var want: float = clampf(value, ZOOM_MIN, ZOOM_MAX)
+	if is_equal_approx(want, zoom):
+		return
+	zoom = want
+	if _fitted:
+		_scale = _ball * zoom / _radius
+		_reframe()
+		queue_redraw()
 
 
 func _aim(new_spin: float, new_tilt: float) -> void:
@@ -585,7 +659,7 @@ func _settle(delta: float) -> void:
 
 	var room: Vector2 = (size - Vector2(PAD_X * 2.0, PAD_Y * 2.0)).max(Vector2(1.0, 1.0))
 	_ball = minf(room.x, room.y) * 0.5
-	_scale = _ball / _radius
+	_scale = _ball * zoom / _radius
 	_reframe()
 
 	# What the animal actually covers on the page, for the organ leader lines.
@@ -719,7 +793,20 @@ func _refresh_draw_list(lat: AnatomyLattice, grid: TissueGrid) -> void:
 		built.append(_shell_surface(lat, masks[s], s == 0))
 	_surfaces = built
 	_draw_list = built[0]
-	_mesh.build(lat, _surfaces, _plane_cells, slice_axis)
+	# ...and then the two supply networks, whole. They are overlays rather than
+	# layers of the depth stack — see `_draw` — so every sample of a shown one is
+	# on view whether or not the flesh over it happens to have been lifted. The
+	# skeleton is pointedly not: a bone *is* part of the stack, and is seen when
+	# the body over it is opened, like everything else in it.
+	for c in _form.chain_count:
+		var kind: int = int(_form.chain_kind[c])
+		if kind != AnatomyLattice.NERVE and kind != AnatomyLattice.VESSEL:
+			continue
+		if not tissue_shown(kind):
+			continue
+		for s in range(_form.chain_from[c], _form.chain_from[c + 1]):
+			_sample_vis[s] = 1
+	_mesh.build(lat, _surfaces, _plane_cells, slice_axis, _form.sample_of)
 
 
 ## The cells standing on the boundary of one shell: shown, standing, on the kept
@@ -734,6 +821,12 @@ func _shell_surface(lat: AnatomyLattice, hidden: int,
 		outermost: bool) -> PackedInt32Array:
 	var plane: float = slice_plane()
 	var sliced: bool = slice_axis >= 0
+	# What counts as a way *in*, which is not the same list as what is being left
+	# out. Switching an overlay off cannot open the flesh: a nerve is a thread
+	# through the middle of a muscle, and a body with the nerves hidden is a whole
+	# body rather than one with a channel bored down it — the muscle around that
+	# thread is interior either way and has no business being drawn as surface.
+	var opened: int = hidden & ~((1 << AnatomyLattice.NERVE) | (1 << AnatomyLattice.VESSEL))
 	var surface := PackedInt32Array()
 	var present := PackedByteArray()
 	present.resize(lat.count)
@@ -769,14 +862,13 @@ func _shell_surface(lat: AnatomyLattice, hidden: int,
 			_plane_cells.append(i)
 		if outermost and xray and chained and chain_of[i] >= 0:
 			_sample_vis[chain_of[i]] = 1
-		if (int(neighbours[i]) & hidden) == 0:
+		if (int(neighbours[i]) & opened) == 0:
 			continue
 		listed[i] = 1
 		surface.append(i)
-		# A cell of a continuous structure — a bone, a cord, a vessel — is skinned
-		# over like any other, and its chain's tube is drawn inside the surface
-		# that closed over it. Which is why the tube shows exactly where the way in
-		# is open and nowhere else; see SpecimenMesh.
+		# A cell of a continuous structure — a bone, a cord, a vessel — has its
+		# chain's tube drawn wherever the way in to it is open, and nowhere else.
+		# The ring skin leaves those cells to their tubes; see SpecimenMesh.
 		if chained and chain_of[i] >= 0 and outermost:
 			_sample_vis[chain_of[i]] = 1
 
@@ -963,28 +1055,71 @@ func _draw() -> void:
 	_draw_cells(lat, grid)
 
 	var state: BodyState = creature.anatomy.state
-	# The supply overlays are things inside the animal, and they draw only when
-	# the inside is genuinely open to view — peeled, cut or thinned — never as
-	# lines through an intact wrap. The trunk runs lie against the spine under
-	# the muscle, so they wait for the deep interior; the limb runs sit just
-	# under the surface and show as soon as the skin is off.
-	var opened: bool = xray or slice_axis >= 0 \
-		or not (layer_shown(AnatomyLattice.SKIN) and layer_shown(AnatomyLattice.FAT))
-	var deep_open: bool = opened and (xray or slice_axis >= 0 \
-		or not (layer_shown(AnatomyLattice.MUSCLE) and layer_shown(AnatomyLattice.BONE)))
-	if show_vessels and opened:
+	# The two supply networks are overlays rather than layers of the depth stack,
+	# and that is a statement about what they are. Skin, fat, muscle and bone are
+	# things the animal is built out of, so they stand in front of each other and
+	# the one on top is the one that is seen. A vascular tree is not a layer of
+	# anything: it threads all four of them, and the question it answers — where
+	# does the blood go, what is still reaching this leg — is worth asking of an
+	# animal with its hide on. So a network draws wherever its own row is lit,
+	# over the top of whatever the stack has settled on, complete from the trunk
+	# to the branchlets, and the flesh goes on occluding itself underneath it.
+	if show_vessels:
 		_draw_network(grid, state.plan.vessels, state.vessels, COL_VESSEL, 3, 46.0, true,
-			VESSEL_OFFSET, deep_open)
+			VESSEL_OFFSET)
 		_draw_branches(lat, state.vessels, TissueForm.VESSELS, COL_VESSEL)
-	if show_nerves and opened:
-		_draw_network(grid, state.plan.nerves, state.nerves, COL_NERVE, 2, 150.0, false, 0.0,
-			deep_open)
+	if show_nerves:
+		_draw_network(grid, state.plan.nerves, state.nerves, COL_NERVE, 2, 150.0, false, 0.0)
 		_draw_branches(lat, state.nerves, TissueForm.NERVES, COL_NERVE)
-	if show_vessels and opened:
+	if show_vessels:
 		_draw_organ(grid, lat, BodyPlan.HEART, COL_VESSEL, "HEART", true)
-	if show_nerves and opened:
+	if show_nerves:
 		_draw_organ(grid, lat, BodyPlan.BRAIN, COL_NERVE, "BRAIN", false)
+	_draw_axes()
 	_draw_hover(lat)
+
+
+## A guide to how the specimen is lying: the animal's own three axes — down the
+## body, across it, and up out of its back — put through the very same projection
+## the flesh is, so the guide turns with the body rather than describing it.
+##
+## The foreshortening is left in, and it is the whole point of drawing this
+## rather than printing the two angles again: an arm pointing at the eye is a
+## stub, and a stub is the one reading that says the specimen is being looked at
+## down its own length. The letters are the lattice's own axes, so a cell named
+## in the readout below can be found on the body above.
+func _draw_axes() -> void:
+	if _af_o.is_empty() or _af_o[0] == null or _scale <= 0.0:
+		return
+	var frame: PackedVector2Array = _af_o[0]
+	if frame.is_empty():
+		return
+	# The middle of the trunk: one station of a bent animal is as good as
+	# another for saying which way it is turned, and the middle is the one that
+	# is never a neck or a tail tip.
+	var mid: int = frame.size() / 2
+	var at := Vector2(size.x - AXIS_INSET, size.y - AXIS_INSET)
+	draw_arc(at, AXIS_ARM + 4.0, 0.0, TAU, 22, Color(INK, 0.09), 0.7, true)
+	var arms: Array = [
+		[(_af_f[0] as PackedVector2Array)[mid], (_dp_f[0] as PackedFloat32Array)[mid], "X"],
+		[(_af_l[0] as PackedVector2Array)[mid], (_dp_l[0] as PackedFloat32Array)[mid], "Y"],
+		[_af_h, _dp_h, "Z"],
+	]
+	for arm in arms:
+		# Back out of the page scale: these are the unit axes already projected,
+		# so dividing by it leaves exactly how much of each one the eye can see.
+		var page: Vector2 = (arm[0] as Vector2) / _scale * AXIS_ARM
+		var toward: bool = float(arm[1]) >= 0.0
+		var ink := Color(INK, 0.55 if toward else 0.22)
+		draw_line(at, at + page, ink, 1.0, true)
+		var reach: float = page.length()
+		if _mono == null or reach < AXIS_FAINT * AXIS_ARM:
+			continue
+		var text: String = str(arm[2])
+		var wide: float = _mono.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 8).x
+		var tip: Vector2 = at + page * (1.0 + 6.0 / reach)
+		draw_string(_mono, tip - Vector2(wide * 0.5, -3.0), text,
+			HORIZONTAL_ALIGNMENT_LEFT, -1.0, 8, ink)
 
 
 func _draw_empty() -> void:
@@ -1053,7 +1188,7 @@ func _fine_enough() -> bool:
 ##     the surface out there is gone.
 func _draw_cells(lat: AnatomyLattice, grid: TissueGrid) -> void:
 	var faces: int = _mesh.count
-	var room: int = faces + _form.sample_total
+	var room: int = faces + _form.sample_total + _loose_shown()
 	if room == 0:
 		_shown_count = 0
 		return
@@ -1182,6 +1317,7 @@ func _draw_cells(lat: AnatomyLattice, grid: TissueGrid) -> void:
 		n += 1
 	var mesh_faces: int = n
 	n = _chain_pass(lat, n, true)
+	n = _loose_pass(lat, n, true)
 	_shown_count = n
 	if n == 0:
 		return
@@ -1282,6 +1418,13 @@ func _chain_pass(lat: AnatomyLattice, n: int, drawing: bool) -> int:
 		if not tissue_shown(t):
 			continue
 		var part: int = int(form.chain_part[c])
+		# A network's own trunks ride over the flesh rather than through the
+		# sort, because they are overlays and the whole of what an overlay means
+		# here is "in front of whatever the depth stack settled on". Lifted by
+		# the animal's own radius, so the lift cannot be confused with a depth on
+		# a bigger creature and the tubes still sort correctly among themselves.
+		var lift: float = _radius * 8.0 if t == AnatomyLattice.NERVE \
+			or t == AnatomyLattice.VESSEL else 0.0
 		# Ring chains sample their hoop in sectors the cells fill unevenly, so
 		# their join reaches further; and bone banks a base band by part — a
 		# girdle is denser stock than a rib, and both are one material along
@@ -1298,18 +1441,30 @@ func _chain_pass(lat: AnatomyLattice, n: int, drawing: bool) -> int:
 		var prev_deep: float = 0.0
 		var prev_r: float = 0.0
 		var prev_worn: float = 0.0
+		# Whether the sample before this one is still waiting to be joined to
+		# something. A chain with one sample in it — a lizard's whole femur is
+		# two cells — and the far side of a gap the carve left are both real
+		# pieces of the animal, and a rule that only draws what it can join to
+		# something else is a rule that leaves them off the slab.
+		var prev_lone: bool = false
 		for s in range(form.chain_from[c], form.chain_from[c + 1]):
-			if _sample_vis[s] == 0 \
-					or (sliced and form.s_canon[s][slice_axis] > plane):
-				prev = -1
-				continue
-			var gone_frac: float = form.sample_gone(lat, s)
-			if gone_frac >= TissueForm.BREAK_SHARE:
-				prev = -1
-				continue
+			# Four ways a sample is not on the specimen — nothing has opened the
+			# way in to it, the section plane has carved past it, the teeth have
+			# taken more than half of what it stands for, or its patch is not
+			# posed — and one thing to do about any of them: the run stops here,
+			# and whatever it was carrying is left as the piece it is.
 			var pk: int = int(form.s_patch[s])
-			if pk >= _af_o.size() or _af_o[pk] == null:
+			var gone_frac: float = form.sample_gone(lat, s)
+			var shown: bool = _sample_vis[s] != 0 \
+				and not (sliced and form.s_canon[s][slice_axis] > plane) \
+				and gone_frac < TissueForm.BREAK_SHARE \
+				and pk < _af_o.size() and _af_o[pk] != null
+			if not shown:
+				if prev_lone:
+					n = _tube_dot(prev_page, prev_r, t, base_band, prev_worn,
+						prev_deep + lift, form.s_rep[prev], n, drawing)
 				prev = -1
+				prev_lone = false
 				continue
 			var o: PackedVector2Array = _af_o[pk]
 			var st: float = clampf(form.s_station[s], 0.0, float(o.size() - 1))
@@ -1326,59 +1481,176 @@ func _chain_pass(lat: AnatomyLattice, n: int, drawing: bool) -> int:
 				+ (_dp_l[pk] as PackedFloat32Array)[ci] * side \
 				+ (_dp_f[pk] as PackedFloat32Array)[ci] * ahead + _dp_h * up
 			var r: float = maxf(form.s_radius[s] * _scale, floor_r)
-			if prev >= 0 and form.s_bucket[s] - prev_bucket <= tol:
+			var joined: bool = prev >= 0 and form.s_bucket[s] - prev_bucket <= tol
+			var span: float = page.distance_to(prev_page) if joined else 0.0
+			if joined and span > 0.0001:
+				var dir: Vector2 = (page - prev_page) / span
+				var nrm := Vector2(-dir.y, dir.x)
+				# Reached a little past both ends, so consecutive segments close
+				# their elbows on a curved run.
+				var ext: Vector2 = dir * minf(prev_r, span * 0.3)
+				var v: int = n * 4
+				_points[v] = prev_page - ext - nrm * prev_r
+				_points[v + 1] = prev_page - ext + nrm * prev_r
+				_points[v + 2] = page + ext + nrm * r
+				_points[v + 3] = page + ext - nrm * r
 				if drawing:
-					var dir: Vector2 = page - prev_page
-					var span: float = dir.length()
-					if span > 0.0001:
-						dir /= span
-						var nrm := Vector2(-dir.y, dir.x)
-						# Reached a little past both ends, so consecutive
-						# segments close their elbows on a curved run.
-						var ext: Vector2 = dir * minf(prev_r, span * 0.3)
-						var band: int = base_band
-						if t == AnatomyLattice.BONE:
-							band += TUBE_SEG if (form.s_bucket[s] & 1) == 0 \
-								else -TUBE_SEG
-						var ink: Color = _shade[t * SHADES \
-							+ clampi(band, 0, SHADES - 1)]
-						var wear: float = maxf(gone_frac, prev_worn)
-						if wear > 0.0:
-							ink = ink.lerp(TISSUE_WORN[t],
-								wear / TissueForm.BREAK_SHARE * 0.85)
-						var v: int = n * 4
-						_points[v] = prev_page - ext - nrm * prev_r
-						_points[v + 1] = prev_page - ext + nrm * prev_r
-						_points[v + 2] = page + ext + nrm * r
-						_points[v + 3] = page + ext - nrm * r
-						_colors[v] = ink
-						_colors[v + 1] = ink
-						_colors[v + 2] = ink
-						_colors[v + 3] = ink
-						_depths[n] = Vector2((deep + prev_deep) * 0.5, float(n))
-						_cell_page[n] = page
-						_cell_deep[n] = deep
-						_shown[n] = form.s_rep[s]
-						# Not a facet of the mesh: the hover marks the cell rather
-						# than outlining a polygon, and no hairline is drawn round
-						# a tube.
-						_shown_face[n] = -1
-						_shown_front[n] = 0
-						n += 1
-				else:
-					_cell_page[n] = page
-					_cell_deep[n] = deep
-					_shown[n] = form.s_rep[s]
-					_shown_face[n] = -1
-					_shown_front[n] = 0
-					n += 1
+					var band: int = base_band
+					if t == AnatomyLattice.BONE:
+						band += TUBE_SEG if (form.s_bucket[s] & 1) == 0 else -TUBE_SEG
+					var ink: Color = _tube_ink(t, band, maxf(gone_frac, prev_worn))
+					_colors[v] = ink
+					_colors[v + 1] = ink
+					_colors[v + 2] = ink
+					_colors[v + 3] = ink
+					_depths[n] = Vector2((deep + prev_deep) * 0.5 + lift, float(n))
+				_cell_page[n] = page
+				_cell_deep[n] = deep
+				_shown[n] = form.s_rep[s]
+				# Not a facet of the mesh: the hover marks the cell rather than
+				# outlining a polygon, and no hairline is drawn round a tube.
+				_shown_face[n] = -1
+				_shown_front[n] = 0
+				n += 1
+			elif prev_lone:
+				n = _tube_dot(prev_page, prev_r, t, base_band, prev_worn,
+					prev_deep + lift, form.s_rep[prev], n, drawing)
 			prev = s
+			prev_lone = not joined
 			prev_bucket = form.s_bucket[s]
 			prev_page = page
 			prev_deep = deep
 			prev_r = r
 			prev_worn = gone_frac
+		if prev_lone:
+			n = _tube_dot(prev_page, prev_r, t, base_band, prev_worn,
+				prev_deep + lift, form.s_rep[prev], n, drawing)
 	return n
+
+
+## What a stretch of a continuous structure is inked: the tissue's own shade at
+## the band its material sits in, dragged toward the spent shade by whatever the
+## teeth have taken out of it.
+##
+## The bank holds two sides per tissue — see `_bake_shades` — and a tube is
+## always its own near face, so it reads the front half of the pair. Without that
+## stride a bone came out inked as fat and a vessel as bone.
+func _tube_ink(t: int, band: int, wear: float) -> Color:
+	var ink: Color = _shade[(t * 2) * SHADES + clampi(band, 0, SHADES - 1)]
+	if wear <= 0.0:
+		return ink
+	return ink.lerp(TISSUE_WORN[t], wear / TissueForm.BREAK_SHARE * 0.85)
+
+
+## A sample of a chain that no segment reached: a one-sample structure, or the
+## last piece before a gap. Laid as the block of solid it stands for, so a
+## skeleton the lattice only has scraps of is still drawn as those scraps rather
+## than as nothing at all.
+func _tube_dot(at: Vector2, r: float, t: int, band: int, wear: float, deep: float,
+		rep: int, n: int, drawing: bool) -> int:
+	var v: int = n * 4
+	_points[v] = at + Vector2(-r, -r)
+	_points[v + 1] = at + Vector2(r, -r)
+	_points[v + 2] = at + Vector2(r, r)
+	_points[v + 3] = at + Vector2(-r, r)
+	if drawing:
+		# Asked for here rather than by the caller: the shade bank is baked by the
+		# drawing pass, and a placement pass has no business reading it.
+		var ink: Color = _tube_ink(t, band, wear)
+		_colors[v] = ink
+		_colors[v + 1] = ink
+		_colors[v + 2] = ink
+		_colors[v + 3] = ink
+		_depths[n] = Vector2(deep, float(n))
+	_cell_page[n] = at
+	_cell_deep[n] = deep
+	_shown[n] = rep
+	_shown_face[n] = -1
+	_shown_front[n] = 0
+	return n + 1
+
+
+## The flesh the ring skin could not make a surface of, drawn cell by cell.
+##
+## A ring needs most of its sectors before it can be closed into a hoop, and a
+## place where the animal is two cells wide has not got them — a tail's last
+## slice, the fat on a lean lizard, a stray shred of muscle beside a girdle. The
+## old rule dropped those cells, and dropping them is why a tissue on its own
+## came up full of holes: what was missing from the picture was not missing from
+## the animal.
+##
+## So whatever is left over is drawn as what it is, a cell, at the size a cell
+## is on this page. It carries its tissue's ink and its region's wash like any
+## facet, it sorts with them, and it answers the pointer like them — the only
+## difference is that it is a box rather than a piece of a surface, which is the
+## truth about a place too thin to have a surface.
+func _loose_pass(lat: AnatomyLattice, n: int, drawing: bool) -> int:
+	var cells: PackedInt32Array = _mesh.loose
+	var total: int = cells.size()
+	if total == 0:
+		return n
+	# A body can in principle be nearly all fringe — a filter that leaves one
+	# scattered tissue on a big animal — so the pass is bounded and thins itself
+	# rather than growing without limit. It is the fringe: thinning it drops
+	# detail from the places that had least of it to begin with.
+	var step: int = _loose_step()
+	var half: float = maxf(AnatomyLattice.CELL * _scale * 0.5, LOOSE_MIN)
+	var kinds: PackedByteArray = lat.kind
+	var regions: PackedByteArray = lat.region
+	var i: int = 0
+	while i < total:
+		var cell: int = cells[i]
+		i += step
+		if lat.gone[cell] != 0:
+			continue
+		var at: Vector3 = _cell_at(lat, cell)
+		var mid := Vector2(at.x, at.y)
+		# The corners go down either way: the pointer is tested against the very
+		# quad that was laid, and a hover arriving before the specimen has been
+		# painted has to be tested against something real too.
+		var v: int = n * 4
+		_points[v] = mid + Vector2(-half, -half)
+		_points[v + 1] = mid + Vector2(half, -half)
+		_points[v + 2] = mid + Vector2(half, half)
+		_points[v + 3] = mid + Vector2(-half, half)
+		if drawing:
+			var t: int = kinds[cell]
+			var ink: Color = _shade[(t * 2) * SHADES + LOOSE_BAND]
+			var reg: int = regions[cell]
+			if _wash_amt[reg] > 0.0:
+				ink = ink.lerp(_wash_col[reg], _wash_amt[reg])
+			if xray:
+				ink.a = XRAY_ALPHA
+			_colors[v] = ink
+			_colors[v + 1] = ink
+			_colors[v + 2] = ink
+			_colors[v + 3] = ink
+			_depths[n] = Vector2(at.z, float(n))
+		_reach_over(mid, _points[v], _points[v + 1], _points[v + 2], _points[v + 3])
+		_cell_page[n] = mid
+		_cell_deep[n] = at.z
+		_shown[n] = cell
+		# Not a facet of the mesh: the hover marks the cell itself, and no
+		# hairline is drawn round a box.
+		_shown_face[n] = -1
+		_shown_front[n] = 0
+		n += 1
+	return n
+
+
+## Every how-many-th loose cell the pass keeps, and how many that leaves — which
+## is what the buffers have to have room for. Both answers come off the one
+## division, so the count and the walk can never disagree.
+func _loose_step() -> int:
+	return maxi(1, int(ceil(float(_mesh.loose.size()) / float(LOOSE_MOST))))
+
+
+func _loose_shown() -> int:
+	var total: int = _mesh.loose.size()
+	if total == 0:
+		return 0
+	var step: int = _loose_step()
+	return (total + step - 1) / step
 
 
 ## Places every facet on the page without drawing it, for a hover test arriving
@@ -1388,7 +1660,7 @@ func _chain_pass(lat: AnatomyLattice, n: int, drawing: bool) -> int:
 ## in the ordinary way of things.
 func _place_marks(lat: AnatomyLattice) -> void:
 	var faces: int = _mesh.count
-	var room: int = faces + _form.sample_total
+	var room: int = faces + _form.sample_total + _loose_shown()
 	if _cell_page.size() != room:
 		_cell_page.resize(room)
 		_cell_deep.resize(room)
@@ -1422,6 +1694,7 @@ func _place_marks(lat: AnatomyLattice) -> void:
 		_shown_front[n] = 1
 		n += 1
 	n = _chain_pass(lat, n, false)
+	n = _loose_pass(lat, n, false)
 	_shown_count = n
 	_index_marks()
 
@@ -1466,8 +1739,11 @@ func _index_marks() -> void:
 func _bake_shades() -> void:
 	# A dead animal's whole palette is drained toward its own spent shades, and
 	# that is the only thing in the bank that is about the creature rather than
-	# about the light — so it is the only thing the key has to carry.
-	var dead: bool = is_instance_valid(creature) and not creature.alive
+	# about the light — so it is the only thing the key has to carry. Read off
+	# the heart rather than off a flag: the specimen and the panel beside it are
+	# describing one body and there is one place either of them asks.
+	var dead: bool = is_instance_valid(creature) and creature.anatomy != null \
+		and creature.anatomy.state.arrested
 	var key: int = hash([dead])
 	var want: int = AnatomyLattice.TISSUES * 2 * SHADES
 	if key == _shade_key and _shade.size() == want:
@@ -1479,15 +1755,27 @@ func _bake_shades() -> void:
 		var base: Color = TISSUE_INK[t]
 		if dead:
 			base = base.lerp(TISSUE_WORN[t], DEAD_DRAIN)
+		var shade: Color = _scaled(base, FACET_FLOOR)
+		var lit: Color = _scaled(base, FACET_FLOOR + FACET_GAIN)
+		# A tissue inked at the black end of the page cannot be lit by scaling —
+		# nothing times a gain is still nothing — so it is carried toward a sheen
+		# instead. Which is the whole of how a black hide is a solid with planes
+		# on it rather than a hole cut in the paper. Every other tissue lands on
+		# exactly the ramp it always had: the lerp between these two *is* the
+		# scale, written as its own two ends.
+		if lit.get_luminance() < SHEEN_UNDER:
+			lit = base.lerp(SHEEN, SHEEN_LIFT)
 		for side in 2:
 			# A facet turned away from the eye is the far wall of a crater or the
 			# inside of an opened body, and is seen in that flesh's own shadow.
 			var dim: float = FACET_BACK if side == 1 else 1.0
 			for k in SHADES:
 				var lam: float = (float(k) + 0.5) / float(SHADES)
-				var f: float = (FACET_FLOOR + FACET_GAIN * lam) * dim
-				_shade[(t * 2 + side) * SHADES + k] = Color(
-					minf(base.r * f, 1.0), minf(base.g * f, 1.0), minf(base.b * f, 1.0))
+				_shade[(t * 2 + side) * SHADES + k] = _scaled(shade.lerp(lit, lam), dim)
+
+
+static func _scaled(ink: Color, by: float) -> Color:
+	return Color(minf(ink.r * by, 1.0), minf(ink.g * by, 1.0), minf(ink.b * by, 1.0))
 
 
 ## What each region of the animal is going through, as one colour and one amount
@@ -1557,15 +1845,16 @@ func _layer_full(grid: TissueGrid, p: TissueGrid.Patch, cell: int, layer: int) -
 
 ## One supply network, laid along the ledger cells it actually passes through.
 ## Width and alpha carry what *arrives* rather than what survives locally, so a
-## sound run still fades out behind a cut upstream of it. `deep_open` is whether
-## the trunk's own interior is on view — the body runs lie under the muscle
-## against the spine, and are skipped while that cover is intact.
+## sound run still fades out behind a cut upstream of it.
+##
+## Every run of the tree is drawn, trunk included. A network is only a network
+## because it is joined up: a limb's run drawn without the body run that feeds it
+## is four strokes lying near an animal, and the reading it exists to give — this
+## leg is behind that cut — cannot be seen in it at all.
 func _draw_network(grid: TissueGrid, runs: Array[BodyPlan.Conduit],
 		network: AnatomyNetwork, tint: Color, pulses: int, speed: float,
-		beat: bool, offset: float, deep_open: bool) -> void:
+		beat: bool, offset: float) -> void:
 	for run in runs:
-		if not deep_open and run.patch_key == TissueGrid.BODY_KEY:
-			continue
 		var p: TissueGrid.Patch = grid.patch(run.patch_key)
 		if p == null or not p.live or run.cells.size() < 2:
 			continue
@@ -1585,7 +1874,7 @@ func _draw_network(grid: TissueGrid, runs: Array[BodyPlan.Conduit],
 
 
 ## The run's cells in panel space, ordered so it flows away from whatever feeds
-## it.
+## it, started at the point where it actually meets that feeder, and smoothed.
 func _gather_run(grid: TissueGrid, runs: Array[BodyPlan.Conduit],
 		run: BodyPlan.Conduit, offset: float) -> void:
 	var p: TissueGrid.Patch = grid.patch(run.patch_key)
@@ -1602,17 +1891,83 @@ func _gather_run(grid: TissueGrid, runs: Array[BodyPlan.Conduit],
 			var span: Vector2 = _run[mini(i + 1, count - 1)] - _run[maxi(i - 1, 0)]
 			if span.length_squared() > 0.000001:
 				_run[i] += Vector2(-span.y, span.x).normalized() * offset
-	if run.parent < 0:
-		return
-	var upstream: BodyPlan.Conduit = runs[run.parent]
+	if run.parent >= 0:
+		_join_upstream(grid, runs[run.parent])
+	_smooth_run()
+
+
+## Turns this run to flow away from the one that feeds it, and starts it *on*
+## that run.
+##
+## The junction is the nearest point of the feeder rather than wherever its own
+## cell list happens to end, because the two runs are laid through different
+## patches and a limb's artery leaves the trunk at the shoulder rather than at
+## the tail. Without this the tree is drawn as a set of separate strokes with
+## gaps between them, and a gap in a supply network is the one thing on this
+## panel that already means something else.
+func _join_upstream(grid: TissueGrid, upstream: BodyPlan.Conduit) -> void:
 	var feeder: TissueGrid.Patch = grid.patch(upstream.patch_key)
-	if feeder == null or upstream.cells.is_empty():
+	if feeder == null or not feeder.live or upstream.cells.is_empty():
 		return
-	var joint: Vector2 = to_panel(feeder.centre_of(upstream.cells[upstream.cells.size() - 1]))
-	if joint.distance_squared_to(_run[count - 1]) >= joint.distance_squared_to(_run[0]):
+	var last: int = _run.size() - 1
+	var head: Vector2 = _run[0]
+	var tail: Vector2 = _run[last]
+	var joint: Vector2 = head
+	var joint_gone: int = 0
+	var nearest: float = INF
+	for cell in upstream.cells:
+		var at: Vector2 = project(feeder.centre_of(cell), feeder.height_of(cell))
+		var span: float = minf(at.distance_squared_to(head), at.distance_squared_to(tail))
+		if span >= nearest:
+			continue
+		nearest = span
+		joint = at
+		joint_gone = feeder.gone[cell]
+	if joint.distance_squared_to(tail) < joint.distance_squared_to(head):
+		_run.reverse()
+		_run_gone.reverse()
+	_run.insert(0, joint)
+	_run_gone.insert(0, joint_gone)
+
+
+## The same run as a curve.
+##
+## A conduit is drawn between the middles of the ledger cells it threads, and
+## those are a staircase: a run of right angles at the resolution of the grid,
+## which reads as a picture of the grid rather than of a vessel. Catmull-Rom
+## through the very same points says the same thing with the corners taken off —
+## no point is moved, none is invented between two that are not neighbours, and
+## the pulses ride the smoothed path because after this it is the only path.
+func _smooth_run() -> void:
+	var n: int = _run.size()
+	if n < 3:
 		return
-	_run.reverse()
-	_run_gone.reverse()
+	_curve.resize(0)
+	_curve_gone.resize(0)
+	for i in range(n - 1):
+		var p0: Vector2 = _run[maxi(i - 1, 0)]
+		var p1: Vector2 = _run[i]
+		var p2: Vector2 = _run[i + 1]
+		var p3: Vector2 = _run[mini(i + 2, n - 1)]
+		# A span either end of which the teeth have been through is a broken
+		# span, however smooth the line across it.
+		var gone: int = 1 if _run_gone[i] != 0 or _run_gone[i + 1] != 0 else 0
+		for k in SMOOTH_STEPS:
+			_curve.append(_spline(p0, p1, p2, p3, float(k) / float(SMOOTH_STEPS)))
+			_curve_gone.append(gone)
+	_curve.append(_run[n - 1])
+	_curve_gone.append(_run_gone[n - 1])
+	_run = _curve.duplicate()
+	_run_gone = _curve_gone.duplicate()
+
+
+## One point of a Catmull-Rom spline through p1 and p2.
+static func _spline(p0: Vector2, p1: Vector2, p2: Vector2, p3: Vector2, t: float) -> Vector2:
+	var t2: float = t * t
+	var t3: float = t2 * t
+	return 0.5 * ((2.0 * p1) + (p2 - p0) * t
+		+ (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+		+ (3.0 * p1 - 3.0 * p2 + p3 - p0) * t3)
 
 
 ## What the network is carrying, moving. Nerves fire as quick dashes and blood
@@ -1678,50 +2033,78 @@ func _depth_of(runs: Array[BodyPlan.Conduit], run: BodyPlan.Conduit) -> int:
 ## delivery term fades a starved or silenced region's whole tree.
 ##
 ## Every branch vertex is a lattice cell, posed through the same affine as the
-## marks — the tree bends with the flesh it supplies, and a vertex whose cell
-## has been eaten breaks the branch there. A vertex whose cell's tissue is
-## filtered off breaks it the same way: a branch runs inside flesh, and where
-## the flesh has been lifted away the branch is not left hanging in the air.
+## marks, so the tree bends with the flesh it supplies. Two rules keep it a tree
+## rather than a scatter of twigs, and both are about what a *branch* is:
+##
+##   * It is drawn from where it starts, and it stops where the teeth have been
+##     through it. A vertex whose cell is gone ends the branch — it does not skip
+##     the hole and carry on, because what would carry on is a piece of vessel
+##     joined to nothing.
+##   * It is only drawn if the branch it grew out of was, all the way back to a
+##     named run. Which is the same statement one level up, and between them
+##     nothing on the specimen is a floating segment.
+##
+## The tissue filters are not among the rules. These are overlays: a supply tree
+## is a thing threading the animal rather than a layer of it, and asking to see
+## the vessels of a body with its hide on is a fair question.
 func _draw_branches(lat: AnatomyLattice, network: AnatomyNetwork, net: int,
 		tint: Color) -> void:
 	var paths: Array = _form.branches[net]
 	if paths.is_empty():
 		return
 	var owner: PackedInt32Array = _form.branch_region[net]
+	var stem: PackedInt32Array = _form.branch_parent[net]
 	var field: PackedFloat32Array = _form.density[net]
-	if field.size() < BodyPlan.REGIONS:
+	if field.size() < BodyPlan.REGIONS or stem.size() != paths.size():
 		return
-	var hidden: int = 0
-	for t in AnatomyLattice.TISSUES:
-		if not tissue_shown(t):
-			hidden |= 1 << t
 	var sliced: bool = slice_axis >= 0
 	var plane: float = slice_plane()
+	var drawn := PackedByteArray()
+	drawn.resize(paths.size())
 	for reg in BodyPlan.REGIONS:
 		_branch_lines.resize(0)
 		for b in paths.size():
-			if owner[b] != reg:
+			if owner[b] != reg or (stem[b] >= 0 and drawn[stem[b]] == 0):
 				continue
 			var path: PackedInt32Array = paths[b]
-			var live: bool = false
-			var prev := Vector2.ZERO
+			_path.resize(0)
 			for idx in path:
-				if lat.gone[idx] != 0 or (hidden & (1 << int(lat.kind[idx]))) != 0 \
+				if lat.gone[idx] != 0 \
 						or (sliced and lat.pos[idx][slice_axis] > plane):
-					live = false
-					continue
-				var at3: Vector3 = _cell_at(lat, idx)
-				var at := Vector2(at3.x, at3.y)
-				if live:
-					_branch_lines.append(prev)
-					_branch_lines.append(at)
-				prev = at
-				live = true
+					break
+				var at: Vector3 = _cell_at(lat, idx)
+				_path.append(Vector2(at.x, at.y))
+			if _path.size() < 2:
+				continue
+			drawn[b] = 1
+			_smooth_branch()
 		if _branch_lines.size() < 2:
 			continue
 		var reach: float = clampf(network.delivery[reg], 0.0, 1.0)
-		var alpha: float = (0.08 + 0.34 * reach) * (0.45 + 0.55 * field[reg])
+		var alpha: float = (0.10 + 0.42 * reach) * (0.45 + 0.55 * field[reg])
 		draw_multiline(_branch_lines, Color(tint, alpha), BRANCH_WIDTH, true)
+
+
+## The branch standing in `_path`, as a curve, into the multiline buffer. Cell to
+## cell over a lattice is a staircase of right angles — see `_smooth_run`, which
+## does the same thing to the named runs and for the same reason.
+func _smooth_branch() -> void:
+	var n: int = _path.size()
+	if n < 3:
+		_branch_lines.append(_path[0])
+		_branch_lines.append(_path[n - 1])
+		return
+	var at: Vector2 = _path[0]
+	for i in range(n - 1):
+		var p0: Vector2 = _path[maxi(i - 1, 0)]
+		var p1: Vector2 = _path[i]
+		var p2: Vector2 = _path[i + 1]
+		var p3: Vector2 = _path[mini(i + 2, n - 1)]
+		for k in range(1, SMOOTH_STEPS + 1):
+			var to: Vector2 = _spline(p0, p1, p2, p3, float(k) / float(SMOOTH_STEPS))
+			_branch_lines.append(at)
+			_branch_lines.append(to)
+			at = to
 
 
 # ---------------------------------------------------------------- organs ----
@@ -1749,7 +2132,10 @@ func _draw_organ(grid: TissueGrid, lat: AnatomyLattice, which: int, tint: Color,
 	var health: float = grid.organ(which)
 
 	var radius: float = 7.0
-	if beat:
+	# A heart beats while it is beating. The ring on a stopped one holds still —
+	# read off the circulation rather than off anything about the creature, so it
+	# is the same reading the panel prints STOPPED from.
+	if beat and creature.anatomy.state.circulation > BodyState.COLLAPSE:
 		var thump: float = 0.5 - 0.5 * cos(TAU * fposmod(_clock * HEART_RATE, 1.0))
 		radius = 6.0 * (1.0 + 0.16 * thump)
 	draw_circle(at, radius, Color(PAPER, 0.92))
@@ -1798,6 +2184,16 @@ func _draw_hover(lat: AnatomyLattice) -> void:
 ## happening is decided by whether a button is down and nowhere else.
 func _gui_input(event: InputEvent) -> void:
 	var click := event as InputEventMouseButton
+	# The wheel over the stage leans in on the specimen. Taken here rather than
+	# on the drawer, so it is the thing under the pointer that answers — and
+	# accepted either way, because a wheel that scrolls the panel out from under
+	# the animal while the animal is being read is the wrong thing entirely.
+	if click != null and click.pressed and (click.button_index == MOUSE_BUTTON_WHEEL_UP
+			or click.button_index == MOUSE_BUTTON_WHEEL_DOWN):
+		set_zoom(zoom * (ZOOM_STEP if click.button_index == MOUSE_BUTTON_WHEEL_UP
+			else 1.0 / ZOOM_STEP))
+		accept_event()
+		return
 	if click != null and click.button_index == MOUSE_BUTTON_LEFT:
 		if click.double_click:
 			reset_orbit()

@@ -713,12 +713,15 @@ func _on_cell_hovered(readout: String, alarm: bool) -> void:
 func _orbit_word() -> String:
 	if view == null:
 		return ""
-	if not view.orbited() and absf(view.roll) < 0.017:
-		return "DRAG TO TURN THE SPECIMEN"
+	var near: bool = not is_equal_approx(view.zoom, 1.0)
+	if not view.orbited() and absf(view.roll) < 0.017 and not near:
+		return "DRAG TO TURN THE SPECIMEN · WHEEL TO ZOOM"
 	var word: String = "SPIN %d° · TILT %+d°" % [
 		int(round(rad_to_deg(view.spin))), int(round(rad_to_deg(view.tilt)))]
 	if absf(view.roll) >= 0.017:
 		word += " · ROLL %+d°" % int(round(rad_to_deg(view.roll)))
+	if near:
+		word += " · %.1f×" % view.zoom
 	return word + " · DOUBLE-CLICK RESETS"
 
 

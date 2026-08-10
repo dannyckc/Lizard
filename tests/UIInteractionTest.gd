@@ -254,6 +254,8 @@ func _check_anatomy(hud: EvolutionHUD) -> void:
 			str(main.creature.anatomy.tissue.lattice.built_total)),
 		"the stage note did not count the creature's own cell lattice: " + panel._note.text)
 
+	_check_death(panel, target)
+
 	var f3 := InputEventKey.new()
 	f3.keycode = KEY_F3
 	f3.pressed = true
@@ -305,6 +307,61 @@ func _check_composition(panel: AnatomyPanel, each: Creature) -> void:
 		"an organ was still quoting a percentage: %s / %s" % [brain, heart])
 	_check(is_equal_approx(panel._vitals[AnatomyPanel.HEART_VITAL]["meter"].values[0],
 		each.anatomy.state.circulation), "the heart bar was not what the heart delivers")
+
+
+## The drawer on an animal that has just died.
+##
+## Everything here is the same six readouts the panel gives a living body, and
+## the point is that none of them is asking whether the creature is dead: the
+## heart has stopped, so nothing is arriving anywhere, so the brain is producing
+## nothing and both networks are carrying nothing. What is checked is that the
+## chain runs — and that it runs *now*, in the frame the animal stopped in,
+## rather than easing into place over the following second while the panel says
+## the corpse is fine.
+func _check_death(panel: AnatomyPanel, each: Creature) -> void:
+	panel.select_specimen(1)
+	# The body in the habitat is placed as a carcass, so it is put back on its
+	# feet first — which is worth checking in its own right, because a heart that
+	# stopped and cannot start again would leave every test that borrows this
+	# body running on a corpse.
+	each.alive = true
+	each.anatomy.update(each)
+	panel.refresh()
+	var beating: String = panel._vitals[AnatomyPanel.HEART_VITAL]["word"].text
+	_check(not each.anatomy.state.arrested and beating != "STOPPED",
+		"a body put back on its feet did not start beating again: " + beating)
+
+	each.collapse()
+	panel.refresh()
+	var state: BodyState = each.anatomy.state
+	_check(state.arrested, "killing the animal did not stop its heart")
+	_check(is_zero_approx(state.circulation) and is_zero_approx(state.consciousness),
+		"a stopped heart was still circulating (%.3f) or thinking (%.3f)"
+			% [state.circulation, state.consciousness])
+	_check(panel._status.text == "Dead",
+		"the drawer did not say the specimen had died: " + panel._status.text)
+	_check(panel._vitals[AnatomyPanel.HEART_VITAL]["word"].text == "STOPPED",
+		"a dead animal's heart did not read as stopped: "
+			+ panel._vitals[AnatomyPanel.HEART_VITAL]["word"].text)
+	_check(panel._vitals[AnatomyPanel.BRAIN_VITAL]["word"].text == "SILENT",
+		"a dead animal's brain did not read as silent: "
+			+ panel._vitals[AnatomyPanel.BRAIN_VITAL]["word"].text)
+	_check(panel._rows[AnatomyPanel.NERVES_ROW]["value"].text == "SILENT"
+		and panel._rows[AnatomyPanel.VESSELS_ROW]["value"].text == "NO FLOW",
+		"a dead animal's networks still read as running: %s / %s" % [
+			panel._rows[AnatomyPanel.NERVES_ROW]["value"].text,
+			panel._rows[AnatomyPanel.VESSELS_ROW]["value"].text])
+	# The bars go with the words. A word without the length beside it moving is a
+	# panel with two ideas of the same body in it.
+	_check(is_zero_approx(panel._vitals[AnatomyPanel.HEART_VITAL]["meter"].values[0])
+		and is_zero_approx(panel._vitals[AnatomyPanel.BRAIN_VITAL]["meter"].values[0]),
+		"a dead animal's organ bars were still standing up")
+	# Nothing about the tissue changed: it is the same body it was a tick ago, and
+	# that is exactly why the readouts had to come from somewhere else.
+	_check(panel._rows[AnatomyPanel.VESSELS_ROW]["meter"].values[0] == 0.0,
+		"the vessels were delivering to a corpse")
+	panel.select_specimen(0)
+	panel.refresh()
 
 
 ## Turning the specimen. It is a camera and nothing else, so what is worth checking
@@ -362,11 +419,72 @@ func _check_orbit(panel: AnatomyPanel, each: Creature) -> void:
 		"the stage did not report where the eye had been moved to: " + panel._orbit.text)
 
 	_check_trackball(view)
+	_check_zoom(panel, each)
 
 	view.reset_orbit()
 	_check(not view.orbited() and is_zero_approx(view.spin) and is_zero_approx(view.roll),
 		"resetting the view did not put the eye back over the animal's back")
+	_check(is_equal_approx(view.zoom, 1.0),
+		"resetting the view left the specimen leaned in at %.2fx" % view.zoom)
 	_settled(view)
+
+
+## The wheel. It leans the eye in on the specimen, which is a different thing
+## from turning it: the body gets bigger and stays where it is, and the drag that
+## turns it is untouched by how far in it has been leaned.
+func _check_zoom(panel: AnatomyPanel, each: Creature) -> void:
+	var view: AnatomyView = panel.view
+	view.reset_orbit()
+	_settled(view)
+	var rested: float = view._scale
+	var ball: float = view.ball_radius()
+	# How far the animal's own snout stands from the middle of the stage: the
+	# reading that says the specimen was drawn larger rather than merely redrawn.
+	var out: float = (view.to_panel(each.body.head.pos) - view.size * 0.5).length()
+
+	_wheel(view, MOUSE_BUTTON_WHEEL_UP, view.size * 0.5)
+	_check(view.zoom > 1.0, "the wheel over the specimen did not lean the eye in")
+	# ...and off the stage, over the readouts, where it has to do the same thing
+	# or the player has to aim at the animal to zoom the animal.
+	var leaned: float = view.zoom
+	var elsewhere := InputEventMouseButton.new()
+	elsewhere.button_index = MOUSE_BUTTON_WHEEL_UP
+	elsewhere.pressed = true
+	elsewhere.position = Vector2(panel.size.x * 0.5, panel.size.y - 12.0)
+	panel._gui_input(elsewhere)
+	_check(view.zoom > leaned, "the wheel over the drawer's readouts zoomed nothing")
+	_check(view._scale > rested,
+		"leaning in did not draw the specimen any larger: %f then %f" % [rested, view._scale])
+	_check(is_equal_approx(view.ball_radius(), ball),
+		"leaning in moved the ball the specimen is turned by")
+	_check((view.to_panel(each.body.head.pos) - view.size * 0.5).length() > out,
+		"leaning in left the animal's own places exactly where they stood")
+	panel.refresh()
+	_check(panel._orbit.text.contains("x") or panel._orbit.text.contains("×"),
+		"the stage did not say how far the eye had been leaned in: " + panel._orbit.text)
+
+	# All the way out and all the way in: the wheel stops somewhere on both sides
+	# rather than shrinking the animal to a speck or losing it off the stage.
+	for _turn in 40:
+		_wheel(view, MOUSE_BUTTON_WHEEL_DOWN, view.size * 0.5)
+	_check(view.zoom >= AnatomyView.ZOOM_MIN - 0.001 and view.zoom <= 1.0,
+		"the wheel wound the specimen out past its own stop: %.2f" % view.zoom)
+	for _turn in 80:
+		_wheel(view, MOUSE_BUTTON_WHEEL_UP, view.size * 0.5)
+	_check(view.zoom <= AnatomyView.ZOOM_MAX + 0.001,
+		"the wheel wound the specimen in past its own stop: %.2f" % view.zoom)
+	view.reset_orbit()
+	_settled(view)
+	_check(is_equal_approx(view._scale, rested),
+		"the specimen did not come back to its own fit: %f then %f" % [rested, view._scale])
+
+
+func _wheel(view: AnatomyView, button: int, at: Vector2) -> void:
+	var turn := InputEventMouseButton.new()
+	turn.button_index = button
+	turn.pressed = true
+	turn.position = at
+	view._gui_input(turn)
 
 
 ## The drag itself. The specimen is held inside a sphere and the pointer takes hold

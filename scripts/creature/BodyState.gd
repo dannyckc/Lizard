@@ -149,6 +149,20 @@ var consciousness: float = 1.0
 ## The heart's output, times how much blood there is left to move.
 var circulation: float = 1.0
 var blood: float = 1.0
+## Whether the heart has stopped.
+##
+## Not a death flag for the readouts to consult, and pointedly not consulted by
+## any of them: it is the state the circulation is *solved from*, and everything
+## a stopped heart means — no blood arriving anywhere, tissue going pale, the
+## brain out, both supply networks silent — is then worked out by the same lines
+## that work out a wound. Which is why the panel needs no special case for a
+## corpse: it asks the same questions and the answers have changed.
+##
+## The one thing here that cannot be read off the tissue. An animal that has
+## stopped is made of exactly the cells it was made of a moment earlier; the
+## difference is that nothing is working them any more, and only the creature
+## knows that.
+var arrested: bool = false
 ## Rate blood is currently being lost at, for the HUD and the tests.
 var bleeding: float = 0.0
 ## What fraction of its top speed the body can still produce, and how accurately
@@ -211,6 +225,7 @@ func reset() -> void:
 	coordination = 1.0
 	support = BodyPlan.LIMB_REGIONS.size()
 	collapsed = false
+	arrested = false
 	for region in regions:
 		region.muscle = 1.0
 		region.control = 1.0
@@ -227,6 +242,23 @@ func reset() -> void:
 	actuators.fill(1.0)
 	_fibre.fill(1.0)
 	_revision = -1
+
+
+## The heart stops, now.
+##
+## The next `update` would work this out on its own — it is handed the same fact
+## every tick — but the animal stops between two of them, and a drawer open on it
+## would spend that tick describing a body with a pulse. So the moment of death
+## says so itself, and both networks are pushed through with nothing behind them
+## so that everything reading off this agrees in the same frame rather than in
+## the next one.
+func arrest() -> void:
+	arrested = true
+	circulation = 0.0
+	consciousness = 0.0
+	collapsed = true
+	vessels.propagate(0.0)
+	nerves.propagate(0.0)
 
 
 func region(index: int) -> Region:
@@ -277,9 +309,15 @@ func axial_at(t: float) -> Region:
 ## already know whether it is being supplied. Then, and only then, the functional
 ## numbers the animator reads. Nothing in that chain runs backwards, which is why
 ## none of it has to iterate to a fixed point.
-func update(tissue: TissueGrid, delta: float) -> void:
+##
+## `beating` is whether the animal is still driving its own heart. It is the only
+## input here that is not a piece of tissue, and it enters at the top of that
+## chain rather than beside it — so death is not a state this file switches into,
+## it is the heart's output being nothing and every reading below it following.
+func update(tissue: TissueGrid, delta: float, beating: bool = true) -> void:
 	if plan == null or tissue == null:
 		return
+	arrested = not beating
 	if tissue.revision != _revision:
 		_revision = tissue.revision
 		_read_structure(tissue)
@@ -342,7 +380,12 @@ func _advance_blood(tissue: TissueGrid, delta: float) -> void:
 		blood = maxf(blood - bleeding * delta, 0.0)
 	else:
 		blood = minf(blood + CLOT_RECOVERY * delta, 1.0)
-	circulation = tissue.organ(BodyPlan.HEART) * blood
+	# What the heart is putting out: how much of the organ is left while the
+	# animal is still driving it, and nothing at all once it has stopped. Times
+	# how much blood there is to move — so a body that has bled out and a body
+	# whose heart has stopped arrive at the same circulation by different roads,
+	# and neither of them is a case anybody wrote down.
+	circulation = (0.0 if arrested else tissue.organ(BodyPlan.HEART)) * blood
 
 
 ## Blood reaching each region, and how far the tissue there has followed it.
@@ -369,7 +412,13 @@ func _advance_supply(delta: float) -> void:
 	var head: Region = regions[BodyPlan.HEAD]
 	var supplied: float = clampf(
 		(head.vitality - FAINT_FLOOR) / maxf(1.0 - FAINT_FLOOR, 0.0001), 0.0, 1.0)
-	consciousness = _brain * supplied
+	# A brain with no circulation at all is not producing anything, and there is
+	# nothing here for it to ease toward: the supply it runs on has not fallen
+	# low, it has stopped. So the head's own tissue goes on cooling at its own
+	# rate — which is what makes a starved head and a stopped heart look
+	# different on the specimen — while what the brain *delivers* is nil at once,
+	# and the nerve network below reads that and goes quiet with it.
+	consciousness = 0.0 if arrested else _brain * supplied
 	collapsed = consciousness <= COLLAPSE
 
 

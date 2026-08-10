@@ -110,6 +110,12 @@ var sample_of: PackedInt32Array = PackedInt32Array()
 ## and its region says whose delivery it fades with.
 var branches: Array = [[], []]
 var branch_region: Array = [PackedInt32Array(), PackedInt32Array()]
+## Which branch each one grew out of, or -1 where it grew straight off a named
+## run. A tree is only a tree because every branch of it is somebody's branch,
+## and a drawing that leaves out a stem has to leave out everything hanging from
+## it or it is drawing twigs floating in flesh. Parents always come first, so one
+## pass in growth order is enough to answer it.
+var branch_parent: Array = [PackedInt32Array(), PackedInt32Array()]
 ## How much supply each region's tissue asks for, 0..1 against the neediest
 ## region of this animal — the density field, one number per region per network.
 var density: Array = [PackedFloat32Array(), PackedFloat32Array()]
@@ -382,10 +388,13 @@ func _build_supply(lat: AnatomyLattice) -> void:
 	branches = [[], []]
 	var region_n := PackedInt32Array()
 	var region_v := PackedInt32Array()
+	var stem_n := PackedInt32Array()
+	var stem_v := PackedInt32Array()
 	for reg in BodyPlan.REGIONS:
-		_grow_region(lat, branches[NERVES], region_n, reg, seeds_n[reg], want_n[reg])
-		_grow_region(lat, branches[VESSELS], region_v, reg, seeds_v[reg], want_v[reg])
+		_grow_region(lat, branches[NERVES], region_n, stem_n, reg, seeds_n[reg], want_n[reg])
+		_grow_region(lat, branches[VESSELS], region_v, stem_v, reg, seeds_v[reg], want_v[reg])
 	branch_region = [region_n, region_v]
+	branch_parent = [stem_n, stem_v]
 
 
 ## Space colonisation over the lattice graph, one region of one network: each
@@ -393,11 +402,17 @@ func _build_supply(lat: AnatomyLattice) -> void:
 ## first, branches already grown after them — one neighbouring cell at a time.
 ## Every vertex is a cell, so the tree lives in the flesh it supplies.
 func _grow_region(lat: AnatomyLattice, out: Array, out_region: PackedInt32Array,
-		reg: int, seeds: Array, want: Array) -> void:
+		out_parent: PackedInt32Array, reg: int, seeds: Array, want: Array) -> void:
 	if seeds.is_empty() or want.is_empty():
 		return
 	var per: int = maxi(1, want.size() / ATTRACTORS)
 	var nodes: Array = seeds.duplicate()
+	# Which branch each node of the growing tree belongs to, -1 for the seeds
+	# that are the named run itself. Carried alongside rather than looked up
+	# afterwards, because by then the walk has forgotten where it started.
+	var stem: PackedInt32Array = PackedInt32Array()
+	stem.resize(nodes.size())
+	stem.fill(-1)
 	var a: int = 0
 	while a < want.size():
 		var attractor: int = want[a]
@@ -405,12 +420,14 @@ func _grow_region(lat: AnatomyLattice, out: Array, out_region: PackedInt32Array,
 		var goal: Vector3 = lat.pos[attractor]
 		# Nearest point of the whole tree so far.
 		var from: int = nodes[0]
+		var parent: int = stem[0]
 		var best: float = INF
-		for n in nodes:
-			var d: float = (lat.pos[n] - goal).length_squared()
+		for j in nodes.size():
+			var d: float = (lat.pos[nodes[j]] - goal).length_squared()
 			if d < best:
 				best = d
-				from = n
+				from = nodes[j]
+				parent = stem[j]
 		if best <= REACHED * REACHED:
 			continue
 		# Walk toward the attractor, cell to cell, staying out of the skeleton —
@@ -436,8 +453,10 @@ func _grow_region(lat: AnatomyLattice, out: Array, out_region: PackedInt32Array,
 			closing = nearer
 			path.append(cur)
 			nodes.append(cur)
+			stem.append(out.size())
 			if closing <= REACHED:
 				break
 		if path.size() >= 2:
 			out.append(path)
 			out_region.append(reg)
+			out_parent.append(parent)

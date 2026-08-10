@@ -292,9 +292,16 @@ func refresh() -> void:
 		else:
 			var network: AnatomyNetwork = state.vessels if index == VESSELS_ROW \
 				else state.nerves
-			meter.set_bar(_mean_delivery(network), row["ink"])
+			var arriving: float = _mean_delivery(network)
+			meter.set_bar(arriving, row["ink"])
 			var cut: int = network.cut_off()
-			value.text = "SOUND" if cut == 0 else "%d CUT" % cut
+			# A network delivering nothing anywhere is not a tally of cut runs —
+			# the plumbing may be perfect and the organ behind it stopped — so it
+			# is named for what it is doing rather than counted.
+			if arriving <= AnatomyNetwork.CUTOFF:
+				value.text = "NO FLOW" if index == VESSELS_ROW else "SILENT"
+			else:
+				value.text = "SOUND" if cut == 0 else "%d CUT" % cut
 
 	var head: BodyState.Region = state.region(BodyPlan.HEAD)
 	_set_vital(BRAIN_VITAL, state.consciousness,
@@ -308,7 +315,11 @@ func refresh() -> void:
 ## has stopped is not merely a percentage, and saying so is the point of having a
 ## functional layer at all.
 func _status_word(each: Creature, state: BodyState, integrity: float) -> String:
-	if not each.alive:
+	# Off the anatomy's own reading rather than off the creature's flag, so the
+	# word at the top of the drawer and the organs at the bottom of it are the
+	# same body being described. They are set in one breath — see
+	# `BodyState.arrest` — and this is the panel keeping them that way.
+	if state.arrested or not each.alive:
 		return "Dead"
 	if state.collapsed:
 		return "Collapsed"
@@ -327,6 +338,12 @@ func _status_word(each: Creature, state: BodyState, integrity: float) -> String:
 ## they are not remotely the same injury. The whole reason this panel says
 ## STARVED rather than a number is that the number cannot tell them apart.
 static func _brain_word(state: BodyState, brain: float, head: BodyState.Region) -> String:
+	# A brain with nothing arriving and a brain that has merely gone under are
+	# both producing nothing, and they are not the same thing to look at: one of
+	# them comes back. So the animal that has stopped is named apart from the one
+	# that is only out of it.
+	if state.arrested:
+		return "SILENT"
 	if state.collapsed:
 		return "OUT"
 	if state.consciousness < FAINT:
@@ -365,12 +382,17 @@ func _orbit_word() -> String:
 	if view == null:
 		return ""
 	var roll: float = view.roll
-	if not view.orbited() and absf(roll) < LEVEL:
-		return "TOP DOWN · DRAG TO TURN"
+	var near: bool = not is_equal_approx(view.zoom, 1.0)
+	if not view.orbited() and absf(roll) < LEVEL and not near:
+		return "TOP DOWN · DRAG TO TURN · WHEEL TO ZOOM"
 	var word: String = "SPIN %d° · TILT %+d°" % [
 		int(round(rad_to_deg(view.spin))), int(round(rad_to_deg(view.tilt)))]
 	if absf(roll) >= LEVEL:
 		word += " · ROLL %+d°" % int(round(rad_to_deg(roll)))
+	# Only once the wheel has been turned. On a specimen sitting at its own fit
+	# it would be a reading of nothing, exactly as roll is.
+	if near:
+		word += " · %.1f×" % view.zoom
 	return word + " · DOUBLE-CLICK RESETS"
 
 
@@ -705,6 +727,25 @@ func _apply_specimen() -> void:
 	_style_chips()
 	_on_cell_hovered("", false)
 	refresh()
+
+
+## The wheel anywhere on the drawer leans the specimen in and out.
+##
+## The stage takes it directly — see `AnatomyView._gui_input` — and this is the
+## rest of the panel doing the same, because a drawer whose animal only answers
+## the wheel over some of its own surface is a drawer the player has to aim at.
+## The section slider is the one thing that keeps its own wheel, since a control
+## under the pointer is what the pointer is on.
+func _gui_input(event: InputEvent) -> void:
+	var turn := event as InputEventMouseButton
+	if turn == null or not turn.pressed or view == null:
+		return
+	if turn.button_index != MOUSE_BUTTON_WHEEL_UP \
+			and turn.button_index != MOUSE_BUTTON_WHEEL_DOWN:
+		return
+	view.set_zoom(view.zoom * (AnatomyView.ZOOM_STEP
+		if turn.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / AnatomyView.ZOOM_STEP))
+	accept_event()
 
 
 func _on_row_input(event: InputEvent, index: int) -> void:

@@ -886,6 +886,10 @@ func collapse() -> void:
 	if not alive:
 		return
 	alive = false
+	# The heart is one of the things it has stopped driving, and the anatomy is
+	# told in the same breath rather than on the next tick — so a drawer open on
+	# this animal reads a stopped heart in the frame it stopped in.
+	anatomy.state.arrest()
 	_release_grip()
 	# Whatever was holding it up has stopped. A body that dies in the air falls,
 	# and it falls the whole way this tick rather than over a graceful arc — the

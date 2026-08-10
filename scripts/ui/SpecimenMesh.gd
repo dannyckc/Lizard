@@ -17,6 +17,17 @@
 ## teeth cut closes flat, so a stump shows the cross-section it was bitten
 ## through rather than a whittled point.
 ##
+## Two kinds of cell are not skinned, and both because a ring is the wrong shape
+## for them. A cell belonging to a continuous structure — a vertebra, a rib, the
+## aorta — is drawn by that structure's own tube; thrown a ring skin instead, a
+## rib cage comes out as a barrel, which is a solid the animal has not got. And a
+## ring with too few sectors to close is not closed: a place where the animal is
+## two cells wide has no hoop in it, and a loop drawn through three points is a
+## triangle claiming to be a leg. Neither sort is dropped — the first goes to the
+## chains and the second to `loose`, and the specimen draws both. What this file
+## will not do is invent a surface; what it will not do either is leave flesh off
+## the slab for being awkward.
+##
 ## Two things fall out of doing it this way, and both are the point:
 ##
 ##   * **It is cheap and it is bounded.** A lizard and an elephant carve the same
@@ -97,6 +108,12 @@ var f_flat := PackedByteArray()
 var f_raw := PackedByteArray()
 var count: int = 0
 
+## Surface cells the ring skin could not make a facet of: the outermost cell of
+## a sector on a ring too thin to close. They are still the outside of the
+## animal, so the specimen draws them cell by cell — see `AnatomyView._loose_pass`
+## — and nothing a layer is showing is left off the slab for being awkward.
+var loose := PackedInt32Array()
+
 # Reused between builds; sized once and refilled.
 var _best_r := PackedFloat32Array()
 var _best_i := PackedInt32Array()
@@ -153,16 +170,20 @@ static func bands_of(pk: int) -> int:
 ## are the cells standing in a section plane, which are laid as the cut face
 ## itself.
 ##
-## Every tissue is skinned, the skeleton included. The chains drawn inside the
-## mesh are the same structures seen as volumes, and they need no hole cut for
-## them: a rib's tube stands at the rib's own radius, which is inside the surface
-## that closed over it, so the painter's order hides it exactly while the flesh
-## is intact and shows it exactly where a bite, a section or an X-ray has opened
-## the way in.
+## `chained` is the lattice's cell-to-chain-sample table: a cell that answers a
+## sample belongs to a continuous structure — a vertebra, a rib, the aorta — and
+## is skinned by that structure's own tube rather than here. It matters only when
+## such a tissue is the outermost thing being shown, and then it matters
+## entirely: a ring skin thrown over a rib cage joins one rib to the next and
+## produces a barrel, which is a solid the animal does not have. A skeleton
+## should look like a skeleton at every setting of the toggles, and the way to
+## get that is to let the ribs be ribs. Everything else — the skull, the flesh,
+## the organs — is a heap of cells with a surface, and is skinned here.
 func build(lat: AnatomyLattice, surfaces: Array, plane_cells: PackedInt32Array,
-		slice_axis: int) -> void:
+		slice_axis: int, chained: PackedInt32Array = PackedInt32Array()) -> void:
 	v_count = 0
 	count = 0
+	loose.resize(0)
 	v_patch.resize(0)
 	v_station.resize(0)
 	v_lat.resize(0)
@@ -174,7 +195,7 @@ func build(lat: AnatomyLattice, surfaces: Array, plane_cells: PackedInt32Array,
 	f_flat.resize(0)
 	f_raw.resize(0)
 	for s in surfaces.size():
-		_skin(lat, surfaces[s], s)
+		_skin(lat, surfaces[s], s, chained)
 	if slice_axis >= 0 and plane_cells.size() > 0:
 		_cut_faces(lat, plane_cells, slice_axis)
 
@@ -182,7 +203,8 @@ func build(lat: AnatomyLattice, surfaces: Array, plane_cells: PackedInt32Array,
 ## One shell: bucket its surface cells into rings, keep the outermost of each
 ## sector, close the gaps the lattice was too coarse to fill, and stitch what is
 ## left into quads.
-func _skin(lat: AnatomyLattice, surface: PackedInt32Array, shell: int) -> void:
+func _skin(lat: AnatomyLattice, surface: PackedInt32Array, shell: int,
+		chained: PackedInt32Array) -> void:
 	_best_r.fill(-1.0)
 	_best_i.fill(-1)
 	_best_raw.fill(0)
@@ -213,7 +235,12 @@ func _skin(lat: AnatomyLattice, surface: PackedInt32Array, shell: int) -> void:
 	hi.resize(AnatomyLattice.PATCH_KEYS.size())
 	lo.fill(INF)
 	hi.fill(-INF)
+	# Whether the chain table was handed over at all: without it every cell is
+	# skinned, which is what the tests that build a mesh on its own get.
+	var chains: bool = chained.size() == lat.count
 	for i in surface:
+		if chains and chained[i] >= 0:
+			continue
 		var pk: int = patch_of[i]
 		var u: float = where[i].x if pk == 0 else -where[i].z
 		lo[pk] = minf(lo[pk], u)
@@ -225,6 +252,8 @@ func _skin(lat: AnatomyLattice, surface: PackedInt32Array, shell: int) -> void:
 			else maxf(AnatomyLattice.CELL, span / float(bands_of(pk) - 1))
 
 	for i in surface:
+		if chains and chained[i] >= 0:
+			continue
 		var pk: int = patch_of[i]
 		var sectors: int = BODY_SECTORS if pk == 0 else LIMB_SECTORS
 		var u: float = where[i].x if pk == 0 else -where[i].z
@@ -257,12 +286,20 @@ func _skin(lat: AnatomyLattice, surface: PackedInt32Array, shell: int) -> void:
 					found += 1
 			if found == 0:
 				continue
-			# Too little of the ring to be a ring. A limb's ankle and a tail's last
-			# slice are genuinely two or three cells around, and a loop drawn
-			# through three points is a triangle claiming to be a leg.
+			# Too little of the ring to be a ring. A limb's ankle and a tail's
+			# last slice are genuinely two or three cells around, and a loop
+			# drawn through three points is a triangle claiming to be a leg.
+			#
+			# The cells are not dropped for it, though — they are flesh that is
+			# there, and a specimen that leaves out the flesh it cannot make a
+			# ring of is a specimen with holes in it wherever a tissue thins out.
+			# They are handed on as loose cells and drawn one by one, which is
+			# the honest picture of a place where the animal is two cells wide.
 			if found < maxi(int(float(sectors) * RING_ENOUGH), 3):
 				for sector in sectors:
-					_best_i[row + sector] = -1
+					if _best_i[row + sector] >= 0:
+						loose.append(_best_i[row + sector])
+						_best_i[row + sector] = -1
 				continue
 			if found < sectors:
 				_close_ring(row, sectors)

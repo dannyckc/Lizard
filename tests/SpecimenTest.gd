@@ -31,6 +31,7 @@ func _process(_delta: float) -> bool:
 
 	var lizard: int = _check_skin(view)
 	var small: int = main.creature.anatomy.tissue.lattice.built_total
+	_check_layers(view)
 	_check_peel(view)
 	_check_flare(view)
 	_check_wounds(view)
@@ -82,6 +83,64 @@ func _check_skin(view: AnatomyView) -> int:
 		wired = wired and v >= 0 and v < mesh.v_count
 	_check(wired, "a facet pointed at a vertex the mesh does not have")
 	return mesh.count
+
+
+## What a toggle promises, asked of every tissue in turn: everything the layer is
+## showing is on the slab, and nothing else is.
+##
+## The half that used to fail is the first one. A ring skin can only make a
+## surface out of a tissue that goes most of the way round the body, and the
+## skeleton, the fat on a lean animal and the two supply networks do not — so a
+## specimen showing them alone came up empty or nearly so, which is a panel
+## saying the animal has no bones in it. Every representation the specimen has —
+## the mesh, the chains' own tubes, the loose cells — is asked here at once,
+## because which of the three a tissue is drawn by is this file's business and
+## not the player's.
+##
+## The second half is the older promise and still worth holding: a tissue that is
+## off is off. Not dimmed, not behind something — absent.
+func _check_layers(view: AnatomyView) -> void:
+	var lat: AnatomyLattice = view.lattice()
+	var grid: TissueGrid = view.tissue()
+	if lat == null or grid == null:
+		return
+	for t in AnatomyLattice.TISSUES:
+		view.layers = 0
+		view.show_vessels = t == AnatomyLattice.VESSEL
+		view.show_nerves = t == AnatomyLattice.NERVE
+		if t < AnatomyLattice.NERVE:
+			view.layers = 1 << t
+		_rebuild(view, lat, grid)
+		view._place_marks(lat)
+		var mine: int = 0
+		var strays: Dictionary = {}
+		for j in view._shown_count:
+			var kind: int = int(lat.kind[view._shown[j]])
+			if kind == t:
+				mine += 1
+			else:
+				strays[kind] = true
+		var name: String = AnatomyLattice.TISSUE_NAMES[t]
+		if lat.tissue_cells(t) > 0:
+			_check(mine > 0, "the specimen was showing %s alone and drew none of it: %d cells"
+				% [name, lat.tissue_cells(t)])
+		for kind in strays:
+			_check(false, "the specimen was showing %s alone and drew %s as well"
+				% [name, AnatomyLattice.TISSUE_NAMES[kind]])
+
+	# ...and the two networks over a body with its hide on, which is the whole of
+	# what makes them overlays rather than another layer of the depth stack.
+	view.layers = AnatomyView.ALL_LAYERS
+	view.show_vessels = true
+	view.show_nerves = true
+	_rebuild(view, lat, grid)
+	view._place_marks(lat)
+	var supply: int = 0
+	for j in view._shown_count:
+		var kind: int = int(lat.kind[view._shown[j]])
+		if kind == AnatomyLattice.NERVE or kind == AnatomyLattice.VESSEL:
+			supply += 1
+	_check(supply > 0, "the supply networks were switched on and nothing of them was drawn")
 
 
 ## Peeling is a subtraction from the same cells: what the surface is *made of*
