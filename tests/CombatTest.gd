@@ -443,18 +443,26 @@ func _hold(biter: Creature, victim: Creature, biter_name: String, victim_name: S
 	# to the animal's midline. A fixed aim point out in the world was scaffolding
 	# that happened to line up with where a leg used to stand.
 	if at_leg:
+		# The shank rather than the foot, and the difference is a mouthful. A
+		# load-bearing leg is thick through its lower bone — see Limb.girth_of —
+		# while a foot is the thinnest thing on the animal; jaws thrown at the
+		# foot of a heavy build close deeper into the belly overhanging it than
+		# into the toe they grazed, and a graze is not a hold. Biting the shin is
+		# also simply what the fixture means: it is the run of leg a low predator
+		# can actually get its jaws around.
 		var leg: Limb = victim.gait.limbs[0]
+		var shin: Vector2 = leg.plan[1].lerp(leg.plan[2], 0.6)
 		var mark := Reticle.Pick.new()
-		mark.at = leg.plan[2]
-		mark.band = victim.anatomy.tissue.limb_band(leg.key, 2)
+		mark.at = shin
+		mark.band = victim.anatomy.tissue.limb_band(leg.key, 1)
 		biter.aim_at(mark)
 		for _i in 12:
 			biter._physics_process(TICK)
 			victim._physics_process(TICK)
-		mark.at = leg.plan[2]
 
 	biter.set_bite_held(true)
-	biter.request_bite(victim.gait.limbs[0].plan[2] if at_leg
+	var struck: Limb = victim.gait.limbs[0]
+	biter.request_bite(struck.plan[1].lerp(struck.plan[2], 0.6) if at_leg
 		else Vector2(200.0, 0.0))
 	# Long enough for the whole strike, not for most of it. A lunge is a wind-up,
 	# a throw and a closing, and a heavy-jawed animal's takes longer than a quick

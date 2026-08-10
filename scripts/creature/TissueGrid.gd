@@ -485,6 +485,14 @@ var fat_reserve: float = 1.0
 ## walking a cell.
 var region_hp: PackedFloat32Array = PackedFloat32Array()
 var region_full: PackedFloat32Array = PackedFloat32Array()
+## The same stacks at a fat reserve of exactly 1.0 — the ordinary animal of this
+## plan, whatever this species actually lays down. It is the ruler the census
+## measures tissue volume with: the drawn silhouette is the reference-condition
+## body, so hp is converted to volume against *this* stack, and a padded animal
+## then genuinely carries more tissue than its silhouette while a lean one
+## carries less. Normalising against `region_full` instead would quietly cancel
+## the fat out of the weight, which is the one thing fat must not do.
+var region_norm: PackedFloat32Array = PackedFloat32Array()
 ## Fat a `fat_reserve` of exactly 1.0 would lay on this plan. The padding a body
 ## actually carries is quoted against it, so 1.0 means "an ordinary animal" and
 ## every other build is a ratio — which is what lets fat move mass without any
@@ -554,6 +562,7 @@ func _init(p_plan: BodyPlan = null, p_fat_reserve: float = 1.0) -> void:
 		patches[key] = limb
 	region_hp.resize(BodyPlan.REGIONS * LAYERS)
 	region_full.resize(BodyPlan.REGIONS * LAYERS)
+	region_norm.resize(BodyPlan.REGIONS * LAYERS)
 	organ_hp.resize(BodyPlan.ORGAN_NAMES.size())
 	organ_full.resize(BodyPlan.ORGAN_NAMES.size())
 	_region_attached.resize(BodyPlan.REGIONS)
@@ -587,6 +596,7 @@ func rebuild_layout() -> void:
 
 func reset() -> void:
 	region_full.fill(0.0)
+	region_norm.fill(0.0)
 	organ_full.fill(0.0)
 	fat_reference = 0.0
 	full_hp = 0.0
@@ -652,6 +662,9 @@ func _fill(p: Patch) -> void:
 				var have: float = p.hp[base + layer]
 				p.full_hp += have
 				region_full[region_base + layer] += have
+				# The reference stack: fat at reserve 1.0, everything else as laid.
+				region_norm[region_base + layer] += \
+					FAT_HP * profile if layer == FAT else have
 			if organ != BodyPlan.NO_ORGAN:
 				organ_full[organ] += ORGAN_HP
 	p.clear_damage()

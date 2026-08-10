@@ -145,18 +145,28 @@ func hit_test(creature: Node, bite_center: Vector2, bite_radius: float,
 	# jaws closing on a place a previous bite already emptied find nothing there
 	# and the strike reads as a miss. A structure eaten clean through drops out
 	# of the query entirely rather than answering as a target with no substance.
+	# Every candidate's score below is its *penetration*: how deep the jaw centre
+	# stands inside the structure, negated. The plan view gives one reading of
+	# that and the height band gives another — jaws overlapping a structure's
+	# band by two pixels are two pixels into it however far past its outline the
+	# picture puts them — and the honest depth is the lesser of the two, so each
+	# score is floored at minus the band overlap. That single cap is what stops a
+	# graze along the underside of a tall animal outranking the leg the same jaws
+	# are closing around: the belly's plan-view capsule is enormous, and the two
+	# pixels of band the jaws actually share with it now say so.
 	# --- head: the same circle CreatureView draws --------------------------
 	var head_radius: float = body.head_radius * tissue.head_solid()
 	var head_delta: Vector2 = bite_center - body.head.pos
 	var head_distance: float = head_delta.length()
-	var head_score: float = head_distance - head_radius
+	var head_score: float = maxf(head_distance - head_radius,
+		-Volume.shared(reach, tissue.head_band()))
 	if reach_head and head_radius > 0.0 and head_score <= bite_radius:
 		var head_dir: Vector2 = head_delta / head_distance if head_distance > 0.0001 else body.head.fwd
 		var head_hit := Hit.new()
 		head_hit.region_id = "head"
 		head_hit.kind = HEAD
 		head_hit.score = head_score
-		head_hit.world_point = body.head.pos + head_dir * head_radius
+		head_hit.world_point = body.head.pos + head_dir * minf(head_distance, head_radius)
 		head_hit.local_forward = head_dir.dot(body.head.fwd)
 		head_hit.lateral = head_dir.dot(body.head.perp)
 		best = head_hit
@@ -174,14 +184,16 @@ func hit_test(creature: Node, bite_center: Vector2, bite_radius: float,
 		# Per interval, because a trunk is not level: the neck rises to the head
 		# over the front of it, so jaws that can reach a browsing animal's throat
 		# genuinely cannot reach the back three segments behind it.
-		if not Volume.overlaps(reach, tissue.body_band(along)):
+		var band: Vector2 = tissue.body_band(along)
+		if not Volume.overlaps(reach, band):
 			continue
 		var solid: float = tissue.body_solid(along, radial.dot(spine.perps[i]))
 		if solid <= 0.0:
 			continue
 		var tissue_radius: float = lerpf(body.widths[i], body.widths[i + 1], u) * solid
 		var radial_distance: float = radial.length()
-		var score: float = radial_distance - tissue_radius
+		var score: float = maxf(radial_distance - tissue_radius,
+			-Volume.shared(reach, band))
 		if score > bite_radius or (best != null and score >= best.score):
 			continue
 
@@ -191,7 +203,14 @@ func hit_test(creature: Node, bite_center: Vector2, bite_radius: float,
 		torso_hit.kind = TORSO
 		torso_hit.score = score
 		torso_hit.spine_t = (float(i) + u) / float(maxi(spine.points.size() - 1, 1))
-		torso_hit.world_point = axis + radial_dir * tissue_radius
+		# Where the jaws actually met flesh. From outside, that is the silhouette;
+		# from *inside* the capsule — jaws under a tall animal's belly, which is a
+		# place low jaws genuinely reach — it is the jaws' own position, because
+		# the flesh there is directly overhead rather than out at the far flank.
+		# Projecting outward regardless handed the grip an anchor most of a body
+		# away from the mouth that bit, and the tether then measured itself
+		# against a point nobody's teeth had touched.
+		torso_hit.world_point = axis + radial_dir * minf(radial_distance, tissue_radius)
 		var frame: Spine.Frame = spine.sample(torso_hit.spine_t)
 		torso_hit.lateral = clampf((torso_hit.world_point - frame.pos).dot(frame.perp) / maxf(tissue_radius, 0.001), -1.0, 1.0)
 		best = torso_hit
@@ -205,7 +224,8 @@ func hit_test(creature: Node, bite_center: Vector2, bite_radius: float,
 			# upper bone is up at the shoulder and the lower is down at the floor.
 			# Asked per bone, low jaws take the shin of an animal whose hip they
 			# could never have got near.
-			if not Volume.overlaps(reach, tissue.limb_band(limb.key, segment)):
+			var bone_band: Vector2 = tissue.limb_band(limb.key, segment)
+			if not Volume.overlaps(reach, bone_band):
 				continue
 			var limb_solid: float = tissue.limb_solid(limb.key, segment)
 			if limb_solid <= 0.0:
@@ -215,7 +235,8 @@ func hit_test(creature: Node, bite_center: Vector2, bite_radius: float,
 			var limb_u: float = segment_u(bite_center, la, lb)
 			var limb_axis: Vector2 = la.lerp(lb, limb_u)
 			var limb_radius: float = (widths.x if segment == 0 else widths.y) * 0.5 * limb_solid
-			var limb_score: float = bite_center.distance_to(limb_axis) - limb_radius
+			var limb_score: float = maxf(bite_center.distance_to(limb_axis) - limb_radius,
+				-Volume.shared(reach, bone_band))
 			if limb_score > bite_radius or (best != null and limb_score >= best.score):
 				continue
 			var limb_hit := Hit.new()
@@ -231,10 +252,12 @@ func hit_test(creature: Node, bite_center: Vector2, bite_radius: float,
 		# The foot is its own band and it is the lowest thing on the animal: a foot
 		# on the floor is reachable by anything that can reach the floor, and the
 		# same foot at the top of a step is not reachable at all.
-		var foot_reached: bool = Volume.overlaps(reach, tissue.limb_band(limb.key, 2))
+		var foot_band: Vector2 = tissue.limb_band(limb.key, 2)
+		var foot_reached: bool = Volume.overlaps(reach, foot_band)
 		var foot_radius: float = limb.foot_radius(creature.size_scale) \
 			* tissue.limb_solid(limb.key, 2)
-		var foot_score: float = bite_center.distance_to(limb.joints[2]) - foot_radius
+		var foot_score: float = maxf(bite_center.distance_to(limb.joints[2]) - foot_radius,
+			-Volume.shared(reach, foot_band))
 		if foot_reached and foot_radius > 0.0 and foot_score <= bite_radius \
 				and (best == null or foot_score < best.score):
 			var foot_hit := Hit.new()

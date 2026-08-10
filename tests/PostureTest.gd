@@ -322,16 +322,19 @@ func _turn_radius(player: Creature, preset: String) -> float:
 
 ## The projection is about where a limb *reaches*, not about how much limb there
 ## is. Taking it literally everywhere would draw a columnar animal on four
-## spindles, so thickness is priced off the bone instead — and the check is that
-## two identical legs held at different angles are equally thick.
+## spindles, so thickness is priced off what the leg carries instead — see
+## Limb.girth_of — and the check is that a leg never *thins* for being held
+## upright. It may thicken: the same silhouette held columnar is a deeper body —
+## see Posture.depth_ratio — and a deeper body is a heavier one, so the legs
+## under it are honestly built for more.
 func _check_limbs_are_not_spindly(player: Creature) -> void:
 	player.params.apply_preset("Lizard")
 	player.params.posture = Posture.SPRAWLED
 	var flat: Dictionary = _measure(player)
 	player.params.posture = Posture.COLUMNAR
 	var tall: Dictionary = _measure(player)
-	_check(is_equal_approx(flat["girth"], tall["girth"]),
-		"the same leg held upright came out %.2f px thick instead of %.2f"
+	_check(tall["girth"] >= flat["girth"] - 0.01,
+		"the same leg held upright came out spindly: %.2f px thick against %.2f sprawled"
 			% [tall["girth"], flat["girth"]])
 	_check(is_equal_approx(flat["bone"], tall["bone"]),
 		"the same leg held upright changed length (%.1f -> %.1f)"

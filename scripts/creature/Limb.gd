@@ -327,6 +327,13 @@ var carry: float = 1.0
 ## the four above rather than among them because it is a fact about proportion
 ## rather than about condition: it is the same on a fresh body and a chewed one.
 var bearing: bool = true
+## The mass this limb is built to hold up, in Lizard units — written by the
+## creature off its own physique, and what the limb's thickness is asked of. A
+## fact about the *build* rather than the moment, quoted off the intact trunk:
+## bone laid down under a heavy body stays thick when that body is bitten.
+## Negative until a physique has said, which leaves the girth on its length —
+## the honest reading for a bare limb nothing is standing on.
+var load: float = -1.0
 ## How far it can still be extended, as a multiple of its working envelope.
 var reach: float = 1.0
 ## Off the animal entirely. A severed limb is not solved, not drawn and not
@@ -412,23 +419,57 @@ func joint_angle() -> float:
 		/ maxf(2.0 * l0 * l1, 0.000001), -1.0, 1.0))
 
 
-## Half-thickness of the upper bone, and the flesh over it. Off the anatomical
-## length, so an upright leg is a stout column rather than a short thin one.
-## Shared by the renderer, the lattice and the hit test so all three agree on how
-## much limb is there.
+## Slimmest a limb may run against its own length: flesh wrapped around a bone
+## cannot be a line however little it carries. This is the floor a biped's arm
+## and a runner's shank sit on.
+const GIRTH_ASPECT: float = 0.10
+## How limb thickness grows with the mass carried: girth = GIRTH_LOAD × load^GIRTH_ALLOMETRY.
+##
+## The exponent is the measured one, and it sits between two arguments that are
+## both real. Isometry says a third — a limb is a piece of the animal, scaled
+## with it. Constant stress says a half — the bone and muscle holding a body up
+## work as a cross-*section*, so the area must track the load. Actual skeletons
+## split the difference at about 0.4, because thickening is not the only tool a
+## heavy body has: its limbs also straighten toward columns, which cuts the
+## bending loads the extra girth would otherwise have to carry — and that
+## straightening is already on the animal here, as posture. GIRTH_LOAD is
+## calibrated so the reference Lizard's leg keeps the girth it has always drawn
+## (a quarter of unit mass on a 40 px leg is the same 6.4 px), and every
+## heavier build thickens from there.
+const GIRTH_ALLOMETRY: float = 0.4
+const GIRTH_LOAD: float = 11.5
+
+
+## Thickness of the upper bone, and the flesh over it. Asked of the load the
+## limb is built to carry — see `load` — so the legs under a heavy body are
+## stout columns and the same bones under a light one are slim, whatever their
+## length. Shared by the renderer, the lattice and the hit test so all three
+## agree on how much limb is there.
 func girth(scale: float) -> float:
-	return girth_of(anatomical_length, scale)
+	return girth_of(anatomical_length, scale, load)
 
 
+## The foot stays sized to the leg, and deliberately so: its radius is a working
+## part of the gait — the toe the stance rolls onto, the purchase a foothold is
+## tested against — so it is a piece of the walk's calibration rather than of
+## the load path, and the girth above is where the weight shows.
 func foot_radius(scale: float) -> float:
-	return maxf(anatomical_length * 0.10, 3.0 * scale)
+	return foot_of(anatomical_length, scale)
 
 
-## The same, asked of a length rather than of a limb. Stature needs it to know
-## how far inside the body a socket has to sit before there is a leg at that
-## station, and it is asking about a limb that has not been built yet.
-static func girth_of(anatomical: float, scale: float) -> float:
-	return maxf(anatomical * 0.16, 2.5 * scale)
+## The same, asked of a length and a load rather than of a limb — for anything
+## sizing a limb that has not been built yet, the physique's own census first
+## among them. With no load stated the old length-only reading answers, which is
+## the right description of a bare chain nothing is standing on.
+static func girth_of(anatomical: float, scale: float, load: float = -1.0) -> float:
+	if load < 0.0:
+		return maxf(anatomical * 0.16, 2.5 * scale)
+	return maxf(maxf(anatomical * GIRTH_ASPECT,
+		GIRTH_LOAD * pow(maxf(load, 0.0), GIRTH_ALLOMETRY)), 2.5 * scale)
+
+
+static func foot_of(anatomical: float, scale: float) -> float:
+	return maxf(anatomical * 0.10, 3.0 * scale)
 
 
 ## How far the ankle is lifted off the ground by the foot rolling forward onto

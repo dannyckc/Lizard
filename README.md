@@ -89,7 +89,7 @@ input ──▶ head position ──▶ contacts + grip ──▶ spine ──�
 | [Constraints.gd](scripts/creature/Constraints.gd) | the two projection primitives everything is built from |
 | [Spine.gd](scripts/creature/Spine.gd) | the particle chain and its relaxation solve |
 | [BodyShape.gd](scripts/creature/BodyShape.gd) | outline, head, eyes, limb sockets, tail — all derived from the spine |
-| [Physique.gd](scripts/creature/Physique.gd) | mass, strength and bite force, read off the drawn body and the surviving tissue |
+| [Physique.gd](scripts/creature/Physique.gd) | mass, strength and bite force, counted out of a census of fixed-size cells over the posed body and its surviving tissue — bigger animals are more cells, never larger ones |
 | [Grip.gd](scripts/creature/Grip.gd) | one set of jaws holding onto another creature, as a tether in its body space |
 | [AnatomyState.gd](scripts/creature/AnatomyState.gd) | anatomical hit-testing — which creature, and which structure of it |
 | [Dentition.gd](scripts/creature/Dentition.gd) | the teeth: how many, how long, how keen, and what type each one turns out to be |

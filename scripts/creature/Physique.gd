@@ -1,15 +1,24 @@
 ## What the creature is physically made of: how much of it there is, how hard it
 ## can pull, and how hard its jaws close.
 ##
-## None of the three is a slider of its own. They are read off the body that is
-## already being solved every tick — the silhouette's widths, the length they are
-## strung along, the head cap, and how much tissue is still standing in the
-## lattice — and scaled by three per-species power parameters. That is deliberate
-## twice over. An Elephant comes out twenty times a Lizard because it is *drawn*
-## twenty times the Lizard, not because someone remembered to move a second
-## slider; and a creature eaten half open gets lighter, weaker and slacker-jawed
-## for free, because the same lattice that says where the holes are is what these
-## are measured through.
+## None of the three is a slider of its own, and none of them is read off the
+## picture any more. They are counted out of *cells*: the body the pose describes
+## is measured as a volume, that volume is a number of biological cells — the one
+## unit in the game that never scales, see CELL_SIZE — and each cell weighs what
+## the tissue standing in it weighs. An Elephant outweighs a Lizard because it is
+## *built of* twenty-odd times the cells, not because someone remembered to move
+## a second slider; a fat animal is heavier because fat is real tissue in its
+## stack; a creature eaten half open gets lighter, and lighter by the density of
+## exactly what was chewed out of it, because the same lattice that says where
+## the holes are is what the census counts through.
+##
+## Strength is no longer mass with an exponent. It is the muscle cells — and only
+## the muscle cells — raised to the area power, so a body that grows by laying
+## down fat gets heavier without getting stronger, and one that grows thicker
+## legs gets stronger because those legs are muscle. The square-cube law is not
+## stated anywhere: an animal scaled up isometrically grows muscle with its
+## volume, cross-section with the two-thirds power of it, and comes out slower
+## per kilo, because that is what the arithmetic of counting does.
 ##
 ## Refreshed once per tick, after the body and the lattice. Everything that reads
 ## it — contact shares, hauling, grip strain — is strictly a consumer, so this
@@ -17,19 +26,59 @@
 class_name Physique
 extends RefCounted
 
-## Silhouette volume of the default Lizard build, so `density` 1.0 reads as mass
-## 1.0 there and every other creature is a ratio against it. A constant rather
-## than a measured baseline for the same reason the lattice's dimensions are: it
-## has to mean the same thing after the creation menu has restructured the body
-## underneath it.
+## Edge of one biological cell, in world pixels. The one size in the game that is
+## the same for every creature: a larger animal is more of these, never larger
+## ones. Everything below is a count of them — a body part's size *is* its cell
+## count, so doubling a part's linear dimensions is an eightfold gain in the
+## cells it contains, and therefore in what it weighs.
+const CELL_SIZE: float = 4.0
+const CELL_VOLUME: float = CELL_SIZE * CELL_SIZE * CELL_SIZE
+
+## What one cell of each tissue weighs, relative to water. Indexed by
+## TissueGrid's layers, because they are the same tissues: bone is nearly twice
+## the density of the flesh around it, fat floats, and muscle sits just over
+## water like the meat it is. This is the whole of how composition reaches the
+## scales — a bony animal and a fat one of the same size weigh what their
+## different stacks add up to, and nothing anywhere else says so.
+const TISSUE_DENSITY: Array[float] = [
+	1.10,  # skin
+	0.92,  # fat
+	1.06,  # muscle
+	1.80,  # bone
+	1.05,  # organ
+]
+
+## How deep one hit point of each tissue stands in the body, relative to muscle.
 ##
-## Re-measured when the width profile's knots were moved onto the girdles they are
-## named for — see BodyShape.knot_stations. Every body in the file got lighter by
-## much the same fraction, because all of them had been carrying a tail drawn at
-## nearly hip width for three quarters of its length, and none of them had a tail
-## like that. Re-anchoring here is what keeps `density` 1.0 meaning what its own
-## comment says it means; leaving it would have quietly made the reference animal
-## weigh four fifths of a reference animal.
+## The lattice's hit points are a *bite* currency — how much closing of the jaws
+## a layer soaks up — and toughness per pixel of depth is not the same from
+## tissue to tissue: fat yields easily, so its few hit points are a thick soft
+## layer; bone resists fiercely, so its many hit points are a modest thickness
+## of skeleton. This is the exchange rate between the two currencies, and it is
+## what the census converts through — so a reserve of fat is the fifth of the
+## body's depth it is on a real animal, not the sliver its bite-cost implies,
+## and the skeleton is a frame rather than a third of the flesh.
+const LAYER_DEPTH: Array[float] = [
+	1.0,  # skin
+	4.0,  # fat
+	1.0,  # muscle
+	0.4,  # bone
+	1.2,  # organ
+]
+
+## The default Lizard build's census, in density-weighted cells, so `density` 1.0
+## reads as mass 1.0 there and every other creature is a ratio against it. A
+## constant rather than a measured baseline for the same reason the lattice's
+## dimensions are: it has to mean the same thing after the creation menu has
+## restructured the body underneath it.
+const REFERENCE_CELL_MASS: float = 280.0
+## ...and its muscle alone, in cells, so `muscle_power` 1.0 reads as strength 1.0
+## on the same animal.
+const REFERENCE_MUSCLE_CELLS: float = 172.0
+
+## Silhouette volume of the default Lizard build, kept as the reference for the
+## plan-view `volume` reading below — a picture-space number some consumers still
+## want, distinct from the census the mass is counted out of.
 const REFERENCE_VOLUME: float = 23224.0
 ## Head cap radius of that same default build, ditto.
 const REFERENCE_HEAD_RADIUS: float = 13.0
@@ -37,21 +86,15 @@ const REFERENCE_HEAD_RADIUS: float = 13.0
 ## creature chewed down to its last cell still has to have a share of a push.
 const MIN_MASS: float = 0.02
 ## Strength and bite force both go as a cross-sectional *area* while mass goes as
-## a volume, so both scale with mass^(2/3). That is the square-cube law, and it
+## a volume, so both scale with volume^(2/3). That is the square-cube law, and it
 ## is the whole reason a small creature can drag proportionally more than a large
 ## one — and why a large one still wins outright.
 const AREA_EXPONENT: float = 2.0 / 3.0
-## How much of its own weight a body's padding is. Quoted against an ordinary
-## animal of the same plan, so a creature at the default reserve weighs exactly
-## what it always did and only a deliberately fat or deliberately lean one moves —
-## which is the whole reason fat can be added to the stack without silently
-## reweighing every existing species.
-const FAT_MASS_GAIN: float = 0.18
 
 ## Mass, in Lizard units. Sets who moves whom in every contact and every grip.
 var mass: float = 1.0
 ## The force this creature can put into locomotion, in the same currency as the
-## load a grip hangs off it.
+## load a grip hangs off it. Read off the muscle cells alone — see `update`.
 var strength: float = 1.0
 ## The force the jaws clamp with, in the same currency again — so a grip's load
 ## and the bite holding it are directly comparable.
@@ -60,9 +103,27 @@ var bite_force: float = 1.0
 var volume: float = 0.0
 ## Fraction of its original tissue the creature still carries.
 var condition: float = 1.0
-## Padding carried, against an ordinary animal of the same build. Part of what
-## this creature weighs.
+## Padding carried, against an ordinary animal of the same build. Descriptive —
+## the weight of the fat itself is already in the census.
 var padding: float = 1.0
+
+## The census: biological cells standing in the whole animal, and per region of
+## it. What "how big is this body part" now means — a chest widened in the
+## creation menu contains more cells and says so here, and a leg bitten hollow
+## contains fewer.
+var cells: float = 0.0
+var region_cells: PackedFloat32Array = PackedFloat32Array()
+## Muscle cells standing, the only tissue strength is read off.
+var muscle_cells: float = 0.0
+
+## Mass each limb of a girdle is built to hold up, in Lizard units: x the fore
+## pair, y the hind. This is what sizes a leg's thickness — see Limb.girth_of —
+## so a heavier body demands thicker, more muscular legs and a forelimb that
+## carries nothing (a biped's arm) is built to its own length instead. Quoted
+## off the *intact* trunk at the species' density, because a skeleton is built
+## for the body it grew under and does not slim when that body is bitten.
+var limb_load: Vector2 = Vector2(0.25, 0.25)
+
 ## How much of the body lies beyond each girdle: ahead of the shoulder in x,
 ## behind the hip in y, as shares of the whole drawn animal.
 ##
@@ -80,27 +141,81 @@ var padding: float = 1.0
 ## the two that jump best. See Leap, which is the only consumer.
 var balance: Vector2 = Vector2(0.15, 0.30)
 
+## Physical volume standing over each region, px³, rebuilt each update. The
+## bridge between the drawn body and the cell count: a region's cells are its
+## volume over CELL_VOLUME, apportioned to tissues by its own reference stack.
+var _region_volume: PackedFloat32Array = PackedFloat32Array()
 
-## Re-derives all three from the pose and lattice solved this tick.
+
+func _init() -> void:
+	_region_volume.resize(BodyPlan.REGIONS)
+	region_cells.resize(BodyPlan.REGIONS)
+
+
+## Re-derives all of it from the pose and lattice solved this tick.
 ##
 ## `state` is what the body can still *do*, as opposed to what is still there.
-## The distinction matters for exactly one of the three: mass and bite force are
-## properties of tissue and are read off the lattice, while strength is a muscle
-## being driven — so a limb that is entirely present, well fed and simply not
-## answering its nerve contributes its weight and none of its pull.
+## The distinction matters for exactly one reading: mass and bite force are
+## properties of tissue and are counted off the lattice, while strength is a
+## muscle being driven — so a limb that is entirely present, well fed and simply
+## not answering its nerve contributes its weight and none of its pull.
+##
+## `posture` is needed because a body is deep as well as wide and how deep is a
+## stance trait — the same `depth_ratio` the lattice poses the cells with, so
+## what the census weighs is exactly the solid the bites land in. Left null (a
+## bare physique in a test) it is derived from the params, which is the same
+## answer arrived at the long way.
 func update(body: BodyShape, spine: Spine, tissue: TissueGrid, p: CreatureParams,
-		state: BodyState = null) -> void:
+		state: BodyState = null, posture: Posture = null, scale: float = 1.0) -> void:
 	if body == null or spine == null or body.widths.size() < 2 or p == null:
 		return
 	volume = body_volume(body, spine)
 	condition = clampf(tissue.integrity(), 0.0, 1.0) if tissue != null else 1.0
 	padding = tissue.fat_carried() if tissue != null else 1.0
-	mass = maxf(p.density * (volume / REFERENCE_VOLUME) * condition
-		* (1.0 + FAT_MASS_GAIN * (padding - 1.0)), MIN_MASS)
+	var stance: Posture = posture if posture != null else Posture.new(p.posture)
 
-	var area: float = pow(mass, AREA_EXPONENT)
+	if tissue != null:
+		# The trunk first: its slabs are volume wherever the spine has carried
+		# them, and its cells are what the legs will be asked to hold up.
+		_axial_volumes(body, spine, tissue.plan, stance.depth_ratio)
+
+		# What each limb must carry: the intact trunk, at the species' density,
+		# split across the limbs that actually bear. A biped's whole weight goes
+		# through its hind pair and its arms carry nothing — which is why a
+		# T. rex's legs come out pillars and its arms stay the twigs they are,
+		# with no rule anywhere saying so.
+		var trunk: float = p.density \
+			* _tally(tissue, tissue.region_full, false) / REFERENCE_CELL_MASS
+		var bearing: bool = Locomotion.bears_on_forelimbs(p)
+		limb_load = Vector2(
+			trunk * 0.25 if bearing else 0.0,
+			trunk * (0.25 if bearing else 0.5))
+
+		# Now the limbs are sized, they are volume too — length, width, depth,
+		# girth and foot together, so a leg thickened to carry a heavier body is
+		# itself more cells, more muscle and more weight on the scales.
+		_limb_volumes(p, scale)
+
+		# The standing census: every region, every layer, at whatever is left in
+		# it. Damage needs no multiplier — a bitten region simply counts fewer
+		# cells, and fewer of whichever tissue the bite actually took.
+		var standing: float = _tally(tissue, tissue.region_hp, true)
+		mass = maxf(p.density * standing / REFERENCE_CELL_MASS, MIN_MASS)
+	else:
+		mass = maxf(p.density * (volume / REFERENCE_VOLUME), MIN_MASS)
+
+	# Strength is the muscle, and only the muscle, at the area power: force is
+	# cross-section, and cross-section is what a two-thirds power of the tissue's
+	# own bulk measures. Fat and bone are in the mass and not in this, so a
+	# padded animal is duller for free and a bony one no fiercer. The species'
+	# `density` *is* in it — it describes the animal's tissue throughout, muscle
+	# included, so a denser build's muscle is denser muscle — which keeps mass
+	# and strength in one currency: power-to-weight falls as the cube root of
+	# density exactly as it falls with size.
 	var drive: float = state.locomotion if state != null and state.impaired else 1.0
-	strength = maxf(p.muscle_power * area * drive, 0.0001)
+	var fibre: float = p.density * muscle_cells / REFERENCE_MUSCLE_CELLS \
+		if tissue != null else mass
+	strength = maxf(p.muscle_power * pow(maxf(fibre, 0.0), AREA_EXPONENT) * drive, 0.0001)
 
 	# Bite force is sized off the head rather than off the body, because the head
 	# is the part that does the biting and the part you can see doing it: a broad
@@ -119,6 +234,106 @@ func update(body: BodyShape, spine: Spine, tissue: TissueGrid, p: CreatureParams
 		beyond(body, spine, p.front_limb_t, true),
 		beyond(body, spine, p.rear_limb_t, false))
 
+
+## Biological cells standing in one region — how big that body part is, in the
+## only unit that means the same thing on every creature.
+func cells_of(region: int) -> float:
+	return region_cells[region] if region >= 0 and region < region_cells.size() else 0.0
+
+
+# ----------------------------------------------------------------- census ----
+
+## Physical volume of the axial body, attributed region by region.
+##
+## The same chain of elliptical slabs the lattice tessellates: half-width from
+## the profile, half-depth the posture's ratio of it, a hemispherical head cap as
+## deep as it is wide and a tail cap tapering with the tip. Everything here
+## deliberately mirrors TissueGrid's posing of the same flesh, so the solid the
+## census weighs and the solid a bite lands in are one body. (The constant π is
+## dropped from every term alike — the census is a ratio against a reference
+## counted the same way, so it cancels.)
+func _axial_volumes(body: BodyShape, spine: Spine, plan: BodyPlan,
+		depth_ratio: float) -> void:
+	_region_volume.fill(0.0)
+	var last: int = mini(body.last_index, spine.size() - 1)
+	if last < 1 or plan == null:
+		return
+	for i in range(last):
+		var w: float = (body.widths[i] + body.widths[i + 1]) * 0.5
+		var slab: float = w * (w * depth_ratio) \
+			* spine.points[i].distance_to(spine.points[i + 1])
+		_region_volume[plan.region_at((float(i) + 0.5) / float(last))] += slab
+	# The head cap is a hemisphere as deep as it is wide — exactly how the
+	# lattice poses it — and it is the whole of the HEAD region's volume: the
+	# strip behind it already belongs to the neck and trunk.
+	var r: float = body.head_radius
+	_region_volume[BodyPlan.HEAD] += r * r * r * (2.0 / 3.0)
+	var tip: float = body.widths[last]
+	_region_volume[BodyPlan.TAIL] += tip * (tip * depth_ratio) * tip * (2.0 / 3.0)
+
+
+## Physical volume of the four limbs, each sized to what it carries.
+##
+## A limb scales in every dimension at once: its length is the species' bone, its
+## thickness is asked of the load it holds up — see Limb.girth_of — and its foot
+## spreads with the same load. So the volume here is where "a heavier body needs
+## thicker legs" becomes "thicker legs are more cells": the extra girth is real
+## tissue, weighed and counted like any other, and most of it is muscle.
+func _limb_volumes(p: CreatureParams, scale: float) -> void:
+	for region in BodyPlan.LIMB_REGIONS:
+		var fore: bool = region == BodyPlan.FL or region == BodyPlan.FR
+		var bone: float = (p.arm_length if fore else p.leg_length) * scale
+		var load: float = limb_load.x if fore else limb_load.y
+		var upper_share: float = p.fore_upper_share if fore else p.hind_upper_share
+		var upper_r: float = Limb.girth_of(bone, scale, load) * 0.5
+		# The lower bone runs slimmer than the upper, in exactly the ratio the
+		# lattice and the renderer draw it.
+		var lower_r: float = upper_r * 0.72
+		var foot_r: float = Limb.foot_of(bone, scale)
+		_region_volume[region] = bone * upper_share * upper_r * upper_r \
+			+ bone * (1.0 - upper_share) * lower_r * lower_r \
+			+ foot_r * foot_r * foot_r * (4.0 / 3.0)
+
+
+## Adds up one set of tissue stacks as density-weighted cells.
+##
+## `hp` is which reading of the lattice to count — `region_full` for the animal
+## as built, `region_hp` for what is still standing — and the conversion runs
+## through each region's *reference* stack: the region's physical volume is worth
+## its reference depth (hit points through LAYER_DEPTH), so a layer's cells are
+## its share of that, and tissue beyond the reference (a heavy fat reserve) is
+## genuinely extra cells. The
+## return is Σ cells × density, the mass numerator; alongside it the full pass
+## fills `cells`, `region_cells` and `muscle_cells`, which are the same counts
+## before the densities are applied.
+func _tally(tissue: TissueGrid, hp: PackedFloat32Array, full_pass: bool) -> float:
+	var total: float = 0.0
+	if full_pass:
+		cells = 0.0
+		muscle_cells = 0.0
+		region_cells.fill(0.0)
+	for region in BodyPlan.REGIONS:
+		if not full_pass and tissue.plan.is_limb_region(region):
+			continue
+		var base: int = region * TissueGrid.LAYERS
+		var norm: float = 0.0
+		for layer in TissueGrid.LAYERS:
+			norm += tissue.region_norm[base + layer] * LAYER_DEPTH[layer]
+		if norm <= 0.0 or _region_volume[region] <= 0.0:
+			continue
+		var cells_per_depth: float = _region_volume[region] / (norm * CELL_VOLUME)
+		for layer in TissueGrid.LAYERS:
+			var counted: float = hp[base + layer] * LAYER_DEPTH[layer] * cells_per_depth
+			total += counted * TISSUE_DENSITY[layer]
+			if full_pass:
+				cells += counted
+				region_cells[region] += counted
+				if layer == TissueGrid.MUSCLE:
+					muscle_cells += counted
+	return total
+
+
+# ------------------------------------------------------------- silhouette ----
 
 ## Plan-view volume of the drawn body: a chain of discs, one per cross-section,
 ## clipped exactly where the silhouette is clipped, with a round cap at each end.

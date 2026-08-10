@@ -525,9 +525,14 @@ func _check_walking_under_a_tall_animal(player: Creature, target: Creature) -> v
 	var leg: Limb = _planted_leg(target)
 	var blocked: Dictionary = _lane(player, target, leg)
 	_check(blocked["met"], "the Lizard never came near the foot it was aimed at")
-	_check(blocked["aside"] > through["aside"] * 2.0,
-		"a planted foot turned the Lizard aside no more than an open belly did (%.1f px against %.1f)"
-			% [blocked["aside"], through["aside"]])
+	# Turned aside by something real: several pixels off its line, which open
+	# ground never does. It is no longer quoted against the belly-corridor walk —
+	# the legs either side of that corridor are sized to what they carry now (see
+	# Limb.girth_of), so a body threading it brushes them and the corridor is a
+	# mild obstacle in its own right. The clean height contrast is the
+	# planted-against-raised pair below, where nothing changes but the height.
+	_check(blocked["aside"] > 5.0,
+		"a planted foot barely turned the Lizard aside (%.1f px)" % blocked["aside"])
 
 	# ...and the identical walk with that foot held clear of the lizard's back is
 	# a walk under a doorway. Nothing about the test changes but the height, and

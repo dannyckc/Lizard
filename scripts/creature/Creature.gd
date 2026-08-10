@@ -538,7 +538,7 @@ func rebuild() -> void:
 	# previous stature to read it from. And before *that*, what this body can do
 	# about walking: the stance the legs are solved to, and so the height the whole
 	# picture is registered to, is one of its answers.
-	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
+	_update_physique()
 	locomotion.update(posture, physique, params, size_scale, articulation)
 	gait.loco = locomotion
 	# ...and what all of that comes to about leaving the ground. After the
@@ -559,9 +559,26 @@ func rebuild() -> void:
 	# Existing damage is kept — it lives in body space precisely so a structural
 	# rebuild cannot wash it off — but its world geometry is now stale.
 	anatomy.update(self)
-	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
+	_update_physique()
 	_update_stature()
 	_update_bounds()
+
+
+## Re-counts what the body is made of, and tells the limbs what they carry.
+##
+## One call, because the two halves are one fact: the physique's census says what
+## mass each bearing limb is built to hold up, and the limb's thickness — which
+## the renderer, the lattice and the hit test all read — is asked of exactly that
+## load. Written back here rather than read live so a bare limb (a test's, a
+## piece on the ground) keeps the honest default of being sized to its length.
+func _update_physique() -> void:
+	physique.update(body, spine, anatomy.tissue, params, anatomy.state,
+		posture, size_scale)
+	if gait == null:
+		return
+	for limb in gait.limbs:
+		limb.load = physique.limb_load.x if limb.pair == Limb.FRONT \
+			else physique.limb_load.y
 
 
 ## Re-reads what heights this body occupies. Runs beside `physique` and for the
@@ -809,7 +826,7 @@ func _physics_process(delta: float) -> void:
 	_update_stature()
 	anatomy.update(self, delta)
 	_release_severed()
-	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
+	_update_physique()
 	_update_bounds()
 	# Whether any of that is standing up. After the physique because what a leg has
 	# to hold is what the body weighs, and after the gait because where the support
@@ -1026,7 +1043,7 @@ func _dead_process(delta: float) -> void:
 	_update_stature()
 	anatomy.update(self, delta)
 	_release_severed()
-	physique.update(body, spine, anatomy.tissue, params, anatomy.state)
+	_update_physique()
 	_update_bounds()
 
 
