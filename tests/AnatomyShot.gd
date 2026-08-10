@@ -42,8 +42,16 @@ func _process(_delta: float) -> bool:
 			if "--peel" in args:
 				v.set_layer_shown(AnatomyLattice.SKIN, false)
 				v.set_layer_shown(AnatomyLattice.FAT, false)
+			if "--bones" in args:
+				v.set_layer_shown(AnatomyLattice.SKIN, false)
+				v.set_layer_shown(AnatomyLattice.FAT, false)
+				v.set_layer_shown(AnatomyLattice.MUSCLE, false)
+				v.set_layer_shown(AnatomyLattice.ORGAN, false)
 			if "--xray" in args:
 				v.xray = true
+			if "--slice" in args:
+				v.slice_axis = AnatomyView.SLICE_FLAT
+				v.slice_at = 0.9
 			if "--wire" in args:
 				v.show_lattice = true
 		return false

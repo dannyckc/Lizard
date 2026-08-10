@@ -11,6 +11,16 @@
 ## beside it are these same cells, because the physique weighed these same
 ## cells: there is no second anatomy anywhere.
 ##
+## Each tissue is drawn as the structure it is, not as a common cell shape. Skin
+## and fat are watertight sheets subdivided into a Voronoi-style tessellation,
+## anchored in the body's own frame so the pattern survives every bend. Muscle
+## is elongated fibres along its own contraction direction, parted into bellies
+## at the plan's actuator boundaries. Bone, the cord and the great vessels are
+## continuous volumes drawn from their TissueForm chains — centreline plus
+## thickness, never cell by cell — and the two supply networks carry their
+## space-colonised branch trees, with everything finer living in the per-region
+## density fields. One census underneath all of it, five representations on top.
+##
 ## Four ways to look inside, and all four are subtractions rather than styles:
 ## a tissue toggled off has its cells lifted away and whatever they enclosed is
 ## simply visible; X-ray thins every cell to a film so the interior reads in
@@ -131,9 +141,16 @@ const PICK_BUCKET: float = 12.0
 ## each surviving mark grows to cover for the ones that went. The two sizes are
 ## apart so a specimen easing to a fit that lands on the line does not rebuild
 ## its whole draw list every frame deciding which side of it to be on.
+##
+## The grow has to cover a dropped neighbour *alone*. The parity checkerboard is
+## even over any flat face, but where the surface steps diagonally through the
+## solid a whole staircase run shares one parity and goes out together — so a
+## kept mark's reach must be the full cell and a half to the far side of a
+## dropped diagonal, or a big animal's hide comes up flecked with dash-shaped
+## pinholes along exactly those staircases.
 const LOD_CELL: float = 2.2
 const LOD_BACK: float = 2.6
-const LOD_GROW: float = 1.42
+const LOD_GROW: float = 2.15
 ## Most marks an X-ray will lay down before it starts taking one cell in every
 ## few — see the sieve in `_refresh_draw_list`.
 const XRAY_MOST: int = 6000
@@ -143,6 +160,44 @@ const XRAY_MOST: int = 6000
 ## is finer than the eye reads on a two-pixel mark, and it turns four Color
 ## operations per cell into one array read.
 const SHADES: int = 32
+
+# --- per-tissue marks ---------------------------------------------------------
+# Every tissue used to be stamped with the same square, which is why the specimen
+# read as generic cells rather than as skin, fat, muscle and bone. Each tissue now
+# gets the mark its own structure has; the constants below are those shapes.
+## How far a skin, fat or organ cell's corners wander from the square, as a share
+## of the mark's own half-size. The wander is hashed off the corner's *canonical*
+## position, quantised to the half-cell grid — so the two cells sharing a corner
+## move it identically and the tessellation stays watertight, and so the pattern
+## is a fact about the animal's own frame that bending and walking cannot churn.
+## Kept under SPLAT_GROW - 1, which is what guarantees the jittered marks still
+## overlap at least as much as the square ones did.
+const VORONOI_JITTER: float = 0.34
+## Muscle marks are fibres: elongated along the direction the tissue contracts
+## in — the body's long axis on the trunk, down the limb on a leg — staggered
+## along their own grain so they read as bundled strands rather than as a brick
+## wall. The width stays over one so the meat is a closed surface with grain in
+## its ink, not a surface with gaps between its fibres: strands are told apart
+## by their banked shade, never by the fat under them showing through.
+const FIBRE_LENGTH: float = 1.7
+const FIBRE_WIDTH: float = 0.9
+const FIBRE_STAGGER: float = 0.35
+## Half a station either side of a muscle-group boundary that is inked as the
+## septum between the two bellies — the plan's own actuator boundaries, so what
+## separates the bellies on the page is what separates them functionally.
+const SEPTUM_HALF: float = 0.5
+const TONE_SEPTUM: int = 255
+## The shade band a chain's tube is inked at — a mineralised matrix or a vessel
+## wall is one material, not a heap of differently-lit boxes — and how far the
+## band steps between segments, which is what makes vertebrae read as vertebrae.
+const TUBE_BAND: int = 20
+const TUBE_SEG: int = 2
+## How quickly a supply run loses calibre per branching generation: the aorta is
+## a tube, the run into a foot is a thread.
+const CALIBRE_FALL: float = 0.45
+## Width of the space-colonisation branchlets, which stand in for everything
+## finer than the named runs. Everything finer than *them* is the density field.
+const BRANCH_WIDTH: float = 0.7
 
 var creature: Creature = null
 ## Which of the five tissue layers are still on the specimen.
@@ -272,8 +327,33 @@ var _order: Array[String] = []
 ## The two in-surface directions of each drawn cell, in the body's own axes.
 ## Fixed for as long as the draw list is, because a cell's surface direction is a
 ## fact about the animal rather than about where it is being looked at from.
+## For muscle the first runs along the fibre — the direction the tissue
+## contracts in — so the marks are the grain of the meat.
 var _tan_a := PackedVector3Array()
 var _tan_b := PackedVector3Array()
+## Corner coefficients of each drawn cell's mark, four corners of (along, across)
+## apiece. The square every cell used to be stamped with is the special case
+## (±1, ±1); skin and fat wander theirs into a Voronoi-style tessellation, muscle
+## stretches its along the fibre. Baked with the draw list, per-frame cost nil.
+var _ca := PackedFloat32Array()
+var _cb := PackedFloat32Array()
+## Per-cell ink adjustment: a small banked band nudge that gives skin and fat
+## their cellular mottle, or TONE_SEPTUM where the mark is the boundary between
+## two muscle bellies.
+var _tone := PackedByteArray()
+## The tissues' derived form — bone centrelines, conduit splines, supply trees,
+## density fields. Rebuilt only when the lattice is; see TissueForm.
+var _form := TissueForm.new()
+## Which chain samples are exposed under the current filters, rebuilt with the
+## draw list. Bone, nerve and vessel cells are never marked one by one — their
+## chains are drawn as continuous tubes wherever any of their cells would show.
+var _sample_vis := PackedByteArray()
+## Reused buffer for the supply branchlets.
+var _branch_lines := PackedVector2Array()
+## Muscle-group boundary stations per patch, for the septa, and the girdle
+## layout they were read off.
+var _septa: Array = []
+var _septa_key: int = -1
 ## Which of the drawn cells survived the facing cut this frame, and how many.
 var _shown := PackedInt32Array()
 var _shown_count: int = 0
@@ -552,6 +632,7 @@ func slice_plane() -> float:
 ## Re-derives which cells are on the specimen. Runs only when something that
 ## decides membership changes; a frame where nothing did reuses the list.
 func _refresh_draw_list(lat: AnatomyLattice, grid: TissueGrid) -> void:
+	_form.ensure(lat)
 	var step: int = _lod_step()
 	var key: int = hash([layers, show_nerves, show_vessels, xray, slice_axis,
 		snappedf(slice_at, 0.002), grid.revision, lat.count, step])
@@ -598,6 +679,11 @@ func _refresh_draw_list(lat: AnatomyLattice, grid: TissueGrid) -> void:
 	var neighbours: PackedByteArray = lat.around
 	var odd: PackedByteArray = lat.parity
 	var where: PackedVector3Array = lat.pos
+	var chain_of: PackedInt32Array = _form.sample_of
+	var chained: bool = chain_of.size() == lat.count
+	if _sample_vis.size() != _form.sample_total:
+		_sample_vis.resize(_form.sample_total)
+	_sample_vis.fill(0)
 	var thin: bool = step > 1
 	# X-ray is the one view with no surface to it — every cell of the body is a
 	# mark, so a big animal asks for the whole census at once and gets tens of
@@ -613,6 +699,14 @@ func _refresh_draw_list(lat: AnatomyLattice, grid: TissueGrid) -> void:
 			lifted.append(i)
 			continue
 		present[i] = 1
+		# A cell of a continuous structure — a bone, a cord, a vessel — is never
+		# marked one by one: where it would show, its chain's tube shows instead.
+		# Ahead of the sieve and the parity thinning, because whether a bone is
+		# exposed is not a question the level of detail gets a say in.
+		if chained and chain_of[i] >= 0:
+			if xray or (int(neighbours[i]) & hidden) != 0:
+				_sample_vis[chain_of[i]] = 1
+			continue
 		if sieve > 1 and i % sieve != 0:
 			continue
 		if thin and not xray and odd[i] != 0:
@@ -624,7 +718,7 @@ func _refresh_draw_list(lat: AnatomyLattice, grid: TissueGrid) -> void:
 			listed[i] = 1
 			_draw_list.append(i)
 	if xray:
-		_bake_tangents(lat)
+		_bake_marks(lat, grid)
 		return
 
 	for i in lifted:
@@ -633,11 +727,14 @@ func _refresh_draw_list(lat: AnatomyLattice, grid: TissueGrid) -> void:
 			var n: int = lat.neighbor[base + k]
 			if n < 0 or present[n] == 0 or listed[n] != 0:
 				continue
+			if chained and chain_of[n] >= 0:
+				_sample_vis[chain_of[n]] = 1
+				continue
 			if step > 1 and lat.parity[n] != 0:
 				continue
 			listed[n] = 1
 			_draw_list.append(n)
-	_bake_tangents(lat)
+	_bake_marks(lat, grid)
 
 
 ## Half the size of one mark, on the page. One statement, so the marks, the ring
@@ -663,7 +760,7 @@ func _lod_step() -> int:
 	return 1 if page >= LOD_CELL else 2
 
 
-## The plane each drawn cell's mark lies in.
+## The plane each drawn cell's mark lies in, and the shape of the mark on it.
 ##
 ## A cell is marked with a patch of the surface it stands on, so the mark needs
 ## two directions across that surface. They come off the cell's own outward
@@ -671,24 +768,150 @@ func _lod_step() -> int:
 ## the shape of the grid — so the marks lie along the body and turn with it, and
 ## the specimen reads as a skin rather than as a pile of cubes.
 ##
-## Baked with the draw list rather than per frame: which way a piece of an animal
-## faces is a fact about the animal, and turning the specimen does not change it.
-func _bake_tangents(lat: AnatomyLattice) -> void:
+## The shape is the tissue's own. Skin and fat are a tessellation of irregular
+## cells — corners wandered off the square by a hash of their canonical position,
+## shared between neighbours so the sheet stays watertight, fixed in the body's
+## own frame so bending never churns it. Muscle is fibres: the first tangent is
+## the contraction direction projected into the surface, and the corners stretch
+## the mark along it — which on a tapering limb makes the strands converge from
+## origin to insertion of their own accord, because that is what projecting the
+## pull line into a cone's surface does. Organs keep a softer wander; the skull,
+## the one bone drawn as marks, keeps the plain square so the case reads fused.
+##
+## Baked with the draw list rather than per frame: all of it is fact about the
+## animal, and turning the specimen does not change it.
+func _bake_marks(lat: AnatomyLattice, grid: TissueGrid) -> void:
 	var n: int = _draw_list.size()
 	_tan_a.resize(n)
 	_tan_b.resize(n)
+	_ca.resize(n * 4)
+	_cb.resize(n * 4)
+	_tone.resize(n)
+	_bake_septa(grid)
+	var half_cell: float = AnatomyLattice.CELL * 0.5
+	# When the specimen is thinned to every other cell, each surviving mark has
+	# to cover for a dropped neighbour and has no size to spare — and a cell that
+	# small on the page cannot show a tessellation anyway. So the coarse specimen
+	# keeps the tone mottle and the fibre grain in its ink and gives up the
+	# geometric wander, which is what keeps a distant hide watertight.
+	var coarse: bool = _lod > 1
+	var jitter: float = 0.0 if coarse else VORONOI_JITTER
+	var stagger: float = 0.0 if coarse else FIBRE_STAGGER
+	var wide: float = 1.0 if coarse else FIBRE_WIDTH
 	for j in n:
-		var out: Vector3 = lat.normal[_draw_list[j]]
-		# Any direction not along the normal will do to start; the pair that comes
-		# out is orthonormal either way, and which of the infinitely many rotations
-		# of the patch about its own normal is used cannot be seen.
-		var seed := Vector3(0.0, 0.0, 1.0) if absf(out.z) < 0.9 else Vector3(1.0, 0.0, 0.0)
-		var a: Vector3 = seed.cross(out)
-		if a.length_squared() < 0.000001:
-			a = Vector3(0.0, 1.0, 0.0)
+		var i: int = _draw_list[j]
+		var out: Vector3 = lat.normal[i]
+		var t: int = lat.kind[i]
+		var a: Vector3
+		if t == AnatomyLattice.MUSCLE:
+			# The fibre direction: along the trunk on the body, down the limb on a
+			# leg, laid into the surface the mark lies in.
+			var fibre := Vector3(1.0, 0.0, 0.0) if lat.patch_of[i] == 0 \
+				else Vector3(0.0, 0.0, -1.0)
+			a = fibre - out * out.dot(fibre)
+			if a.length_squared() < 0.000001:
+				a = _spare_tangent(out)
+		else:
+			a = _spare_tangent(out)
 		a = a.normalized()
+		var b: Vector3 = out.cross(a).normalized()
 		_tan_a[j] = a
-		_tan_b[j] = out.cross(a).normalized()
+		_tan_b[j] = b
+
+		var v: int = j * 4
+		var h: int = _hash_at(lat.pos[i], half_cell)
+		match t:
+			AnatomyLattice.MUSCLE:
+				# A strand: long with the grain, narrow across it, slid along its
+				# own length so the bundle reads as overlapping fibres.
+				var slide: float = (float(h & 15) / 15.0 - 0.5) * stagger
+				var span: float = FIBRE_LENGTH * (0.85 + 0.3 * float((h >> 4) & 7) / 7.0)
+				_ca[v] = -span + slide
+				_ca[v + 1] = span + slide
+				_ca[v + 2] = span + slide
+				_ca[v + 3] = -span + slide
+				_cb[v] = -wide
+				_cb[v + 1] = -wide
+				_cb[v + 2] = wide
+				_cb[v + 3] = wide
+				_tone[j] = TONE_SEPTUM if _on_septum(lat, i) else ((h >> 7) % 3)
+			AnatomyLattice.SKIN, AnatomyLattice.FAT, AnatomyLattice.ORGAN:
+				# The tessellation: each corner wanders by a hash of where the
+				# corner *is*, so the two marks meeting there wander it together.
+				for k in 4:
+					var sa: float = -1.0 if k == 0 or k == 3 else 1.0
+					var sb: float = -1.0 if k <= 1 else 1.0
+					var corner: Vector3 = lat.pos[i] + (a * sa + b * sb) * half_cell
+					var ch: int = _hash_at(corner, half_cell)
+					_ca[v + k] = sa + (float(ch & 255) / 255.0 - 0.5) * 2.0 * jitter
+					_cb[v + k] = sb + (float((ch >> 8) & 255) / 255.0 - 0.5) * 2.0 * jitter
+				_tone[j] = (h >> 7) % 3
+			_:
+				_ca[v] = -1.0
+				_ca[v + 1] = 1.0
+				_ca[v + 2] = 1.0
+				_ca[v + 3] = -1.0
+				_cb[v] = -1.0
+				_cb[v + 1] = -1.0
+				_cb[v + 2] = 1.0
+				_cb[v + 3] = 1.0
+				_tone[j] = 1
+
+
+## Any direction not along the normal will do to start; the pair that comes out
+## is orthonormal either way, and which of the infinitely many rotations of the
+## patch about its own normal is used cannot be seen.
+static func _spare_tangent(out: Vector3) -> Vector3:
+	var seed := Vector3(0.0, 0.0, 1.0) if absf(out.z) < 0.9 else Vector3(1.0, 0.0, 0.0)
+	var a: Vector3 = seed.cross(out)
+	if a.length_squared() < 0.000001:
+		a = Vector3(0.0, 1.0, 0.0)
+	return a
+
+
+## A deterministic hash of a canonical-frame position, quantised to the grid
+## `unit` — the whole of why the cellular pattern is the same pattern every
+## frame, from every angle, in every pose.
+static func _hash_at(p: Vector3, unit: float) -> int:
+	var x: int = int(round(p.x / unit))
+	var y: int = int(round(p.y / unit))
+	var z: int = int(round(p.z / unit))
+	var h: int = x * 73856093 ^ y * 19349663 ^ z * 83492791
+	h = (h ^ (h >> 13)) * 1274126177
+	return h & 0x7fffffff
+
+
+## The boundary stations between muscle groups, per patch — the plan's own
+## actuator boundaries, which is what makes the septa anatomy rather than decor.
+## Keyed on the girdles, because they are what moves the boundaries.
+func _bake_septa(grid: TissueGrid) -> void:
+	if grid.plan == null:
+		return
+	var key: int = grid.plan.shoulder_col * 100 + grid.plan.pelvis_col
+	if key == _septa_key:
+		return
+	_septa_key = key
+	_septa.clear()
+	for pk in AnatomyLattice.PATCH_KEYS.size():
+		var walls := PackedFloat32Array()
+		var patch_key: String = AnatomyLattice.PATCH_KEYS[pk]
+		for group in grid.plan.muscles:
+			if group.patch_key != patch_key or group.from_col <= 0:
+				continue
+			walls.append(float(group.from_col))
+		_septa.append(walls)
+
+
+func _on_septum(lat: AnatomyLattice, i: int) -> bool:
+	var pk: int = lat.patch_of[i]
+	if pk >= _septa.size():
+		return false
+	var walls: PackedFloat32Array = _septa[pk]
+	var s: float = lat.station[i]
+	for wall in walls:
+		if absf(s - wall) < SEPTUM_HALF:
+			return true
+	return false
 
 
 ## Refreshes the posed station frames the cells ride, once per frame.
@@ -842,8 +1065,10 @@ func _draw() -> void:
 	if show_vessels:
 		_draw_network(grid, state.plan.vessels, state.vessels, COL_VESSEL, 3, 46.0, true,
 			VESSEL_OFFSET)
+		_draw_branches(lat, state.vessels, TissueForm.VESSELS, COL_VESSEL)
 	if show_nerves:
 		_draw_network(grid, state.plan.nerves, state.nerves, COL_NERVE, 2, 150.0, false, 0.0)
+		_draw_branches(lat, state.nerves, TissueForm.NERVES, COL_NERVE)
 	if show_vessels:
 		_draw_organ(grid, lat, BodyPlan.HEART, COL_VESSEL, "HEART", true)
 	if show_nerves:
@@ -884,24 +1109,31 @@ func _draw_empty() -> void:
 ## and is the size of the cell. What changed is the shape of the mark.
 func _draw_cells(lat: AnatomyLattice, grid: TissueGrid) -> void:
 	var listed: int = _draw_list.size()
-	if listed == 0:
+	# The chains draw into the same buffers as the marks, one quad a segment, so
+	# the room is the two together — and a specimen stripped to nothing but its
+	# skeleton is all chains and no marks.
+	var room: int = listed + _form.sample_total
+	if room == 0:
 		_shown_count = 0
 		return
-	if _cell_page.size() != listed:
-		_cell_page.resize(listed)
-		_cell_deep.resize(listed)
-		_shown.resize(listed)
+	if _cell_page.size() != room:
+		_cell_page.resize(room)
+		_cell_deep.resize(room)
+		_shown.resize(room)
 	# Grown to the whole draw list and cut back to what survived the facing test
 	# before the upload, so a frame that hides half the body uploads half of one.
-	_points.resize(listed * 4)
-	_colors.resize(listed * 4)
-	_depths.resize(listed)
+	_points.resize(room * 4)
+	_colors.resize(room * 4)
+	_depths.resize(room)
 
 	# In world pixels: the three axis vectors below already carry the page scale,
 	# because they are page offsets per world pixel of the body.
 	var half: float = AnatomyLattice.CELL * 0.5 * SPLAT_GROW \
 		* (LOD_GROW if _lod > 1 else 1.0)
-	var floor_page: float = SPLAT_MIN * 0.5
+	# The edge-on floor grows with the thinning: a mark covering for a dropped
+	# neighbour needs the extra reach exactly where its surface is rolling away,
+	# or the hide of a big animal comes up flecked with pinholes.
+	var floor_page: float = SPLAT_MIN * 0.5 * (LOD_GROW if _lod > 1 else 1.0)
 	var alpha: float = 1.0
 	if xray:
 		# Thinner marks, but fewer of them where the sieve has been at work, so
@@ -971,19 +1203,30 @@ func _draw_cells(lat: AnatomyLattice, grid: TissueGrid) -> void:
 
 		var t: int = lat.kind[i]
 		var band: int = clampi(int((lit + 1.0) * (0.5 * float(SHADES))), 0, SHADES - 1)
+		# The banked tone: the cellular mottle on skin and fat, the strand-by-
+		# strand banding that is the muscle's grain, and the darkened seam where
+		# two bellies meet. Ink only — the surfaces themselves stay closed.
+		var tone: int = _tone[j]
+		if tone == TONE_SEPTUM:
+			band = maxi(band - 7, 0)
+		else:
+			band = clampi(band + (tone - 1) * (2 if t == AnatomyLattice.MUSCLE else 1),
+				0, SHADES - 1)
 		var ink: Color = _shade[t * SHADES + band]
 		if worn[pk] != null:
 			ink = _worn(lat, grid, worn[pk], i, ink, t)
 		var v: int = n * 4
-		_points[v] = page - ea - eb
-		_points[v + 1] = page + ea - eb
-		_points[v + 2] = page + ea + eb
-		_points[v + 3] = page - ea + eb
+		var c4: int = j * 4
+		_points[v] = page + ea * _ca[c4] + eb * _cb[c4]
+		_points[v + 1] = page + ea * _ca[c4 + 1] + eb * _cb[c4 + 1]
+		_points[v + 2] = page + ea * _ca[c4 + 2] + eb * _cb[c4 + 2]
+		_points[v + 3] = page + ea * _ca[c4 + 3] + eb * _cb[c4 + 3]
 		_colors[v] = ink
 		_colors[v + 1] = ink
 		_colors[v + 2] = ink
 		_colors[v + 3] = ink
 		n += 1
+	n = _chain_pass(lat, n, true)
 	_shown_count = n
 	if n == 0:
 		return
@@ -1036,6 +1279,124 @@ static func _at_least(edge: Vector2, other: Vector2, least: float) -> Vector2:
 	return Vector2(-across.y, across.x) * least
 
 
+## The chains, as continuous volumes: every internal structure whose cells are
+## exposed under the current filters is drawn as a run of quads along its own
+## centreline, as thick as the structure is thick — a bone is one solid on its
+## axis, a major vessel or nerve is one pipe, and neither is a heap of boxes.
+##
+## Damage stays spatial: a stretch whose member cells the ledger has taken
+## darkens toward the tissue's spent shade, and a sample more than half gone is
+## a break in the run — a snapped femur shows its fracture as a gap in the bone,
+## exactly where the teeth took it. The segments go into the same painter-sorted
+## buffers as the marks, so a bone sits correctly among the flesh around it, and
+## each segment registers for the hover test like any mark.
+##
+## `drawing` false places the segments for a hover test without painting them —
+## the same arrangement `_place_marks` has with the cell pass.
+func _chain_pass(lat: AnatomyLattice, n: int, drawing: bool) -> int:
+	var form: TissueForm = _form
+	if form.sample_total == 0 or _sample_vis.size() != form.sample_total:
+		return n
+	var sliced: bool = slice_axis >= 0
+	var plane: float = slice_plane()
+	var floor_r: float = SPLAT_MIN * 0.5
+	for c in form.chain_count:
+		var t: int = int(form.chain_kind[c])
+		if not tissue_shown(t):
+			continue
+		var part: int = int(form.chain_part[c])
+		# Ring chains sample their hoop in sectors the cells fill unevenly, so
+		# their join reaches further; and bone banks a base band by part — a
+		# girdle is denser stock than a rib, and both are one material along
+		# their whole run rather than thirty differently-lit boxes.
+		var tol: int = 3 if form.chain_ringed(c) else 1
+		var base_band: int = TUBE_BAND
+		if part == AnatomyLattice.PART_GIRDLE:
+			base_band -= 3
+		elif part == AnatomyLattice.PART_RIB:
+			base_band += 1
+		var prev: int = -1
+		var prev_bucket: int = 0
+		var prev_page := Vector2.ZERO
+		var prev_deep: float = 0.0
+		var prev_r: float = 0.0
+		var prev_worn: float = 0.0
+		for s in range(form.chain_from[c], form.chain_from[c + 1]):
+			if _sample_vis[s] == 0 \
+					or (sliced and form.s_canon[s][slice_axis] > plane):
+				prev = -1
+				continue
+			var gone_frac: float = form.sample_gone(lat, s)
+			if gone_frac >= TissueForm.BREAK_SHARE:
+				prev = -1
+				continue
+			var pk: int = int(form.s_patch[s])
+			if pk >= _af_o.size() or _af_o[pk] == null:
+				prev = -1
+				continue
+			var o: PackedVector2Array = _af_o[pk]
+			var st: float = clampf(form.s_station[s], 0.0, float(o.size() - 1))
+			var ci: int = mini(int(st), o.size() - 1)
+			var f: float = st - float(ci)
+			var side: float = form.s_lat[s]
+			var ahead: float = form.s_fore[s]
+			var up: float = form.s_lift[s]
+			var page: Vector2 = o[ci] + (_af_s[pk] as PackedVector2Array)[ci] * f \
+				+ (_af_l[pk] as PackedVector2Array)[ci] * side \
+				+ (_af_f[pk] as PackedVector2Array)[ci] * ahead + _af_h * up
+			var deep: float = (_dp_o[pk] as PackedFloat32Array)[ci] \
+				+ (_dp_s[pk] as PackedFloat32Array)[ci] * f \
+				+ (_dp_l[pk] as PackedFloat32Array)[ci] * side \
+				+ (_dp_f[pk] as PackedFloat32Array)[ci] * ahead + _dp_h * up
+			var r: float = maxf(form.s_radius[s] * _scale, floor_r)
+			if prev >= 0 and form.s_bucket[s] - prev_bucket <= tol:
+				if drawing:
+					var dir: Vector2 = page - prev_page
+					var span: float = dir.length()
+					if span > 0.0001:
+						dir /= span
+						var nrm := Vector2(-dir.y, dir.x)
+						# Reached a little past both ends, so consecutive
+						# segments close their elbows on a curved run.
+						var ext: Vector2 = dir * minf(prev_r, span * 0.3)
+						var band: int = base_band
+						if t == AnatomyLattice.BONE:
+							band += TUBE_SEG if (form.s_bucket[s] & 1) == 0 \
+								else -TUBE_SEG
+						var ink: Color = _shade[t * SHADES \
+							+ clampi(band, 0, SHADES - 1)]
+						var wear: float = maxf(gone_frac, prev_worn)
+						if wear > 0.0:
+							ink = ink.lerp(TISSUE_WORN[t],
+								wear / TissueForm.BREAK_SHARE * 0.85)
+						var v: int = n * 4
+						_points[v] = prev_page - ext - nrm * prev_r
+						_points[v + 1] = prev_page - ext + nrm * prev_r
+						_points[v + 2] = page + ext + nrm * r
+						_points[v + 3] = page + ext - nrm * r
+						_colors[v] = ink
+						_colors[v + 1] = ink
+						_colors[v + 2] = ink
+						_colors[v + 3] = ink
+						_depths[n] = Vector2((deep + prev_deep) * 0.5, float(n))
+						_cell_page[n] = page
+						_cell_deep[n] = deep
+						_shown[n] = form.s_rep[s]
+						n += 1
+				else:
+					_cell_page[n] = page
+					_cell_deep[n] = deep
+					_shown[n] = form.s_rep[s]
+					n += 1
+			prev = s
+			prev_bucket = form.s_bucket[s]
+			prev_page = page
+			prev_deep = deep
+			prev_r = r
+			prev_worn = gone_frac
+	return n
+
+
 ## Places every drawn cell on the page without drawing it, for a hover test
 ## arriving before the specimen has been painted — which is every hover in a
 ## headless run, and the first one after a filter changes. The drawing pass does
@@ -1043,10 +1404,11 @@ static func _at_least(edge: Vector2, other: Vector2, least: float) -> Vector2:
 ## never run in the ordinary way of things.
 func _place_marks(lat: AnatomyLattice) -> void:
 	var listed: int = _draw_list.size()
-	if _cell_page.size() != listed:
-		_cell_page.resize(listed)
-		_cell_deep.resize(listed)
-		_shown.resize(listed)
+	var room: int = listed + _form.sample_total
+	if _cell_page.size() != room:
+		_cell_page.resize(room)
+		_cell_deep.resize(room)
+		_shown.resize(room)
 	var cut: float = -2.0 if xray else FACING_CUT
 	var n: int = 0
 	for j in listed:
@@ -1074,6 +1436,7 @@ func _place_marks(lat: AnatomyLattice) -> void:
 			+ yd[c] * side + xd[c] * ahead + _dp_h * up
 		_shown[n] = i
 		n += 1
+	n = _chain_pass(lat, n, false)
 	_shown_count = n
 	_index_marks()
 
@@ -1180,12 +1543,15 @@ func _draw_network(grid: TissueGrid, runs: Array[BodyPlan.Conduit],
 			continue
 		_gather_run(grid, runs, run, offset)
 		var reach: float = clampf(network.delivery[run.region], 0.0, 1.0)
+		# Calibre falls with each branching generation: the trunk vessel out of
+		# the chest is a tube, the run into a foot is a thread. Same for nerves.
+		var calibre: float = 1.0 / (1.0 + CALIBRE_FALL * float(_depth_of(runs, run)))
 		for i in range(_run.size() - 1):
 			if _run_gone[i] != 0 or _run_gone[i + 1] != 0:
 				draw_dashed_line(_run[i], _run[i + 1], Color(tint, 0.16), 0.9, 2.5, true)
 				continue
 			draw_line(_run[i], _run[i + 1], Color(tint, 0.18 + 0.62 * reach),
-				1.0 + 1.4 * reach, true)
+				(0.7 + 1.9 * calibre) * (0.55 + 0.45 * reach), true)
 		if reach > AnatomyNetwork.CUTOFF:
 			_draw_pulses(runs, run, tint, reach, pulses, speed, beat)
 
@@ -1275,6 +1641,50 @@ func _depth_of(runs: Array[BodyPlan.Conduit], run: BodyPlan.Conduit) -> int:
 		at = runs[at.parent]
 		depth += 1
 	return depth
+
+
+## The local supply trees: the branches space colonisation grew from each run
+## toward the tissue that demands supply — see TissueForm. Everything finer than
+## these is the density field, and the field shows here too: a region that asks
+## little was grown few branches and inks the ones it has faintly, while the
+## delivery term fades a starved or silenced region's whole tree.
+##
+## Every branch vertex is a lattice cell, posed through the same affine as the
+## marks — the tree bends with the flesh it supplies, and a vertex whose cell
+## has been eaten breaks the branch there.
+func _draw_branches(lat: AnatomyLattice, network: AnatomyNetwork, net: int,
+		tint: Color) -> void:
+	var paths: Array = _form.branches[net]
+	if paths.is_empty():
+		return
+	var owner: PackedInt32Array = _form.branch_region[net]
+	var field: PackedFloat32Array = _form.density[net]
+	if field.size() < BodyPlan.REGIONS:
+		return
+	for reg in BodyPlan.REGIONS:
+		_branch_lines.resize(0)
+		for b in paths.size():
+			if owner[b] != reg:
+				continue
+			var path: PackedInt32Array = paths[b]
+			var live: bool = false
+			var prev := Vector2.ZERO
+			for idx in path:
+				if lat.gone[idx] != 0:
+					live = false
+					continue
+				var at3: Vector3 = _cell_at(lat, idx)
+				var at := Vector2(at3.x, at3.y)
+				if live:
+					_branch_lines.append(prev)
+					_branch_lines.append(at)
+				prev = at
+				live = true
+		if _branch_lines.size() < 2:
+			continue
+		var reach: float = clampf(network.delivery[reg], 0.0, 1.0)
+		var alpha: float = (0.08 + 0.34 * reach) * (0.45 + 0.55 * field[reg])
+		draw_multiline(_branch_lines, Color(tint, alpha), BRANCH_WIDTH, true)
 
 
 # ---------------------------------------------------------------- organs ----
@@ -1423,6 +1833,17 @@ func _readout(lat: AnatomyLattice, grid: TissueGrid, i: int) -> String:
 		bits.append(BodyPlan.ORGAN_NAMES[lat.organ_of[i]].to_upper())
 	else:
 		bits.append(AnatomyLattice.TISSUE_NAMES[t].to_upper())
+
+	# The tissue's own properties, where it has ones worth quoting: the fibre
+	# composition on muscle, the local supply-field density on the two networks.
+	if t == AnatomyLattice.MUSCLE and creature.params != null:
+		bits.append("FT %d%%" % int(round(creature.params.fast_twitch * 100.0)))
+	elif t == AnatomyLattice.NERVE or t == AnatomyLattice.VESSEL:
+		var net: int = TissueForm.NERVES if t == AnatomyLattice.NERVE \
+			else TissueForm.VESSELS
+		var field: PackedFloat32Array = _form.density[net]
+		if field.size() > int(lat.region[i]):
+			bits.append("FIELD %d%%" % int(round(field[lat.region[i]] * 100.0)))
 
 	var p: TissueGrid.Patch = grid.patch(AnatomyLattice.PATCH_KEYS[lat.patch_of[i]])
 	if p != null and p.live:

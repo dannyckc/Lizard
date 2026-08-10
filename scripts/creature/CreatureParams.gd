@@ -200,6 +200,13 @@ extends Resource
 ## is this times mass^(2/3), so raising it makes a creature strong *for its size*
 ## rather than simply large.
 @export_range(0.2, 4.0, 0.01) var muscle_power: float = 1.0
+## What the muscle is made of: the share of its fibre that is fast-twitch. It is
+## composition, not amount — `muscle_power` and the census say how much force
+## there is; this says how quickly it can be applied. Fast fibre turns the limbs
+## over sooner when the animal is throwing them — sprinting, leaping — and slow
+## fibre gives that quickness up. 0.5 is the mixed default every preset stands
+## on; the specimen quotes it on every muscle cell.
+@export_range(0.0, 1.0, 0.01) var fast_twitch: float = 0.5
 ## How much fat the species lays down, as a multiple of the body plan's profile —
 ## thickest over the trunk, thinning toward the head, tail and limbs. It is not a
 ## damage-resistance number: fat is a real layer in the depth stack, so a padded
@@ -388,6 +395,7 @@ const SCHEMA: Array = [
 	{"group": "Physique"},
 	{"prop": "density", "label": "Density", "min": 0.2, "max": 4.0, "step": 0.01},
 	{"prop": "muscle_power", "label": "Muscle power", "min": 0.2, "max": 4.0, "step": 0.01},
+	{"prop": "fast_twitch", "label": "Fast twitch", "min": 0.0, "max": 1.0, "step": 0.01},
 	{"prop": "fat_reserve", "label": "Fat reserve", "min": 0.0, "max": 3.0, "step": 0.05},
 
 	{"group": "Movement"},

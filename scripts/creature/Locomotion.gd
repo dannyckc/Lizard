@@ -120,6 +120,10 @@ const SWING_PERIOD: float = 1.6
 ## as muscle can take. This is only here so a degenerate body — a limb of no
 ## length, a cycle of no duration — cannot ask for a step of zero seconds.
 const SWING_FLOOR: float = 0.045
+## How far fibre composition can move the swing's drive either way of the mixed
+## default — see `swing_time`. Small on purpose: composition is a grade of
+## muscle, not a second engine.
+const TWITCH_SPAN: float = 0.08
 ## How much of a limb's free swing muscle may take off it when the animal is
 ## going flat out.
 ##
@@ -229,6 +233,11 @@ const BUNCH_SHARE: float = 0.16
 ## mass^(2/3) and weight as mass, so this falls as the cube root of size all on
 ## its own — and every slow thing about a large animal below is this one number.
 var power: float = 1.0
+## The fibre composition of that muscle — the params' fast-twitch share. Power
+## says how hard the legs can push; this says how quickly the push arrives, so
+## it enters the swing's drive term and nowhere else. 0.5 is the mixed default,
+## and at 0.5 it changes nothing at all.
+var twitch: float = 0.5
 ## What the muscle behind each girdle can deliver across its sockets, against an
 ## ordinarily-built animal — see Physique.girdle_drive, which is where it is
 ## counted and why. Held here because this is the object the gait already reads
@@ -273,6 +282,7 @@ func update(posture: Posture, physique: Physique, p: CreatureParams, scale: floa
 	if posture == null or physique == null or p == null:
 		return
 	power = clampf(physique.strength / maxf(physique.mass, 0.0001), 0.05, 8.0)
+	twitch = clampf(p.fast_twitch, 0.0, 1.0)
 	girdle_drive = physique.girdle_drive
 
 	# What the joints do. There is no longer a cap here, and its absence is the
@@ -513,8 +523,13 @@ func stride(sweep: float, lead: float) -> float:
 ## through a third slower than gravity alone would have brought them — which is
 ## not a heavy animal walking deliberately, it is a heavy animal wading.
 func swing_time(bone: float) -> float:
+	# Fibre composition scales the drive, not the pendulum: fast-twitch muscle
+	# throws the same limb through sooner, slow-twitch gives that up — and the
+	# same bound still holds, because no composition of muscle can slow a limb
+	# below the rate gravity alone brings it through at.
 	return SWING_PERIOD * sqrt(maxf(bone, 1.0) / Elevation.GRAVITY) \
-		/ maxf(pow(clampf(power, 0.05, 8.0), 1.0 / 3.0), 1.0)
+		/ maxf(pow(clampf(power, 0.05, 8.0), 1.0 / 3.0)
+			* lerpf(1.0 - TWITCH_SPAN, 1.0 + TWITCH_SPAN, twitch), 1.0)
 
 
 ## The same swing with as much taken off it as going fast can take.
