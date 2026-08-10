@@ -60,6 +60,9 @@ var _colors := PackedColorArray()
 var _indices := PackedInt32Array()
 var _flat := PackedColorArray([COL_SHADOW])
 var _strand_points := PackedVector2Array()
+## Whether the drawn field is stale — set by arrivals and removals, held while
+## anything still slides. A field of settled scraps issues no draw at all.
+var _dirty: bool = true
 
 
 func _ready() -> void:
@@ -103,6 +106,7 @@ func scatter(chunks: Array, origin: Vector2, source_id: int) -> void:
 	var excess: int = scraps.size() - MAX_SCRAPS
 	if excess > 0:
 		scraps = scraps.slice(excess)
+	_dirty = true
 
 
 ## Removes every scrap within `radius` of `pos` that `eater` is allowed to have,
@@ -131,11 +135,14 @@ func consume(pos: Vector2, radius: float, eater: Node,
 		if scraps[i].pos.distance_squared_to(pos) <= r2:
 			scraps.remove_at(i)
 			eaten += 1
+	if eaten > 0:
+		_dirty = true
 	return eaten
 
 
 func clear() -> void:
 	scraps.clear()
+	_dirty = true
 
 
 func _process(delta: float) -> void:
@@ -143,9 +150,11 @@ func _process(delta: float) -> void:
 	# whatever the frame rate — and settled chunks fall out of the maths
 	# entirely, which is what keeps a full field free.
 	var keep: float = exp(-DRAG * delta)
+	var live: bool = false
 	for scrap in scraps:
 		if scrap.settled:
 			continue
+		live = true
 		scrap.pos += scrap.vel * delta
 		scrap.angle += scrap.spin * delta
 		scrap.vel *= keep
@@ -154,7 +163,11 @@ func _process(delta: float) -> void:
 			scrap.vel = Vector2.ZERO
 			scrap.spin = 0.0
 			scrap.settled = true
-	queue_redraw()
+	# Redraw only while the picture can differ from the one on screen — see
+	# CarrionField, which holds its meat to the same rule.
+	if live or _dirty:
+		queue_redraw()
+	_dirty = live
 
 
 ## Drawn as weighty irregular blobs whose area matches the joined tissue cells.

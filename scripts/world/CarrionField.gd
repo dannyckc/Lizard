@@ -321,6 +321,11 @@ var _muscle_lines := PackedVector2Array()
 ## whose meat has all landed pays one empty loop for it.
 var _aloft_span := PackedInt32Array()
 var _aloft_lift := PackedFloat32Array()
+## Whether the drawn field is stale: set by anything that adds, removes, erodes
+## or moves a part, and held true while any part is still in motion. A habitat
+## of settled meat re-walks no cells and issues no draw at all — the last frame
+## drawn is still the truth, and that is what a canvas item already shows.
+var _dirty: bool = true
 
 
 func _ready() -> void:
@@ -357,6 +362,7 @@ func receive(pieces: Array, source: Node) -> void:
 		if part != null:
 			parts.append(part)
 	_cull()
+	_dirty = true
 
 
 ## Turns one piece of lattice into a body lying in the world.
@@ -439,6 +445,7 @@ func _cull() -> void:
 
 func clear() -> void:
 	parts.clear()
+	_dirty = true
 
 
 # ------------------------------------------------------------------- biting ----
@@ -514,6 +521,7 @@ func bite(part: Part, mark: BiteMark, shed: Array) -> float:
 		return 0.0
 	part.flesh = maxf(part.flesh - removed, 0.0)
 	TissueGrid.coalesce_shed(loose, shed)
+	_dirty = true
 	return removed
 
 
@@ -598,6 +606,7 @@ func split(part: Part, keep: Vector2) -> Array[Part]:
 			made.append(piece)
 			parts.append(piece)
 	_keep_only(part, groups[held])
+	_dirty = true
 	# Not culled: dividing a piece adds no tissue to the world, and the ceiling is
 	# on how many animals have come apart rather than on how finely.
 	return made
@@ -717,6 +726,7 @@ func swallow(part: Part) -> int:
 		return 0
 	parts.erase(part)
 	part.carrier = null
+	_dirty = true
 	return maxi(1, int(round(part.flesh / FOOD_PER_UNIT)))
 
 
@@ -724,7 +734,18 @@ func swallow(part: Part) -> int:
 
 func _process(delta: float) -> void:
 	settle(delta)
-	queue_redraw()
+	# A redraw re-walks every cell of every part, so it is issued only while the
+	# picture can differ from the one already on screen: something moving,
+	# falling or carried, or the set itself just changed. `_dirty` stays up one
+	# frame past the last motion so the final resting pose is what gets drawn.
+	var live: bool = false
+	for part in parts:
+		if part.carrier != null or not part.settled or not part.fall.resting:
+			live = true
+			break
+	if live or _dirty:
+		queue_redraw()
+	_dirty = live
 
 
 ## The fall, then ground friction on everything nothing is holding, and the sweep
@@ -747,6 +768,7 @@ func settle(delta: float) -> void:
 		# nothing in it, and nothing in the world has anything to draw or bite.
 		if part.is_spent():
 			parts.remove_at(i)
+			_dirty = true
 			continue
 		# Something with hold of it is not falling. Jaws carry a piece of meat at the
 		# height of the jaws, which is what they are doing when they lift it — see

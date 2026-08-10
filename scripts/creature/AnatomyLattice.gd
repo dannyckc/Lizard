@@ -300,6 +300,10 @@ var axial_units: float = 0.0
 var _signature: int = 0
 ## The ledger revision the damage mirror was last synced to.
 var _synced: int = -2
+## ...and the ledger's re-lay counter it was last rebuilt against. A mismatch
+## means the tissue was put back whole, which is the one event the incremental
+## mirror cannot absorb — see `refresh_damage`.
+var _resynced: int = -1
 ## Ledger cell -> the lattice cells standing in it, per patch index: an Array of
 ## plain int Arrays, because packed arrays nested in containers copy on read.
 var _cell_index: Array = []
@@ -307,9 +311,13 @@ var _cell_index: Array = []
 ## difference between the specimen finding its heart in a hundred cells and
 ## finding it by walking every cell in an elephant twice a frame.
 var _organ_cells: Array = []
-## Canonical grid position -> cell index, kept from the build for neighbour and
-## point queries.
+## Canonical grid position -> cell index. Alive only during a build: the carve
+## dedups against it, `_finish` converts it into the flat `neighbor` array, and
+## then it is dropped — nothing queries the lattice by grid position afterwards.
 var _grid: Dictionary = {}
+## Each cell's integer grid coordinate, in emit order, x/y/z interleaved. Held
+## only through the build, for the neighbour pass and the parity bit.
+var _coords: PackedInt32Array = PackedInt32Array()
 
 
 # ------------------------------------------------------------------- build ----
@@ -318,6 +326,12 @@ var _grid: Dictionary = {}
 ## rebuild ran. `depth_ratio` is the posture's, `load` the per-girdle mass each
 ## limb is built to hold (x fore, y hind), both quoted exactly as Physique quotes
 ## them so the lattice and the physique describe one animal.
+##
+## Always synchronous: a changed body reads its new census on the very next
+## tick, which is a contract the tests pin. The one source of high-frequency
+## changes — a slider being dragged — is coalesced where it happens instead;
+## see CreatureCreator, which meters its writes so a drag is a few carves and
+## not sixty a second.
 func ensure(plan: BodyPlan, p: CreatureParams, scale: float, depth_ratio: float,
 		fat_reserve: float, load: Vector2) -> bool:
 	var sig: int = _describe(plan, p, scale, depth_ratio, fat_reserve, load)
@@ -362,6 +376,7 @@ func _build(plan: BodyPlan, p: CreatureParams, scale: float, depth_ratio: float,
 	normal = PackedVector3Array()
 	rank = PackedFloat32Array()
 	_grid.clear()
+	_coords = PackedInt32Array()
 	count = 0
 
 	# The same width profile the silhouette is drawn from — one description of
@@ -714,7 +729,7 @@ func _carve_body(plan: BodyPlan, profile: PackedFloat32Array, clip: float,
 					out_n = Vector3(x / head_r, y / head_r, z / head_r).normalized()
 				elif in_tail_cap:
 					out_n = Vector3((x - length) / tip_r, y / tip_r, z / tip_r).normalized()
-				_emit(Vector3i(ix, iy, iz), Vector3(x, y, z), t, reg, pt, org,
+				_emit(ix, iy, iz, Vector3(x, y, z), t, reg, pt, org,
 					0, col * BodyPlan.BODY_ROWS + row, s, y, 0.0, z, rho, out_n)
 
 
@@ -827,7 +842,7 @@ func _carve_limb(plan: BodyPlan, p: CreatureParams, key: String, socket: Vector4
 				elif (1.0 - rho) * foot_r < foot_skin \
 						+ FAT_SHARE * foot_r * BodyPlan.FAT_FOOT * fat_reserve:
 					t = FAT
-				_emit(Vector3i(ixf, iyf, izf), Vector3(x, y, z), t, reg, PART_NONE,
+				_emit(ixf, iyf, izf, Vector3(x, y, z), t, reg, PART_NONE,
 					BodyPlan.NO_ORGAN, patch_i, col_f * BodyPlan.LIMB_ROWS + row_f,
 					s_f, dy, dx, z - toe_z, rho,
 					Vector3(dx, dy, dzf).normalized() if d > 0.001 else Vector3(0, 0, -1))
@@ -894,20 +909,28 @@ func _carve_limb_slice(patch_i: int, reg: int, sx: float, sy: float, z: float,
 				t = SKIN
 			elif depth < skin_t + fat_t:
 				t = FAT
-			_emit(Vector3i(ix, iy, iz), Vector3(x, y, z), t, reg, pt,
+			_emit(ix, iy, iz, Vector3(x, y, z), t, reg, pt,
 				BodyPlan.NO_ORGAN, patch_i, col * BodyPlan.LIMB_ROWS + row,
 				s, dy, dx, 0.0, radial / maxf(r, 0.001),
 				Vector3(dx, dy, 0.0).normalized() if radial > 0.001 else Vector3(0, 1, 0))
 
 
-func _emit(at: Vector3i, p: Vector3, t: int, reg: int, pt: int, org: int,
-		patch_i: int, ledger_cell: int, s: float, p_lat: float, p_fore: float,
-		p_lift: float, rho: float, out_n: Vector3) -> void:
+func _emit(ix: int, iy: int, iz: int, p: Vector3, t: int, reg: int, pt: int,
+		org: int, patch_i: int, ledger_cell: int, s: float, p_lat: float,
+		p_fore: float, p_lift: float, rho: float, out_n: Vector3) -> void:
 	# One cell per grid site: where structures meet — a limb root inside the
-	# body's flank — the first carve wins and the lattice stays a solid.
+	# body's flank — the first carve wins and the lattice stays a solid. The key
+	# packs the three signed coordinates into one integer because a build hashes
+	# every candidate site: an int hashes in one mix where a Vector3i takes
+	# three, and no animal is within two orders of magnitude of the 2048-cell
+	# axis range the packing allows.
+	var at: int = ((ix + 1024) << 22) | ((iy + 1024) << 11) | (iz + 1024)
 	if _grid.has(at):
 		return
 	_grid[at] = count
+	_coords.append(ix)
+	_coords.append(iy)
+	_coords.append(iz)
 	pos.append(p)
 	kind.append(t)
 	region.append(reg)
@@ -935,17 +958,56 @@ func _finish(plan: BodyPlan) -> void:
 	bitten = PackedByteArray()
 	bitten.resize(count)
 
-	# Six neighbours per cell, through the shared grid — patch seams included,
-	# which is what keeps a limb continuous with the flank it hangs from.
-	var offsets: Array[Vector3i] = [
-		Vector3i(-1, 0, 0), Vector3i(1, 0, 0), Vector3i(0, -1, 0),
-		Vector3i(0, 1, 0), Vector3i(0, 0, -1), Vector3i(0, 0, 1),
-	]
-	for at in _grid:
-		var i: int = _grid[at]
-		for k in 6:
-			var other = _grid.get(at + offsets[k])
-			neighbor[i * 6 + k] = other if other != null else -1
+	# Six neighbours per cell, through a flat index over the carve's own bounds —
+	# patch seams included, which is what keeps a limb continuous with the flank
+	# it hangs from. Flat rather than through `_grid`, because six hashed
+	# dictionary probes per cell was the single most expensive pass of a build;
+	# the same lookups against a dense array are plain arithmetic.
+	var x0: int = 0
+	var y0: int = 0
+	var z0: int = 0
+	var x1: int = 0
+	var y1: int = 0
+	var z1: int = 0
+	if count > 0:
+		x0 = _coords[0]
+		x1 = x0
+		y0 = _coords[1]
+		y1 = y0
+		z0 = _coords[2]
+		z1 = z0
+	for i in range(1, count):
+		var c: int = i * 3
+		x0 = mini(x0, _coords[c])
+		x1 = maxi(x1, _coords[c])
+		y0 = mini(y0, _coords[c + 1])
+		y1 = maxi(y1, _coords[c + 1])
+		z0 = mini(z0, _coords[c + 2])
+		z1 = maxi(z1, _coords[c + 2])
+	var dx: int = x1 - x0 + 1
+	var dy: int = y1 - y0 + 1
+	var plane: int = dx * dy
+	var flat := PackedInt32Array()
+	flat.resize(plane * (z1 - z0 + 1))
+	flat.fill(-1)
+	for i in count:
+		var c: int = i * 3
+		flat[(_coords[c] - x0) + (_coords[c + 1] - y0) * dx
+			+ (_coords[c + 2] - z0) * plane] = i
+	var dz: int = z1 - z0 + 1
+	for i in count:
+		var c: int = i * 3
+		var cx: int = _coords[c] - x0
+		var cy: int = _coords[c + 1] - y0
+		var cz: int = _coords[c + 2] - z0
+		var at: int = cx + cy * dx + cz * plane
+		var base: int = i * 6
+		neighbor[base] = flat[at - 1] if cx > 0 else -1
+		neighbor[base + 1] = flat[at + 1] if cx < dx - 1 else -1
+		neighbor[base + 2] = flat[at - dx] if cy > 0 else -1
+		neighbor[base + 3] = flat[at + dx] if cy < dy - 1 else -1
+		neighbor[base + 4] = flat[at - plane] if cz > 0 else -1
+		neighbor[base + 5] = flat[at + plane] if cz < dz - 1 else -1
 
 	# The hull is skin: the animal is covered everywhere, there is no seam anywhere
 	# for the flesh under it to show through, and that holds at any filter and from
@@ -967,23 +1029,20 @@ func _finish(plan: BodyPlan) -> void:
 	# non-skin cell left standing on the boundary is marked `sheathed` instead —
 	# covered by a skin the lattice is too coarse to hold a cell of, drawn as skin,
 	# and counted as itself.
+	#
+	# One walk answers everything per-cell at once — the sheath, what each cell
+	# touches (`around`), the parity bit and the census — because six iterations
+	# of interpreted loop per cell is the cost, and it need only be paid once.
 	sheathed = PackedByteArray()
 	sheathed.resize(count)
-	for i in count:
-		if kind[i] == SKIN:
-			continue
-		for k in 6:
-			if neighbor[i * 6 + k] < 0:
-				sheathed[i] = 1
-				break
-
-	# What each cell touches, now that every cell knows what it is. Written once
-	# and read by everything that has to decide what is on the surface of a
-	# partly-peeled body — see `around`.
 	around = PackedByteArray()
 	around.resize(count)
 	parity = PackedByteArray()
 	parity.resize(count)
+	built = PackedInt32Array()
+	built.resize(BodyPlan.REGIONS * TISSUES)
+	built_units = 0.0
+	axial_units = 0.0
 	for i in count:
 		var mask: int = 0
 		var base: int = i * 6
@@ -991,8 +1050,17 @@ func _finish(plan: BodyPlan) -> void:
 			var n: int = neighbor[base + k]
 			mask |= OPEN_BIT if n < 0 else (1 << int(kind[n]))
 		around[i] = mask
-		var p: Vector3 = pos[i]
-		parity[i] = (floori(p.x / CELL) + floori(p.y / CELL) + floori(p.z / CELL)) & 1
+		var t: int = int(kind[i])
+		if t != SKIN and (mask & OPEN_BIT) != 0:
+			sheathed[i] = 1
+		var c: int = i * 3
+		parity[i] = (_coords[c] + _coords[c + 1] + _coords[c + 2]) & 1
+		var reg: int = int(region[i])
+		built[reg * TISSUES + t] += 1
+		var unit: float = DENSITY[t]
+		built_units += unit
+		if not plan.is_limb_region(reg):
+			axial_units += unit
 
 	# Outside-in ranks, per (patch, ledger cell, tissue) group: the ledger says
 	# how much of a column's layer is left, and the rank decides *which* of the
@@ -1037,23 +1105,15 @@ func _finish(plan: BodyPlan) -> void:
 		if org != BodyPlan.NO_ORGAN and org < _organ_cells.size():
 			(_organ_cells[org] as PackedInt32Array).append(i)
 
-	# The census: what the animal is built out of, region by region, tissue by
-	# tissue — the numbers everything else reads.
-	built = PackedInt32Array()
-	built.resize(BodyPlan.REGIONS * TISSUES)
-	built_units = 0.0
-	axial_units = 0.0
-	for i in count:
-		built[int(region[i]) * TISSUES + int(kind[i])] += 1
-		var unit: float = DENSITY[kind[i]]
-		built_units += unit
-		if not plan.is_limb_region(int(region[i])):
-			axial_units += unit
+	# The census totals were accumulated in the merged walk above; what is left is
+	# declaring the whole of it standing, and letting go of the build-only maps.
 	built_total = count
 	standing = built.duplicate()
 	standing_total = built_total
 	standing_units = built_units
 	_synced = -2
+	_grid.clear()
+	_coords = PackedInt32Array()
 
 
 static func _profile_at(profile: PackedFloat32Array, t: float) -> float:
@@ -1138,28 +1198,58 @@ func cell_band(p: TissueGrid.Patch, i: int) -> Vector2:
 ## The ledger is still the only thing that says how much is missing. All the
 ## lattice adds is which cells that is, and `bitten` is what makes the answer the
 ## place the teeth were rather than a ring worked out from a column total.
+##
+## Incremental between re-lays: damage only ever deepens, so a new bite need
+## only reconcile the columns it freshly changed — the ledger's `fresh` lists —
+## rather than every wound the body has ever taken. Only a whole-tissue event
+## (a reset, a re-fill, a fresh carve) starts the mirror over from built.
 func refresh_damage(grid: TissueGrid) -> void:
-	if grid == null or grid.revision == _synced or count == 0:
+	if grid == null or count == 0 \
+			or (grid.revision == _synced and grid.resync == _resynced):
+		return
+	if _synced == -2 or grid.resync != _resynced:
+		_resynced = grid.resync
+		_synced = grid.revision
+		gone.fill(0)
+		standing = built.duplicate()
+		standing_total = built_total
+		standing_units = built_units
+		for pk in PATCH_KEYS.size():
+			var p: TissueGrid.Patch = grid.patch(PATCH_KEYS[pk])
+			if p == null:
+				continue
+			p.fresh.clear()
+			p.fresh_mark.fill(0)
+			if p.damaged.is_empty():
+				continue
+			var index: Array = _cell_index[pk]
+			for ledger_cell in p.damaged:
+				_mirror_cell(grid, p, index, ledger_cell)
 		return
 	_synced = grid.revision
-	gone.fill(0)
-	standing = built.duplicate()
-	standing_total = built_total
-	standing_units = built_units
 	for pk in PATCH_KEYS.size():
 		var p: TissueGrid.Patch = grid.patch(PATCH_KEYS[pk])
-		if p == null or p.damaged.is_empty():
+		if p == null or p.fresh.is_empty():
 			continue
 		var index: Array = _cell_index[pk]
-		for ledger_cell in p.damaged:
-			var members = index[ledger_cell]
-			if members == null:
-				continue
-			if p.gone[ledger_cell] != 0:
-				for i in members:
-					_retire(i)
-				continue
-			_reconcile(grid, p, ledger_cell, members)
+		for ledger_cell in p.fresh:
+			p.fresh_mark[ledger_cell] = 0
+			_mirror_cell(grid, p, index, ledger_cell)
+		p.fresh.clear()
+
+
+## Brings the lattice cells of one ledger column into line with what the ledger
+## says is left of it.
+func _mirror_cell(grid: TissueGrid, p: TissueGrid.Patch, index: Array,
+		ledger_cell: int) -> void:
+	var members = index[ledger_cell]
+	if members == null:
+		return
+	if p.gone[ledger_cell] != 0:
+		for i in members:
+			_retire(i)
+		return
+	_reconcile(grid, p, ledger_cell, members)
 
 
 ## Which of one column's cells are standing, given what the ledger says is left
@@ -1293,11 +1383,3 @@ func organ_cells(which: int) -> PackedInt32Array:
 	if which < 0 or which >= _organ_cells.size():
 		return PackedInt32Array()
 	return _organ_cells[which]
-
-
-## The lattice cell nearest a canonical-frame point, or -1. Test scaffolding
-## mostly; the HUD picks against the posed cells instead.
-func cell_at(p: Vector3) -> int:
-	var key := Vector3i(floori(p.x / CELL), floori(p.y / CELL), floori(p.z / CELL))
-	var found = _grid.get(key)
-	return found if found != null else -1

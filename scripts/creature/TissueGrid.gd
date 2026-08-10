@@ -225,6 +225,13 @@ class Patch extends RefCounted:
 	var touched: PackedByteArray = PackedByteArray()
 	var damaged: PackedInt32Array = PackedInt32Array()
 
+	## Cells whose stacks changed since the damage mirror last looked — the
+	## increment `AnatomyLattice.refresh_damage` reconciles instead of re-walking
+	## every wound the body has ever taken. Damage between resets only ever
+	## deepens, which is what makes the increment sound.
+	var fresh: PackedInt32Array = PackedInt32Array()
+	var fresh_mark: PackedByteArray = PackedByteArray()
+
 	## 1 where every layer is spent. A gone cell is a hole in the creature: the
 	## renderer skips it, so the world behind shows through, and the collision
 	## and hit-test queries below shrink away from it.
@@ -286,15 +293,24 @@ class Patch extends RefCounted:
 		gone.resize(cells)
 		attached.resize(cells)
 		solid.resize(cols * 2)
+		fresh_mark.resize(cells)
 
 	func clear_damage() -> void:
 		touched.fill(0)
 		damaged.clear()
+		fresh.clear()
+		fresh_mark.fill(0)
 		gone.fill(0)
 		gone_count = 0
 		attached.fill(1)
 		solid.fill(1.0)
 		remaining_hp = full_hp
+
+	## Marks one cell for the incremental damage mirror.
+	func mark_fresh(cell: int) -> void:
+		if fresh_mark[cell] == 0:
+			fresh_mark[cell] = 1
+			fresh.append(cell)
 
 	## Marks a cell as having nothing left in it and re-derives its column's
 	## surviving reach. Called once per cell, on the tick it is destroyed.
@@ -516,6 +532,11 @@ var full_hp: float = 0.0
 ## connectivity cannot have changed, and there is no reason to flood two networks
 ## to be told so.
 var revision: int = 0
+## Bumped when the tissue is re-laid whole — a reset, a re-fill, a new layout.
+## The damage mirror re-derives everything on this, and only the cells erosion
+## freshly touched on `revision` alone; the distinction is what keeps a bite on
+## a long-chewed body from re-walking every wound it has ever taken.
+var resync: int = 0
 
 ## Surviving cells that are no longer joined to the animal — tissue standing where
 ## it grew and attached to nothing. The cheap guard everything downstream asks
@@ -617,6 +638,7 @@ func reset() -> void:
 	if lattice != null:
 		lattice.bitten.fill(0)
 	revision += 1
+	resync += 1
 	resolve_attachment()
 
 
@@ -944,22 +966,39 @@ func bite(mark: BiteMark, shed: Array) -> float:
 		# price of two comparisons, and no cell of it is ever visited.
 		if not mark.reaches(Vector2(p.zlo, p.zhi)):
 			continue
-		for cell in p.cells:
-			if not mark.reaches(p.band_of(cell)):
+		for c in p.cols:
+			# One rejection per column before any of its cells are touched. The
+			# rows of a station lie on one line between its two edge corners, so
+			# these four corners bound every cell of the column exactly — and a
+			# mark whose box misses them could not have eroded anything: a patch
+			# outside the box scores zero depth, and the needle-in-cell case
+			# needs the needle's centre inside a cell, which is inside this box.
+			var a0: Vector2 = p.vert(c, 0)
+			var a1: Vector2 = p.vert(c, p.rows)
+			var b0: Vector2 = p.vert(c + 1, 0)
+			var b1: Vector2 = p.vert(c + 1, p.rows)
+			if maxf(maxf(a0.x, a1.x), maxf(b0.x, b1.x)) < mark.lo.x \
+					or minf(minf(a0.x, a1.x), minf(b0.x, b1.x)) > mark.hi.x \
+					or maxf(maxf(a0.y, a1.y), maxf(b0.y, b1.y)) < mark.lo.y \
+					or minf(minf(a0.y, a1.y), minf(b0.y, b1.y)) > mark.hi.y:
 				continue
-			var at: Vector2 = p.centre_of(cell)
-			# Expanded by the cell's own size, because a tooth finer than the
-			# flesh's grain still marks the cell it landed in — see
-			# BiteMark.depth_over, which is what actually resolves that case.
-			var grain: float = p.extent_of(cell)
-			if at.x + grain < mark.lo.x or at.x - grain > mark.hi.x \
-					or at.y + grain < mark.lo.y or at.y - grain > mark.hi.y:
-				continue
-			p.corners_of(cell, _quad)
-			var depth: float = mark.depth_over(at, _quad)
-			if depth <= 0.0:
-				continue
-			removed += _erode(p, cell, depth, at, loose, mark.reach)
+			for r in p.rows:
+				var cell: int = c * p.rows + r
+				if not mark.reaches(p.band_of(cell)):
+					continue
+				var at: Vector2 = p.centre_of(cell)
+				# Expanded by the cell's own size, because a tooth finer than the
+				# flesh's grain still marks the cell it landed in — see
+				# BiteMark.depth_over, which is what actually resolves that case.
+				var grain: float = p.extent_of(cell)
+				if at.x + grain < mark.lo.x or at.x - grain > mark.hi.x \
+						or at.y + grain < mark.lo.y or at.y - grain > mark.hi.y:
+					continue
+				p.corners_of(cell, _quad)
+				var depth: float = mark.depth_over(at, _quad)
+				if depth <= 0.0:
+					continue
+				removed += _erode(p, cell, depth, at, loose, mark.reach)
 	coalesce_shed(loose, shed)
 	return removed
 
@@ -1074,6 +1113,7 @@ func _erode(p: Patch, cell: int, budget: float, at: Vector2, shed: Array,
 	if p.touched[cell] == 0:
 		p.touched[cell] = 1
 		p.damaged.append(cell)
+	p.mark_fresh(cell)
 	if _cell_is_empty(p, base):
 		p.retire(cell)
 	return removed
@@ -1397,6 +1437,7 @@ func _take_piece(members: PackedInt32Array) -> Piece:
 		if p.touched[cell] == 0:
 			p.touched[cell] = 1
 			p.damaged.append(cell)
+		p.mark_fresh(cell)
 		p.retire(cell)
 
 	piece.link_start[piece.cells] = links.size()

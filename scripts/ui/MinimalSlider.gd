@@ -110,6 +110,14 @@ func set_value_silent(next: float) -> void:
 	_set_value(next, false)
 
 
+## Whether the pointer currently has hold of the handle. What the creation menu
+## meters its parameter writes by: a drag is a stream of values and lands a few
+## times a second, while a click, a key nudge or a test driving the control
+## programmatically is one value and lands at once.
+func is_dragging() -> bool:
+	return _dragging
+
+
 func _set_from_x(x: float) -> void:
 	var t: float = clampf(inverse_lerp(4.0, maxf(size.x - 4.0, 5.0), x), 0.0, 1.0)
 	var next: float = lerpf(min_value, max_value, t)

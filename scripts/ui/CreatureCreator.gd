@@ -215,6 +215,9 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	if not visible:
 		return
+	if _pending_prop != "" \
+			and Time.get_ticks_msec() - _last_write_ms >= WRITE_INTERVAL_MS:
+		_flush_pending()
 	_read_body()
 	_orbit.text = _orbit_word()
 
@@ -225,6 +228,9 @@ func set_open(open: bool) -> void:
 	visible = open
 	set_process(open)
 	if not open:
+		# A drag the menu closed over still lands: the handle's last position is
+		# the edit that was being made.
+		_flush_pending()
 		return
 	if view != null:
 		view.creature = subject
@@ -309,6 +315,9 @@ func edited_count() -> int:
 func refresh() -> void:
 	if params == null:
 		return
+	# Whatever a drag had not yet written is superseded: the panel is being told
+	# what the truth now is, and the sliders are about to be set to it.
+	_pending_prop = ""
 	_updating = true
 	for prop in _sliders:
 		var slider: MinimalSlider = _sliders[prop]
@@ -940,11 +949,46 @@ func _edit_mark(prop: String) -> Control:
 	return wrap
 
 
+## A dragged slider reports a value per mouse move, and several parameters
+## re-carve the creature's whole cell lattice the tick they land — the most
+## expensive single operation a creature owns. The label tracks the handle at
+## full rate so the drag feels live; the write into `params` is metered, so a
+## drag costs a few rebuilds a second rather than sixty. The trailing write is
+## flushed from `_process`, so where the handle stops is always what the animal
+## becomes — a released slider never leaves a stale body behind.
+const WRITE_INTERVAL_MS: int = 90
+
+var _pending_value: float = 0.0
+var _pending_prop: String = ""
+var _last_write_ms: int = -WRITE_INTERVAL_MS
+
+
 func _on_slider_changed(value: float, prop: String) -> void:
 	if _updating or params == null:
 		return
-	params.set(prop, value)
 	_update_value_label(prop, value)
+	# Switching sliders mid-meter flushes the old one first: two properties are
+	# two edits, and neither may swallow the other.
+	if _pending_prop != "" and _pending_prop != prop:
+		_flush_pending()
+	_pending_value = value
+	_pending_prop = prop
+	# Only a drag is metered — it is the one source that produces a value per
+	# mouse move. A click, a key nudge or a test driving the control lands at
+	# once, which is the synchronous contract everything else already relies on.
+	var track: MinimalSlider = _sliders.get(prop)
+	if track == null or not track.is_dragging() \
+			or Time.get_ticks_msec() - _last_write_ms >= WRITE_INTERVAL_MS:
+		_flush_pending()
+
+
+func _flush_pending() -> void:
+	if _pending_prop == "" or params == null or _updating:
+		return
+	var prop: String = _pending_prop
+	_pending_prop = ""
+	_last_write_ms = Time.get_ticks_msec()
+	params.set(prop, _pending_value)
 	_refresh_edits()
 	param_changed.emit(prop, STRUCTURAL.has(prop))
 

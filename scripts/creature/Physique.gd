@@ -205,6 +205,9 @@ var balance: Vector2 = Vector2(0.15, 0.30)
 ## bridge between the drawn body and the cell count: a region's cells are its
 ## volume over CELL_VOLUME, apportioned to tissues by its own reference stack.
 var _region_volume: PackedFloat32Array = PackedFloat32Array()
+## Rest half-widths at each spine station, for the region volumes above. Held
+## rather than allocated because it is refilled every tick.
+var _rest_widths: PackedFloat32Array = PackedFloat32Array()
 
 
 func _init() -> void:
@@ -235,9 +238,15 @@ func update(body: BodyShape, spine: Spine, tissue: TissueGrid, p: CreatureParams
 	var stance: Posture = posture if posture != null else Posture.new(p.posture)
 
 	if tissue != null:
-		# The trunk first: its slabs are volume wherever the spine has carried
-		# them, and its cells are what the legs will be asked to hold up.
-		_axial_volumes(body, spine, tissue.plan, stance.depth_ratio)
+		# The trunk first: its slabs are what the legs will be asked to hold up.
+		# Measured off the animal's *rest* geometry rather than the pose solved
+		# this tick, because what it sizes is the skeleton — see `limb_load`,
+		# which is quoted off the intact trunk for exactly this reason. A body is
+		# the same animal mid-stride bunched, mid-lunge stretched or mid-swallow
+		# distended, and reading the census off the pose made the load breathe
+		# with all three — which re-carved the whole cell lattice every few ticks
+		# of a gallop, the single largest cost in the game.
+		_axial_volumes(body, spine, tissue.plan, stance.depth_ratio, p, scale)
 
 		# What each limb must carry: the intact trunk, at the species' density,
 		# split across the limbs that actually bear. A biped's whole weight goes
@@ -354,23 +363,37 @@ func cells_of(region: int) -> float:
 ## census weighs and the solid a bite lands in are one body. (The constant π is
 ## dropped from every term alike — the census is a ratio against a reference
 ## counted the same way, so it cancels.)
+##
+## Measured at *rest*: every interval at its rest length and every station at
+## its profile width, which is the same body `build` lays out before the solver,
+## a swallow or a hold has done anything to it. On a standing animal the two
+## measurements are identical; on a moving one this is the only reading that
+## does not turn stride into anatomy.
 func _axial_volumes(body: BodyShape, spine: Spine, plan: BodyPlan,
-		depth_ratio: float) -> void:
+		depth_ratio: float, p: CreatureParams, scale: float) -> void:
 	_region_volume.fill(0.0)
-	var last: int = mini(body.last_index, spine.size() - 1)
+	var n: int = spine.size()
+	var last: int = mini(body.last_index, n - 1)
 	if last < 1 or plan == null:
 		return
+	if _rest_widths.size() != n:
+		_rest_widths.resize(n)
+	BodyShape.section_profile(p, scale, _rest_widths)
+	# The same floor `build` puts under the drawn widths, so the two readings
+	# stay one body at rest.
+	for i in n:
+		_rest_widths[i] = maxf(_rest_widths[i], 0.6)
+	var seg_len: float = p.segment_length * scale
 	for i in range(last):
-		var w: float = (body.widths[i] + body.widths[i + 1]) * 0.5
-		var slab: float = w * (w * depth_ratio) \
-			* spine.points[i].distance_to(spine.points[i + 1])
+		var w: float = (_rest_widths[i] + _rest_widths[i + 1]) * 0.5
+		var slab: float = w * (w * depth_ratio) * seg_len
 		_region_volume[plan.region_at((float(i) + 0.5) / float(last))] += slab
 	# The head cap is a hemisphere as deep as it is wide — exactly how the
 	# lattice poses it — and it is the whole of the HEAD region's volume: the
 	# strip behind it already belongs to the neck and trunk.
-	var r: float = body.head_radius
+	var r: float = _rest_widths[0]
 	_region_volume[BodyPlan.HEAD] += r * r * r * (2.0 / 3.0)
-	var tip: float = body.widths[last]
+	var tip: float = _rest_widths[last]
 	_region_volume[BodyPlan.TAIL] += tip * (tip * depth_ratio) * tip * (2.0 / 3.0)
 
 
