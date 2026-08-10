@@ -316,6 +316,14 @@ func _measure(player: Creature, preset: String, throttle: float) -> Dictionary:
 
 	for tick in SETTLE + SAMPLE:
 		player.command = drive
+		# Eighteen seconds flat out is longer than the quicker builds in the file
+		# can hold a sprint, and an animal that has run itself out is held to a
+		# pace it can keep up — see Stamina.hold. That is right in the habitat and
+		# wrong here: what this measures is which feet a *running* body puts down
+		# in what order, so the run has to last the window. Kept full rather than
+		# shortening the sample, because the pattern is counted in footfalls and a
+		# short window is a small count.
+		player.stamina.reset()
 		player._physics_process(TICK)
 		if tick < SETTLE:
 			continue

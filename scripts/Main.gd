@@ -255,7 +255,8 @@ func _update_hud() -> void:
 		creature.anatomy.tissue.integrity(),
 		creature.spine.size(),
 		creature.physique.mass,
-		creature.elevation.height
+		creature.elevation.height,
+		creature.stamina.reserve
 	)
 	hud.update_target(_target_readout())
 

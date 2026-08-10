@@ -60,6 +60,8 @@ func _run_checks() -> void:
 	_check_damage_costs_travel(subject)
 	_check_brain_collapses_the_body(subject)
 	_check_heart_stops_it_slowly(subject)
+	_check_stamina_follows_the_blood(subject)
+	_check_carrying_weight_costs_stamina(subject)
 	_check_severed_limb_leaves(subject)
 	_check_severance_needs_every_tissue(subject)
 	_check_broken_limb_dangles(subject)
@@ -513,6 +515,62 @@ func _check_heart_stops_it_slowly(c: Creature) -> void:
 	_check(ticks > 30,
 		"the body collapsed %.1f s after its heart stopped — that is a switch, not circulation"
 			% (float(ticks) * TICK))
+	_restore(c)
+
+
+## What an animal can keep up is its circulation, and it fails the same way the
+## rest of the functional layer does: nothing is set, everything is read.
+##
+## Three claims, and the third is the one that makes this anatomy rather than a
+## bar. A sound body sustains more than its own walk and holds a full store; a
+## heart torn open sustains less, at once, because what it can sustain *is* what
+## the heart delivers; and the store then falls on its own, with the animal
+## standing still and spending nothing, because a reserve cannot be held above the
+## blood supplying the muscle that holds it.
+func _check_stamina_follows_the_blood(c: Creature) -> void:
+	_restore(c)
+	for _i in 60:
+		c._physics_process(TICK)
+	var sound: float = c.stamina.capacity
+	_check(not c.stamina.winded, "an untouched creature was already out of breath")
+	_check(is_equal_approx(c.stamina.reserve, 1.0),
+		"an untouched creature was not holding a full store (%.2f)" % c.stamina.reserve)
+	_check(sound * c.flat_out() > c.cruise_speed(),
+		"a sound body could not sustain its own walk (%.0f px/s against a walk of %.0f)"
+			% [sound * c.flat_out(), c.cruise_speed()])
+
+	_destroy_organ(c, BodyPlan.HEART)
+	c._physics_process(TICK)
+	_check(c.stamina.capacity < sound - 0.05,
+		"a destroyed heart left the body sustaining %.2f of what it did with one (%.2f)"
+			% [c.stamina.capacity, sound])
+	# Standing still, so nothing is being spent and the only thing that can move
+	# the store is the supply behind it.
+	c.command = MovementInput.Command.new()
+	for _i in 300:
+		c._physics_process(TICK)
+	_check(c.stamina.reserve < 0.5,
+		"a body with no circulation held on to %.2f of its store while standing still"
+			% c.stamina.reserve)
+	_restore(c)
+
+
+## Stamina is muscle against weight, so weight that is not muscle costs it. The
+## same body fattened is the same engine carrying more, and nothing anywhere says
+## fat is bad for the wind — it is one division, and the fat is in its denominator
+## because the fat is in the animal.
+func _check_carrying_weight_costs_stamina(c: Creature) -> void:
+	_restore(c)
+	c._physics_process(TICK)
+	var lean: float = c.stamina.engine
+	c.params.fat_reserve = 3.0
+	c.rebuild()
+	c._physics_process(TICK)
+	var padded: float = c.stamina.engine
+	_check(padded < lean,
+		"laying down fat did not cost the engine anything (%.3f lean, %.3f padded)"
+			% [lean, padded])
+	c.params.fat_reserve = 1.0
 	_restore(c)
 
 

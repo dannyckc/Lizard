@@ -39,10 +39,12 @@ var _active_species: String = "Lizard"
 var _active_view: String = VIEW_FIELD
 var _hint_target: float = 1.0
 
-var _biomass_value: Label
+var _health_value: Label
+var _stamina_value: Label
 var _food_value: Label
 var _stage_value: Label
-var _biomass_meter: BiomassMeter
+var _health_meter: PipMeter
+var _stamina_meter: PipMeter
 var _move_hint: Label
 var _creator_button: Button
 var _stats_grid: GridContainer
@@ -57,7 +59,7 @@ func _ready() -> void:
 	_build_fonts()
 	_build_frame()
 	_build_identity_and_stats()
-	_build_biomass_and_legend()
+	_build_condition_and_legend()
 	_build_creator()
 	_build_creator_button()
 	_build_move_hint()
@@ -79,10 +81,12 @@ func _process(delta: float) -> void:
 	)
 
 
-## `integrity` is the fraction of the creature's own tissue it still has, 1.0
-## intact. It reads out where the growth multiplier used to, because growth is
-## gone for now and biomass you are losing is the live number this prototype
-## actually has.
+## `integrity` is the fraction of the creature's own tissue it still has and
+## `stamina` is what is left of the store that pays for anything past its own
+## sustainable pace. Both arrive as fractions and are drawn as lengths, because
+## the two questions the field asks of an animal are how much of it is left and
+## how much longer it can keep this up — see Stamina, which works the second one
+## out; nothing here knows how either was arrived at.
 func update_metrics(
 	state_name: String,
 	speed: int,
@@ -91,7 +95,8 @@ func update_metrics(
 	integrity: float,
 	segments: int,
 	mass: float = 1.0,
-	height: float = 0.0
+	height: float = 0.0,
+	stamina: float = 1.0
 ) -> void:
 	if _stats.is_empty():
 		return
@@ -107,10 +112,14 @@ func update_metrics(
 	_stats["MASS"].text = "%.2f" % mass
 	_stats["FEET"].text = "%d/4 UP" % airborne
 	_stats["SEGMENTS"].text = str(segments)
-	_biomass_value.text = "%03d%%" % int(round(clampf(integrity, 0.0, 1.0) * 100.0))
+	var health: float = clampf(integrity, 0.0, 1.0)
+	var breath: float = clampf(stamina, 0.0, 1.0)
+	_health_value.text = "%03d%%" % int(round(health * 100.0))
+	_stamina_value.text = "%03d%%" % int(round(breath * 100.0))
+	_health_meter.progress = health
+	_stamina_meter.progress = breath
 	_food_value.text = "FOOD %03d" % food
 	_stage_value.text = "STAGE %02d" % (int(floor(float(food) / 12.0)) + 1)
-	_biomass_meter.progress = float(food % 12) / 12.0
 	if speed > 5:
 		_hint_target = 0.0
 
@@ -335,57 +344,71 @@ func _build_identity_and_stats() -> void:
 		_stats_grid.add_child(value)
 
 
-func _build_biomass_and_legend() -> void:
+## The corner that says what state the animal is in: what is left of it, and what
+## it has left to spend.
+##
+## Two tracks rather than one, because they are two different questions and they
+## come apart — a creature at full health with nothing in the tank is in trouble
+## in a way no single bar can say, and it is the ordinary state of one that has
+## just run down its dinner. They are drawn identically, in the same dots, one
+## above the other, because the design already had a shape for a proportion in
+## this corner and a second reading does not need a second one.
+func _build_condition_and_legend() -> void:
 	var block := Control.new()
-	block.name = "BiomassAndControls"
+	block.name = "ConditionAndControls"
 	block.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	block.offset_left = 32.0
-	block.offset_top = -132.0
+	block.offset_top = -162.0
 	block.offset_right = 620.0
 	block.offset_bottom = -30.0
 	block.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(block)
 	_field_block = block
 
-	var biomass := VBoxContainer.new()
-	biomass.custom_minimum_size.x = 300.0
-	biomass.position = Vector2.ZERO
-	biomass.size = Vector2(300.0, 55.0)
-	biomass.add_theme_constant_override("separation", 6)
-	biomass.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	block.add_child(biomass)
+	var condition := VBoxContainer.new()
+	condition.custom_minimum_size.x = 300.0
+	condition.position = Vector2.ZERO
+	condition.size = Vector2(300.0, 90.0)
+	condition.add_theme_constant_override("separation", 6)
+	condition.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	block.add_child(condition)
 
-	var biomass_header := HBoxContainer.new()
-	biomass_header.custom_minimum_size.x = 300.0
-	biomass_header.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	biomass.add_child(biomass_header)
-	biomass_header.add_child(_label("BIOMASS", 10, _mono_tracked, Color(INK, 0.40)))
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	biomass_header.add_child(spacer)
-	_biomass_value = _label("100%", 10, _mono_tracked, INK)
-	biomass_header.add_child(_biomass_value)
+	_health_value = _label("100%", 10, _mono_tracked, INK)
+	condition.add_child(_reading_header("HEALTH", _health_value))
+	_health_meter = PipMeter.new()
+	_health_meter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	condition.add_child(_health_meter)
 
-	_biomass_meter = BiomassMeter.new()
-	_biomass_meter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	biomass.add_child(_biomass_meter)
+	# A caption sits over its own track rather than between two of them: with one
+	# separation for the whole column the second title would be equidistant from
+	# the bar above it and the bar below, and a reader would have to guess which
+	# length it named.
+	var split := Control.new()
+	split.custom_minimum_size.y = 5.0
+	split.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	condition.add_child(split)
 
-	var biomass_footer := HBoxContainer.new()
-	biomass_footer.custom_minimum_size.x = 300.0
-	biomass_footer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	biomass.add_child(biomass_footer)
+	_stamina_value = _label("100%", 10, _mono_tracked, INK)
+	condition.add_child(_reading_header("STAMINA", _stamina_value))
+	_stamina_meter = PipMeter.new()
+	_stamina_meter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	condition.add_child(_stamina_meter)
+
+	var footer := HBoxContainer.new()
+	footer.custom_minimum_size.x = 300.0
+	footer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	condition.add_child(footer)
 	_food_value = _label("FOOD 000", 10, _mono_tracked, Color(INK, 0.40))
-	biomass_footer.add_child(_food_value)
+	footer.add_child(_food_value)
 	var footer_spacer := Control.new()
 	footer_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	footer_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	biomass_footer.add_child(footer_spacer)
+	footer.add_child(footer_spacer)
 	_stage_value = _label("STAGE 01", 10, _mono_tracked, Color(INK, 0.40))
-	biomass_footer.add_child(_stage_value)
+	footer.add_child(_stage_value)
 
 	var legend := HBoxContainer.new()
-	legend.position = Vector2(0.0, 78.0)
+	legend.position = Vector2(0.0, 108.0)
 	legend.add_theme_constant_override("separation", 22)
 	legend.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	block.add_child(legend)
@@ -396,6 +419,21 @@ func _build_biomass_and_legend() -> void:
 	legend.add_child(_legend_item(["F2"], "DEBUG"))
 	legend.add_child(_legend_item(["F3"], "ANATOMY"))
 	legend.add_child(_legend_item(["R"], "RESET"))
+
+
+## A caption on the left and its reading on the right, over the track it belongs
+## to. Both bars are titled the same way, so the pair reads as one column.
+func _reading_header(caption: String, value: Label) -> Control:
+	var header := HBoxContainer.new()
+	header.custom_minimum_size.x = 300.0
+	header.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	header.add_child(_label(caption, 10, _mono_tracked, Color(INK, 0.40)))
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	header.add_child(spacer)
+	header.add_child(value)
+	return header
 
 
 func _legend_item(keys: Array[String], caption: String) -> Control:

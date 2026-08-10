@@ -90,6 +90,7 @@ input ──▶ head position ──▶ contacts + grip ──▶ spine ──�
 | [Spine.gd](scripts/creature/Spine.gd) | the particle chain and its relaxation solve |
 | [BodyShape.gd](scripts/creature/BodyShape.gd) | outline, head, eyes, limb sockets, tail — all derived from the spine |
 | [Physique.gd](scripts/creature/Physique.gd) | mass, strength and bite force, counted out of a census of fixed-size cells over the posed body and its surviving tissue — bigger animals are more cells, never larger ones |
+| [Stamina.gd](scripts/creature/Stamina.gd) | what that body can keep doing: an aerobic ceiling read off the heart, the blood and the locomotor muscle it has to move its own weight with, and the store that pays for anything above it |
 | [Grip.gd](scripts/creature/Grip.gd) | one set of jaws holding onto another creature, as a tether in its body space |
 | [AnatomyState.gd](scripts/creature/AnatomyState.gd) | anatomical hit-testing — which creature, and which structure of it |
 | [Dentition.gd](scripts/creature/Dentition.gd) | the teeth: how many, how long, how keen, and what type each one turns out to be |
@@ -2111,6 +2112,62 @@ Bite force is sized off the head rather than off the body because the head is th
 part that does the biting and the part you can see doing it: a broad skull reads
 as a hard bite before any number is involved.
 
+### Stamina
+
+A fourth quantity, on the same terms: **not a stat**. What an animal can keep
+doing is read off the heart that supplies it and the locomotor muscle it has to
+move its own weight with, every tick, out of numbers the anatomy was already
+producing.
+
+```
+engine    = locomotor muscle cells / mass          (against the default build)
+cardio    = heart_power × heart output × blood × delivery to the girdles
+capacity  = 0.72 × cardio × (engine × fibre)^0.25  — share of flat out, sustained
+effort    = speed / flat out
+reserve  -= (effort² − capacity²) / store          — while effort is over it
+```
+
+Two quantities, kept apart. **Capacity** is the share of its own top speed the
+animal holds for ever — its aerobic ceiling. **Reserve** is what is left of the
+anaerobic store that pays for anything above that ceiling, and it is the bar on
+the HUD. So a walk is free, a sprint is timed, and how long the sprint lasts is
+the depth of the store over how far past the ceiling the animal is going.
+
+Free by construction rather than by luck: the ceiling is floored at the animal's
+own walking share of flat out, because a species' travelling speed is a speed it
+travels at. The same floor guarantees the other end — a creature that has run
+itself out is **held to a pace it can keep up**, never to a limp, and that is the
+only thing being out of breath does to the walk. It also costs a push: a blown
+animal jumps short, through the same `effort` term a hauled or half-denervated
+one does.
+
+Effort is quoted against flat out and not against a walk, so it reads 1.0 on
+every creature going full pelt: a body at its limit is trying as hard as it can
+whatever species it is, and what separates two animals is how much of that their
+blood covers. Off the shipped presets:
+
+| | engine | heart | sustains | sprint holds for |
+|---|---|---|---|---|
+| Cheetah | 2.10 | 0.70 | 0.61 | 13 s |
+| Lizard | 1.00 | 1.00 | 0.72 | 16 s |
+| Elephant | 0.73 | 1.20 | 0.80 | 18 s |
+| Kangaroo | 1.59 | 0.95 | 0.77 | 19 s |
+| T. rex | 1.38 | 1.05 | 0.82 | 22 s |
+| Cat | 1.91 | 0.95 | 0.80 | 22 s |
+| Camel | 1.41 | 1.15 | 0.90 | 39 s |
+
+The Cheetah carries the most muscle per unit of weight in the file and blows
+first, because a store is not a supply; the Camel is the stayer on an ordinary
+build and a good heart. Neither is a number anybody typed in — swap the heart and
+they swap places. Damage arrives the same way: a torn heart, a body that has bled,
+a cut artery to a hind leg and a hip eaten hollow all lower the same two terms,
+and the store cannot be held above what the circulation is delivering, so a
+bleeding animal's bar falls without it having spent anything. A carcass reads
+zero for the same reason and needs no special case.
+
+`tests/StaminaProbe.gd` prints the whole of the table above, per preset, and is
+where `Stamina.REFERENCE_ENGINE` was measured.
+
 ### Holding on
 
 A latched bite used to be a static hold — the biter's speed was zeroed and the
@@ -2519,16 +2576,20 @@ godot --headless --path . --script tests/TraversalTest.gd # under, over, onto or
 godot --headless --path . --script tests/LatticeTest.gd   # the 3D cell lattice, one census
 ```
 
-Two diagnostic harnesses sit beside the tests and are not part of the suite.
+Three diagnostic harnesses sit beside the tests and are not part of the suite.
 `tests/LatticeAudit.gd` prints every preset's census region by region and tissue
 by tissue, plus where its locomotor muscle stands, whether anything is hollow
 that should not be and what the specimen would draw — it is how "the cheetah has
-no leg muscles" is checkable rather than arguable. `tests/AnatomyShot.gd` must run
-windowed: it opens the anatomy drawer on a named preset, times the frame with the
-specimen up and saves pictures of it from three angles.
+no leg muscles" is checkable rather than arguable. `tests/StaminaProbe.gd` walks
+and then sprints each preset until its store is empty, printing what its engine,
+its heart and its own weight came to and how long the sprint lasted.
+`tests/AnatomyShot.gd` must run windowed: it opens the anatomy drawer on a named
+preset, times the frame with the specimen up and saves pictures of it from three
+angles.
 
 ```
 godot --headless --path . --script tests/LatticeAudit.gd
+godot --headless --path . --script tests/StaminaProbe.gd
 godot --path . --resolution 1440x810 --disable-vsync \
     --script tests/AnatomyShot.gd -- --preset Elephant [--peel|--xray|--wire|--field]
 ```

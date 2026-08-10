@@ -118,6 +118,12 @@ var physique: Physique = Physique.new()
 ## and the posture, once per tick and ahead of everything that uses it — not
 ## settings, see Locomotion.
 var locomotion: Locomotion = Locomotion.new()
+## ...and how long it can keep doing it. The pace this body sustains is its heart
+## and its vessels against its own locomotor muscle and its own weight; what is
+## left is a store, and spending that store is what a sprint is. Read off the
+## physique and the functional state at the end of the tick with the rest of the
+## derived description — see Stamina.
+var stamina: Stamina = Stamina.new()
 ## Rest length the spine was last actually solved to — see `segment_rest`. Zero
 ## until the first tick has run, which is what makes the accessor fall back to the
 ## parameter for a body that has not moved yet.
@@ -581,6 +587,21 @@ func _update_physique() -> void:
 			else physique.limb_load.y
 
 
+## Re-reads how much of all that the animal can keep up.
+##
+## Last of the descriptions, because it is a ratio between two of the others: what
+## the physique has just counted as locomotor muscle and weight, against what the
+## anatomy has just read as circulation.
+##
+## How hard the body is working is what it is travelling at over what it could
+## travel at flat out — see `flat_out`. Measured rather than commanded, so a
+## creature holding sprint against a rock is standing still and standing still is
+## not work; and the haul is the same load the walk itself was already narrowed by.
+func _update_stamina(delta: float) -> void:
+	stamina.update(physique, anatomy.state, params,
+		absf(speed) / flat_out(), _haul_factor(), delta)
+
+
 ## Re-reads what heights this body occupies. Runs beside `physique` and for the
 ## same reason: both are descriptions of the pose that has just been solved, and
 ## both would be a tick stale anywhere else.
@@ -646,6 +667,11 @@ func reset(at: Vector2 = Vector2.ZERO, facing: float = 0.0) -> void:
 	# reset would drop a creature that had just been placed.
 	balance.reset()
 	anatomy.reset()
+	# A body put back is a body that has got its breath back. Beside the anatomy
+	# because it is read off the anatomy: leaving a spent store on a creature whose
+	# tissue has just been restored is the same disagreement `AnatomyState.reset`
+	# exists to prevent.
+	stamina.reset()
 	bite_cooldown_remaining = 0.0
 	bite_connected = false
 	bite_held = false
@@ -828,6 +854,7 @@ func _physics_process(delta: float) -> void:
 	_release_severed()
 	_update_physique()
 	_update_bounds()
+	_update_stamina(delta)
 	# Whether any of that is standing up. After the physique because what a leg has
 	# to hold is what the body weighs, and after the gait because where the support
 	# is is where the feet have actually been put. What it measures is spent through
@@ -1049,6 +1076,10 @@ func _dead_process(delta: float) -> void:
 	_release_severed()
 	_update_physique()
 	_update_bounds()
+	# A carcass is described by the same line the living body is. Nothing is being
+	# spent, and the store goes anyway: what holds a reserve up is the blood
+	# reaching the muscle, and there is none. See Stamina.ceiling.
+	_update_stamina(delta)
 
 
 ## Advances the strike clock and resolves it to a forward displacement.
@@ -1209,9 +1240,18 @@ func _advance_elevation(delta: float) -> void:
 	var effort: float = _haul_factor()
 	if anatomy.state.impaired:
 		effort *= anatomy.state.locomotion
+	# ...and how much of itself the animal has left to throw. A fourth term of the
+	# same kind as the other three — something the rest of the body has already
+	# measured — and the one that is spent rather than damaged: a creature that has
+	# just run itself into the ground jumps like one. Exactly 1.0 until it has.
+	effort *= stamina.push
 	jump.advance(delta, command.climb > 0.0, leap, elevation, locomotion,
 		_footing(), command.throttle)
 	if jump.took_off:
+		# A push-off is the most anaerobic thing this body does, and the only one
+		# that happens in an instant rather than over a chase — so it is charged as
+		# one. See Stamina.spend.
+		stamina.spend(Stamina.LEAP_COST)
 		# Where the push is aimed. A jump is a push against the floor and the floor
 		# is underneath, so most of it goes up whatever the animal intended; leaning
 		# into it trades height for ground, and trades it exactly — the speed is
@@ -1405,6 +1445,13 @@ func _integrate_motion(delta: float) -> void:
 	# stop being dragged, the swing stops being clipped, and the body stops
 	# arriving somewhere its legs never took it. See Locomotion.leg_speed.
 	var asked: float = p.move_speed * sprint * size_scale
+	# ...and then what the animal has the breath to hold. The same kind of clamp as
+	# the leg ceiling below and it sits beside it for that reason: `move_speed` is
+	# what the species asks for, the legs are what it can deliver, and this is the
+	# share of flat out it can deliver *for any length of time*. A body with a
+	# reserve left asks for whatever it likes; a blown one is held to what its own
+	# blood supplies, which is above its walk by construction. See Stamina.hold.
+	asked = stamina.hold(asked, flat_out())
 	var legs: float = _leg_ceiling()
 	var top_speed: float = (minf(asked, legs) if legs > 0.0 else asked) * haul * drive
 	if command.throttle < 0.0:
@@ -1516,6 +1563,20 @@ func cruise_speed() -> float:
 	var asked: float = params.move_speed * size_scale
 	var legs: float = _leg_ceiling()
 	return maxf(minf(asked, legs) if legs > 0.0 else asked, 1.0)
+
+
+## The speed this creature would travel at with everything open — its walk times
+## its own sprint, and the denominator exertion is quoted against.
+##
+## Deliberately the species' figure alone, where `cruise_speed` above takes the
+## lower of the request and what the legs deliver. Effort has to mean the same
+## thing from one tick to the next or it is not a measurement of how hard the
+## animal is trying, and the leg ceiling moves with the footfall pattern: a body
+## that commits to a gallop lifts more feet at once and is handed a higher ceiling
+## for it, which would read as the animal easing off at the moment it stopped
+## easing off.
+func flat_out() -> float:
+	return maxf(params.move_speed * params.sprint_multiplier * size_scale, 1.0)
 
 
 ## How much of what this creature is doing is backing up, 0..1 of its own reverse

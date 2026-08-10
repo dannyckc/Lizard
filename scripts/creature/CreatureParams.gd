@@ -207,6 +207,18 @@ extends Resource
 ## fibre gives that quickness up. 0.5 is the mixed default every preset stands
 ## on; the specimen quotes it on every muscle cell.
 @export_range(0.0, 1.0, 0.01) var fast_twitch: float = 0.5
+## What the heart and the plumbing behind it are worth, against the reference
+## build's. The one cardiovascular trait, and the only new number stamina needed:
+## how much of it there is is not a setting — `Stamina` reads the heart organ, the
+## blood left to move it and the vessel tree that carries it off the anatomy every
+## tick — so this is what a species' circulation is *built* like, quoted the same
+## way `muscle_power` quotes its muscle.
+##
+## It is the primary term in what an animal can sustain and the whole of how fast
+## it gets its breath back, and it does nothing else: a stronger heart never made
+## anything quicker off the mark. 1.0 is the default Lizard, which is where every
+## stamina constant in the file is measured.
+@export_range(0.2, 3.0, 0.01) var heart_power: float = 1.0
 ## How much fat the species lays down, as a multiple of the body plan's profile —
 ## thickest over the trunk, thinning toward the head, tail and limbs. It is not a
 ## damage-resistance number: fat is a real layer in the depth stack, so a padded
@@ -396,6 +408,7 @@ const SCHEMA: Array = [
 	{"prop": "density", "label": "Density", "min": 0.2, "max": 4.0, "step": 0.01},
 	{"prop": "muscle_power", "label": "Muscle power", "min": 0.2, "max": 4.0, "step": 0.01},
 	{"prop": "fast_twitch", "label": "Fast twitch", "min": 0.0, "max": 1.0, "step": 0.01},
+	{"prop": "heart_power", "label": "Heart power", "min": 0.2, "max": 3.0, "step": 0.01},
 	{"prop": "fat_reserve", "label": "Fat reserve", "min": 0.0, "max": 3.0, "step": 0.05},
 
 	{"group": "Movement"},
@@ -507,6 +520,11 @@ const PRESETS: Dictionary = {
 		"turn_responsiveness": 14.0, "turn_pivot": 40.0,
 		"sprint_multiplier": 1.80,
 		"density": 0.68, "muscle_power": 1.56, "jaw_power": 1.1, "fat_reserve": 0.8,
+		# An ambush hunter's heart: a shade under the reference, on an animal
+		# carrying half again its muscle for its weight. What that pairing comes to
+		# is a creature that is quick, that can spend hard, and that cannot keep it
+		# up — the chase is meant to be over in seconds or not at all.
+		"heart_power": 0.95,
 		"bite_damage": 2.4, "bite_reach": 30.0, "bite_radius": 14.0,
 		"bite_cooldown": 0.32, "chew_interval": 0.40,
 		# Head carried clear of the shoulder. The legs that throw this animal
@@ -596,6 +614,12 @@ const PRESETS: Dictionary = {
 		"turn_responsiveness": 5.0, "turn_pivot": 110.0,
 		"sprint_multiplier": 1.30, "reverse_speed_factor": 0.40,
 		"density": 1.66, "muscle_power": 1.31, "jaw_power": 5.5, "fat_reserve": 1.6,
+		# A large heart on the animal with the least muscle per unit of weight in the
+		# file, and a walk that is already three quarters of everything it has. The
+		# three together are a creature that covers ground all day and cannot chase
+		# anything: there is very little of its own speed left to borrow into, and
+		# what there is goes quickly.
+		"heart_power": 1.20,
 		"bite_damage": 2.8, "bite_reach": 34.0, "bite_radius": 22.0,
 		"bite_cooldown": 0.70, "chew_interval": 0.60,
 		"neck_lift": 0.14,
@@ -679,6 +703,12 @@ const PRESETS: Dictionary = {
 		"turn_speed_falloff": 0.60, "turn_responsiveness": 7.0, "turn_pivot": 70.0,
 		"sprint_multiplier": 1.50, "reverse_speed_factor": 0.50,
 		"density": 0.75, "muscle_power": 1.15, "jaw_power": 1.4, "fat_reserve": 2.2,
+		# The stayer, and the one build here whose heart is the interesting number.
+		# Circulation well over the reference on a body carrying half again its
+		# locomotor muscle: it paces at very nearly a pace it sustains, so what
+		# empties its store is measured in the tens of seconds rather than in a
+		# handful of them.
+		"heart_power": 1.15,
 		"bite_damage": 1.8, "bite_reach": 30.0, "bite_radius": 10.0,
 		"bite_cooldown": 0.60, "chew_interval": 0.55,
 		"neck_lift": 0.30,
@@ -717,6 +747,11 @@ const PRESETS: Dictionary = {
 		"turn_speed_falloff": 0.50, "turn_responsiveness": 13.0, "turn_pivot": 44.0,
 		"sprint_multiplier": 2.00, "reverse_speed_factor": 0.45,
 		"density": 0.57, "muscle_power": 1.89, "jaw_power": 1.0, "fat_reserve": 0.4,
+		# The most muscle per unit of weight in the file behind the smallest heart
+		# in it, which is the whole of what a cheetah is: everything is spent out of
+		# the store, nothing is sustained, and the animal that runs down anything on
+		# the plain is also the one that has to stop first.
+		"heart_power": 0.70,
 		"bite_damage": 2.2, "bite_reach": 34.0, "bite_radius": 12.0,
 		"bite_cooldown": 0.30, "chew_interval": 0.38,
 		"neck_lift": 0.08,
@@ -767,6 +802,10 @@ const PRESETS: Dictionary = {
 		"turn_speed_falloff": 0.60, "turn_responsiveness": 7.0, "turn_pivot": 90.0,
 		"sprint_multiplier": 1.35, "reverse_speed_factor": 0.45,
 		"density": 1.01, "muscle_power": 1.46, "jaw_power": 7.0, "fat_reserve": 0.9,
+		# A good heart on four times the reference's weight, and it needs to be: this
+		# build walks at three quarters of everything it has, so the band it can
+		# borrow into is narrow and it is into it the moment the key goes down.
+		"heart_power": 1.05,
 		"bite_damage": 4.0, "bite_reach": 40.0, "bite_radius": 20.0,
 		"bite_cooldown": 0.60, "chew_interval": 0.55,
 		"neck_lift": 0.16,
@@ -811,6 +850,11 @@ const PRESETS: Dictionary = {
 		"turn_speed_falloff": 0.55, "turn_responsiveness": 9.0, "turn_pivot": 60.0,
 		"sprint_multiplier": 2.35, "reverse_speed_factor": 0.40,
 		"density": 0.64, "muscle_power": 2.09, "jaw_power": 0.8, "fat_reserve": 0.8,
+		# A shade under the reference on a light body that carries plenty of muscle,
+		# which leaves it an ordinary store and the widest band in the file to spend
+		# it across: it walks at under half of what it has. The hop it is famous for
+		# being cheap at is the tendon in the row above rather than anything here.
+		"heart_power": 0.95,
 		"bite_damage": 1.6, "bite_reach": 26.0, "bite_radius": 9.0,
 		"bite_cooldown": 0.50, "chew_interval": 0.45,
 		"neck_lift": 0.12,
