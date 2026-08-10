@@ -36,7 +36,7 @@ func _run() -> void:
 	# seconds printed below would be a measurement of the habitat.
 	main.terrain.clear()
 	main.target_creature.reset(Vector2(0.0, -40000.0), 0.0)
-	for preset in ["Lizard", "Cat", "Elephant", "Camel", "Cheetah", "T. rex", "Kangaroo"]:
+	for preset in ["Lizard", "Cat", "Elephant", "Cheetah", "T. rex", "Kangaroo"]:
 		player.params.apply_preset(preset)
 		player.reset(Vector2.ZERO, 0.0)
 		for _tick in 30:

@@ -21,7 +21,7 @@ var cases: Array = [
 	["noskin", AnatomyView.ALL_LAYERS & ~1, true, true],
 	["muscle-only", 1 << AnatomyLattice.MUSCLE, false, false],
 	["bone-only", 1 << AnatomyLattice.BONE, false, false],
-	["organ-only", 1 << AnatomyLattice.ORGAN, false, false],
+	["organs", 0, true, true],
 	["vessels-only", 0, true, false],
 	["nerves-only", 0, false, true],
 	["nets-over-skin", AnatomyView.ALL_LAYERS, true, true],

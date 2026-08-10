@@ -191,8 +191,18 @@ static func bands_of(pk: int) -> int:
 ## should look like a skeleton at every setting of the toggles, and the way to
 ## get that is to let the ribs be ribs. Everything else — the skull, the flesh,
 ## the organs — is a heap of cells with a surface, and is skinned here.
+##
+## `skin_on` says the hide is being worn, and it decides what happens to a
+## chained cell that is *sheathed* — a vertebra at a tail tip, the bone at an
+## ankle, anywhere the animal is too thin to hold a cell of skin over its own
+## frame. Such a cell is being seen as hide, so while the hide is on it is
+## skinned here like any flesh, and its structure's tube is left to the views
+## that have actually uncovered it. Left to the tube instead, the ankle wore its
+## own skeleton outside its skin: a bone-coloured lump on every joint of an
+## otherwise whole animal.
 func build(lat: AnatomyLattice, surfaces: Array, plane_cells: PackedInt32Array,
-		slice_axis: int, chained: PackedInt32Array = PackedInt32Array()) -> void:
+		slice_axis: int, chained: PackedInt32Array = PackedInt32Array(),
+		skin_on: bool = false) -> void:
 	v_count = 0
 	count = 0
 	loose.resize(0)
@@ -207,7 +217,7 @@ func build(lat: AnatomyLattice, surfaces: Array, plane_cells: PackedInt32Array,
 	f_flat.resize(0)
 	f_raw.resize(0)
 	for s in surfaces.size():
-		_skin(lat, surfaces[s], s, chained)
+		_skin(lat, surfaces[s], s, chained, skin_on)
 	if slice_axis >= 0 and plane_cells.size() > 0:
 		_cut_faces(lat, plane_cells, slice_axis)
 
@@ -216,7 +226,7 @@ func build(lat: AnatomyLattice, surfaces: Array, plane_cells: PackedInt32Array,
 ## sector, close the gaps the lattice was too coarse to fill, and stitch what is
 ## left into quads.
 func _skin(lat: AnatomyLattice, surface: PackedInt32Array, shell: int,
-		chained: PackedInt32Array) -> void:
+		chained: PackedInt32Array, skin_on: bool) -> void:
 	_best_r.fill(-1.0)
 	_best_i.fill(-1)
 	_best_raw.fill(0)
@@ -250,8 +260,12 @@ func _skin(lat: AnatomyLattice, surface: PackedInt32Array, shell: int,
 	# Whether the chain table was handed over at all: without it every cell is
 	# skinned, which is what the tests that build a mesh on its own get.
 	var chains: bool = chained.size() == lat.count
+	# A sheathed chained cell is being seen as hide while the hide is on, so it
+	# is skinned here rather than left to its tube — see the note on `build`.
+	var sheath: PackedByteArray = lat.sheathed
+	var hide: bool = skin_on and sheath.size() == lat.count
 	for i in surface:
-		if chains and chained[i] >= 0:
+		if chains and chained[i] >= 0 and not (hide and sheath[i] != 0):
 			continue
 		var pk: int = patch_of[i]
 		var u: float = where[i].x if pk == 0 else -where[i].z
@@ -264,7 +278,7 @@ func _skin(lat: AnatomyLattice, surface: PackedInt32Array, shell: int,
 			else maxf(AnatomyLattice.CELL, span / float(bands_of(pk) - 1))
 
 	for i in surface:
-		if chains and chained[i] >= 0:
+		if chains and chained[i] >= 0 and not (hide and sheath[i] != 0):
 			continue
 		var pk: int = patch_of[i]
 		var sectors: int = BODY_SECTORS if pk == 0 else LIMB_SECTORS
@@ -307,7 +321,18 @@ func _skin(lat: AnatomyLattice, surface: PackedInt32Array, shell: int,
 			# ring of is a specimen with holes in it wherever a tissue thins out.
 			# They are handed on as loose cells and drawn one by one, which is
 			# the honest picture of a place where the animal is two cells wide.
-			if found < maxi(int(float(sectors) * RING_ENOUGH), 3):
+			#
+			# The floor is three on the trunk and nothing at all on a limb, and
+			# the split is about what the tissues there are shaped like. On the
+			# trunk a two-cell band can be two unrelated pockets on opposite
+			# flanks, and a hoop drawn through those invents a surface clean
+			# across the animal. Everything on a limb, though, is genuinely
+			# wrapped around the limb's own axis — the skin, the fat and the
+			# muscle are annular by construction and the bone is chained away —
+			# so a ring recovered from however few cells a band has is a slim
+			# hoop of a genuinely hooped thing. That is what turned a peeled
+			# leg's fat from a scatter of boxes into the sleeve it actually is.
+			if pk == 0 and found < maxi(int(float(sectors) * RING_ENOUGH), 3):
 				for sector in sectors:
 					if _best_i[row + sector] >= 0:
 						loose.append(_best_i[row + sector])

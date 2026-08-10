@@ -74,9 +74,9 @@ extends RefCounted
 ## walking regime, picking its feet up one at a time however hard it is driven,
 ## and a Cheetah's gallop becomes unreachable code. Scaled, which animal crosses
 ## which threshold still falls out of the bodies rather than out of these two
-## numbers: an Elephant stays under the first, a Cheetah passes both, and a Camel
-## lands between them and is kept out of the asymmetric regime by its `launch`,
-## which is where that decision always belonged.
+## numbers: an Elephant stays under the first and a Cheetah passes both, while a
+## build landing between them is kept out of the asymmetric regime by its
+## `launch`, which is where that decision always belonged.
 const FROUDE_WALK: float = 0.12
 ## And where a symmetrical gait runs out. Past this the two limbs of a girdle
 ## gain nothing by alternating and a great deal by pushing together, which is a

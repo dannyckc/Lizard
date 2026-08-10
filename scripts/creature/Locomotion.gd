@@ -567,9 +567,9 @@ func duty_at(pace: float) -> float:
 ## its own cycle *this* foot may spend in the air, and the lift limit says how
 ## many feet the whole body will have off the ground at once — and four legs each
 ## aloft for a third of the time is a body permanently on one foot, whatever the
-## duty factor thinks. Missing it is what left a Camel's ceiling three times what
-## its own gait could deliver, so it was granted a speed it could only meet by
-## dragging its feet along behind it.
+## duty factor thinks. Missing it is what left a long-legged pacer's ceiling three
+## times what its own gait could deliver, so it was granted a speed it could only
+## meet by dragging its feet along behind it.
 func cycle_floor(swing_at_rest: float, pace: float, aloft_share: float = 1.0) -> float:
 	return maxf(hurried_swing(swing_at_rest, pace)
 		/ maxf(minf(1.0 - duty_at(pace), maxf(aloft_share, 0.05) * SLOT_MARGIN), 0.05),

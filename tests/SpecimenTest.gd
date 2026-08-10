@@ -108,7 +108,15 @@ func _check_layers(view: AnatomyView) -> void:
 		view.layers = 0
 		view.show_vessels = t == AnatomyLattice.VESSEL
 		view.show_nerves = t == AnatomyLattice.NERVE
-		if t < AnatomyLattice.NERVE:
+		if t == AnatomyLattice.ORGAN:
+			# The named organs ride the overlays: the brain shows with the
+			# nerves, the heart with the vessels, and the organ layer bit shows
+			# neither. So the organs are asked for by lighting both overlays
+			# over an empty stack, and the networks those overlays bring with
+			# them are expected company rather than strays.
+			view.show_vessels = true
+			view.show_nerves = true
+		elif t < AnatomyLattice.NERVE:
 			view.layers = 1 << t
 		_rebuild(view, lat, grid)
 		view._place_marks(lat)
@@ -134,6 +142,14 @@ func _check_layers(view: AnatomyView) -> void:
 			_check(mine > 0, "the specimen was showing %s alone and drew none of it: %d cells"
 				% [name, lat.tissue_cells(t)])
 		for kind in strays:
+			# An overlay carries its own organ, and the organs carry both
+			# overlays — those pairings are the contract, not a leak.
+			if t == AnatomyLattice.ORGAN and (kind == AnatomyLattice.NERVE
+					or kind == AnatomyLattice.VESSEL):
+				continue
+			if kind == AnatomyLattice.ORGAN and (t == AnatomyLattice.NERVE
+					or t == AnatomyLattice.VESSEL):
+				continue
 			_check(false, "the specimen was showing %s alone and drew %s as well"
 				% [name, AnatomyLattice.TISSUE_NAMES[kind]])
 

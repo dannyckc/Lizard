@@ -127,27 +127,8 @@ func _check_the_pattern_comes_from_the_body(player: Creature) -> void:
 	_check(float(elephant["froude"]) < Footfall.FROUDE_WALK,
 		"an Elephant reached the running regime (Fr %.2f)" % elephant["froude"])
 
-	# And a long-legged animal on a short trunk has a problem neither of the other
-	# two has: its hind foot swings forward into where its own forefoot is
-	# standing. Moving that pair together is the way out, and a pace is what that
-	# is called. Nothing here is about speed or spring — it is the plain geometry
-	# of not treading on itself.
-	var camel: Dictionary = _measure(player, "Camel", 1.0)
-	_check(float(camel["interference"]) > 0.2,
-		"a Camel's legs did not interfere with each other (%.2f) — it has no reason to pace"
-			% camel["interference"])
-	var pace: float = minf(float(camel["diagonality"]), 1.0 - float(camel["diagonality"]))
-	_check(pace < 0.2,
-		"a Camel did not move its legs in lateral pairs (diagonality %.2f)"
-			% camel["diagonality"])
-	# ...and it is the interference doing it rather than the stance, which the
-	# Cheetah shares and does not pace on.
-	var cheetah_walk: Dictionary = _measure(player, "Cheetah", 0.25)
-	_check(float(cheetah_walk["interference"]) < float(camel["interference"]),
-		"the two erect builds had the same interference (%.2f, %.2f) — the pace is not coming from proportion"
-			% [cheetah_walk["interference"], camel["interference"]])
-	notes.append("Lizard trots, Elephant ambles, Camel paces on %.2f interference"
-		% camel["interference"])
+	notes.append("Lizard trots on %.2f diagonality, Elephant ambles on %.2f"
+		% [lizard["diagonality"], elephant["diagonality"]])
 
 
 # -------------------------------------------------------------- asymmetric ----
@@ -167,32 +148,16 @@ func _check_a_girdle_lands_together_only_when_it_can(player: Creature) -> void:
 		"a galloping Cheetah's hind feet landed apart %.0f%% of the time"
 			% ((1.0 - float(cheetah["hind_together"])) * 100.0))
 
-	# The control, and the point of the whole derivation: the same speed, the same
-	# erect stance, the same four legs — and joints that do not fold away, so there
-	# is nothing to gather with. It stays in a symmetrical gait however hard it is
-	# driven.
-	#
-	# Stated as the three things a symmetrical gait *is* rather than as `aerial`
-	# being exactly zero, and the difference is worth the words. The old check held
-	# because a hand-authored `leap_height` of 0.25 happened to land under
-	# `LAUNCH_MIN`, which is a coincidence about a number rather than a claim about
-	# an animal; the leap is now derived, and a large browser that can canter comes
-	# out with a sliver of a launch available to it at a flat sprint, which is
-	# honest — camels do canter. What it must never do is *use* it: the pair on one
-	# side stays coupled, the two hind feet keep alternating, and no more than two
-	# feet leave the ground. Every one of those would break the instant it started
-	# bounding, and none of them is a threshold anybody chose.
-	var camel: Dictionary = _measure(player, "Camel", 1.0)
-	_check(str(camel["gait"]) == "pace",
-		"a Camel at a flat sprint was %s rather than pacing" % camel["gait"])
-	_check(float(camel["hind_together"]) < 0.5,
-		"a Camel's hind feet landed together %.0f%% of the time — it is bounding"
-			% (float(camel["hind_together"]) * 100.0))
-	_check(float(camel["aerial"]) < Footfall.SUSPENSION_AT,
-		"a Camel committed to an asymmetric gait (aerial %.2f)" % camel["aerial"])
-	_check(int(camel["aloft"]) <= 2,
-		"a Camel had %d feet off the ground at once" % camel["aloft"])
-	notes.append("Cheetah gathers %.2f, Camel %.2f" % [cheetah["aerial"], camel["aerial"]])
+	# The control on the other side of the multiplication: an Elephant is driven
+	# as hard as its body allows and still keeps every one of the symmetrical
+	# gait's promises, because its knees do not open far enough to push against
+	# anything. Nothing to gather with, nothing left the ground in numbers.
+	var elephant: Dictionary = _measure(player, "Elephant", 1.0)
+	_check(float(elephant["aerial"]) < Footfall.SUSPENSION_AT,
+		"an Elephant committed to an asymmetric gait (aerial %.2f)" % elephant["aerial"])
+	_check(int(elephant["aloft"]) <= 2,
+		"an Elephant had %d feet off the ground at once" % elephant["aloft"])
+	notes.append("Cheetah gathers %.2f, Elephant %.2f" % [cheetah["aerial"], elephant["aerial"]])
 
 
 # ------------------------------------------------------------------ bipeds ----
@@ -257,24 +222,19 @@ func _check_the_back_folds_only_when_the_girdles_pair(player: Creature) -> void:
 # ---------------------------------------------------------------- attitude ----
 
 ## Four legs holding four different heights are a body that is tipped, and the tip
-## is a measurement rather than a lean anybody drew. What it has to do is differ
-## between gaits that put the animal's weight in different places: a pace has both
-## legs of one side off the ground at once and rolls, a bound has a whole girdle
-## off and pitches.
+## is a measurement rather than a lean anybody drew. A bound has a whole girdle
+## off the ground at once, so the weight lands fore-and-aft and the body pitches
+## rather than rolls.
 func _check_the_body_tips_onto_its_feet(player: Creature) -> void:
-	var camel: Dictionary = _measure(player, "Camel", 1.0)
 	var cheetah: Dictionary = _measure(player, "Cheetah", 1.0)
-	# Both quoted as the swing over the run rather than as a peak, because that is
+	# Quoted as the swing over the run rather than as a peak, because that is
 	# what a body tipping about is: how far it travels, not how far off level it
 	# ever got.
-	_check(float(camel["roll"]) > float(camel["pitch_swing"]),
-		"a pacing Camel pitched more than it rolled (%.3f roll, %.3f pitch)"
-			% [camel["roll"], camel["pitch_swing"]])
 	_check(float(cheetah["pitch_swing"]) > float(cheetah["roll"]),
 		"a bounding Cheetah rolled more than it pitched (%.3f roll, %.3f pitch)"
 			% [cheetah["roll"], cheetah["pitch_swing"]])
-	notes.append("Camel rolls %.3f, Cheetah pitches %.3f"
-		% [camel["roll"], cheetah["pitch_swing"]])
+	notes.append("Cheetah pitches %.3f over %.3f of roll"
+		% [cheetah["pitch_swing"], cheetah["roll"]])
 
 
 # ------------------------------------------------------------------ harness ----

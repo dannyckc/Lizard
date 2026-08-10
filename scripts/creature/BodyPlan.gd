@@ -94,9 +94,9 @@ const LIMB_REGIONS: Array[int] = [FL, FR, RL, RR]
 ## particular animal and was then applied to every animal. Move a build's hind
 ## limbs and the girdle bar under them moved with the socket, exactly as it should,
 ## while the block of muscle, nerve, vessel and fat *called* the pelvis stayed
-## bolted across the ninth column: a Camel and a Kangaroo hung their hind legs off
-## their own lumbar region, and every creature in the file started its tail at the
-## same fraction of itself however far forward or back its hips were.
+## bolted across the ninth column: a Kangaroo hung its hind legs off its own
+## lumbar region, and every creature in the file started its tail at the same
+## fraction of itself however far forward or back its hips were.
 ##
 ## So the three that are a function of where the girdles are now say so, and the
 ## only constant left is the one that genuinely is one — a trunk starts where the

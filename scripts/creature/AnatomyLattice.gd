@@ -266,6 +266,23 @@ var bitten: PackedByteArray = PackedByteArray()
 
 var count: int = 0
 
+# --- sockets -----------------------------------------------------------------
+## Where each limb hangs off the trunk, in the trunk's own posing coordinates:
+## the body's fractional station at the socket, and the socket's lateral and
+## vertical offsets within the section. Index-matched to `PATCH_KEYS`, entry 0
+## (the body itself) unused.
+##
+## Kept because the carve and the pose disagree about where a limb's top is. The
+## cells hang the limb off the flank — that is where a leg is — but the ledger's
+## limb patch runs from the girdle's own point on the spine, so a limb posed
+## through its patch alone lands its top cells a flank's width away from the
+## trunk cells they canonically touch. The specimen closes that seam by carrying
+## the limb's posed frame onto this socket — see `AnatomyView._close_seams` —
+## and this is the socket, stated once by the same carve that laid the cells.
+var socket_station: PackedFloat32Array = PackedFloat32Array()
+var socket_lat: PackedFloat32Array = PackedFloat32Array()
+var socket_lift: PackedFloat32Array = PackedFloat32Array()
+
 # --- census ------------------------------------------------------------------
 ## Cells built and cells still standing, indexed `region * TISSUES + tissue`.
 var built: PackedInt32Array = PackedInt32Array()
@@ -363,6 +380,17 @@ func _build(plan: BodyPlan, p: CreatureParams, scale: float, depth_ratio: float,
 	for key in BodyPlan.LIMB_KEYS:
 		sockets.append(_socket_of(plan, p, key, profile, clip, length,
 			depth_ratio, scale, load))
+	socket_station = PackedFloat32Array()
+	socket_lat = PackedFloat32Array()
+	socket_lift = PackedFloat32Array()
+	socket_station.resize(PATCH_KEYS.size())
+	socket_lat.resize(PATCH_KEYS.size())
+	socket_lift.resize(PATCH_KEYS.size())
+	for i in BodyPlan.LIMB_KEYS.size():
+		socket_station[i + 1] = float(BodyPlan.HEAD_COLS) \
+			+ sockets[i].x / maxf(length, 0.001) * float(BodyPlan.TORSO_COLS)
+		socket_lat[i + 1] = sockets[i].y
+		socket_lift[i + 1] = sockets[i].z
 	_carve_body(plan, profile, clip, length, depth_ratio, fat_reserve, sockets)
 	for i in BodyPlan.LIMB_KEYS.size():
 		_carve_limb(plan, p, BodyPlan.LIMB_KEYS[i], sockets[i], scale,

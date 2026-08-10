@@ -130,8 +130,8 @@ func _check_one_set_of_hips(player: Creature) -> void:
 				% [name, bar, plan.torso_column(hip)])
 
 		# 3. The lattice: the socket is inside the block of tissue called the
-		# pelvis. This is the one that used to be flatly wrong on two builds —
-		# a Camel and a Kangaroo hung their hind legs off their own lumbar region.
+		# pelvis. This is the one that used to be flatly wrong on rear-hipped
+		# builds — a Kangaroo hung its hind legs off its own lumbar region.
 		_check(plan.region_at(hip) == BodyPlan.PELVIS,
 			"a %s's hind limbs hang off its %s, not its pelvis"
 				% [name, plan.region_name(plan.region_at(hip))])

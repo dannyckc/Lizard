@@ -629,92 +629,14 @@ const PRESETS: Dictionary = {
 		"jaw_gape_deg": 46.0, "tooth_variation": 0.14,
 	},
 
-	# --- and four builds that exist to show the range -------------------------
-	# None of the four below carries a gait, a footfall order or an animation.
+	# --- and three builds that exist to show the range ------------------------
+	# None of the three below carries a gait, a footfall order or an animation.
 	# They are bones, weights and angles, exactly as the three above are, and what
-	# comes out of them is a pace, a rotary gallop, a two-legged stride and a hop —
+	# comes out of them is a rotary gallop, a two-legged stride and a hop —
 	# because those are what bodies of those proportions do. The interesting thing
 	# about each is which single number is responsible, and that is what the
 	# comments say.
 
-	# Erect, long-legged, short-bodied. The legs are so long against the gap
-	# between the girdles that a hind foot swinging forward arrives where the
-	# forefoot on the same side is standing — and the way out of that is to move
-	# the pair together, which is a pace. It is the one build in the file whose
-	# footfall pattern is decided by neither speed nor spring but by the plain
-	# geometry of not treading on itself, and the number doing it is
-	# `rear_limb_t - front_limb_t` against `leg_length`.
-	#
-	# Everything else here is a browser: a long neck, a great deal of stored fat,
-	# grinding teeth, and no leap worth the name — which keeps it out of the
-	# asymmetric regime however fast it is pushed, so the roll never turns into a
-	# bound.
-	"Camel": {
-		"posture": Posture.ERECT,
-		"segment_count": 13, "segment_length": 17.0, "max_bend_deg": 14.0,
-		"spine_stiffness": 0.93, "spine_damping": 0.55, "body_wave": 3.5,
-		"wave_frequency": 0.7, "wave_speed": 1.3,
-		"head_width": 8.0, "chest_width": 17.0, "waist_width": 15.0,
-		"hip_width": 16.0, "tail_tip_width": 1.2,
-		# Long legs on a short trunk, and that pairing is the whole preset. A hind
-		# foot swinging forward arrives where the forefoot on the same side is
-		# standing, because the two girdles are closer together than the two legs can
-		# reach between them — so the way out is to move the pair as one, which is a
-		# pace. Both halves of it are ordinary numbers: the gap is
-		# `rear_limb_t - front_limb_t` against the body, and the reach is the legs.
-		"front_limb_t": 0.28, "rear_limb_t": 0.44,
-		"arm_length": 88.0, "leg_length": 90.0,
-		"stance_width": 0.80,
-		# Long straight legs, near-identical front and back — which is exactly why
-		# the pair on one side arrives at the same place and it paces.
-		#
-		#
-		# The fold ranges are load-bearing in a way that is worth saying out loud,
-		# because they are what this build's whole gait rests on: a joint that folds
-		# is a body that sinks over its own stride, and sinking is what buys an
-		# upright leg the plan-view reach to step with — see Locomotion.sink. Take
-		# them down and the legs stop interfering, and an animal whose legs do not
-		# interfere has no reason to pace. So this is not a spare knob to price the
-		# leap with; the leap is what this articulation happens to come to, which is
-		# a modest one on a heavy body with a stiff back.
-		"fore_flex_deg": -12.0, "hind_flex_deg": -4.0,
-		"fore_fold_range": 0.70, "hind_fold_range": 0.75,
-		"fore_upper_share": 0.52, "hind_upper_share": 0.48,
-		"fore_swing_deg": 58.0, "hind_swing_deg": 64.0,
-		"toe_push": 0.40,
-		# Long springy tendons carrying a great deal of weight — a browser's legs
-		# are cheap to walk on for exactly this reason. What they are not is a
-		# jump: the store is there and the joints are straight, so most of it goes
-		# into the walk and very little of it comes back out all at once.
-		"fore_spring": 0.20, "hind_spring": 0.18,
-		# A pair that lands as one. `beat_coupling` is the only thing in the file that
-		# says *how tightly* limbs sharing a beat keep to it — which foot shares a
-		# beat with which is Footfall's answer, off the interference above — and an
-		# animal that has moved its legs in lateral pairs to stop them fouling each
-		# other has every reason to keep them there.
-		"beat_coupling": 0.75,
-		# Quick for its weight, and it has to be: a pace is a two-beat gait, and a
-		# body that must be statically supported at every instant cannot have one —
-		# it picks its feet up one at a time whatever its proportions say. So this
-		# build has to be going fast enough for its size to be caught briefly on one
-		# pair, and no faster: past a run it starts throwing itself between girdles
-		# instead, which is a different gait again. See Footfall.caution.
-		"move_speed": 130.0, "acceleration": 0.16,
-		"turn_speed_falloff": 0.60, "turn_responsiveness": 7.0, "turn_pivot": 70.0,
-		"sprint_multiplier": 1.50, "reverse_speed_factor": 0.50,
-		"density": 0.75, "muscle_power": 1.15, "jaw_power": 1.4, "fat_reserve": 2.2,
-		# The stayer, and the one build here whose heart is the interesting number.
-		# Circulation well over the reference on a body carrying half again its
-		# locomotor muscle: it paces at very nearly a pace it sustains, so what
-		# empties its store is measured in the tens of seconds rather than in a
-		# handful of them.
-		"heart_power": 1.15,
-		"bite_damage": 1.8, "bite_reach": 30.0, "bite_radius": 10.0,
-		"bite_cooldown": 0.60, "chew_interval": 0.55,
-		"neck_lift": 0.30,
-		"tooth_count": 8, "tooth_size": 0.14, "tooth_sharpness": 0.20,
-		"jaw_gape_deg": 50.0, "tooth_variation": 0.16,
-	},
 
 	# The same erect stance with the opposite emphasis: a back that folds twice as
 	# far as anything else here, legs that can throw the whole animal three times

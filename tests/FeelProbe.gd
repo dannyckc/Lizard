@@ -13,7 +13,7 @@ func _process(_delta: float) -> bool:
 	if done:
 		return true
 	done = true
-	for preset_name in ["Lizard", "Cat", "Elephant", "Camel", "Cheetah", "T. rex", "Kangaroo"]:
+	for preset_name in ["Lizard", "Cat", "Elephant", "Cheetah", "T. rex", "Kangaroo"]:
 		_probe(preset_name)
 	quit(0)
 	return true

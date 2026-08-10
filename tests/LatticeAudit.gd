@@ -28,7 +28,7 @@ func _process(_delta: float) -> bool:
 
 func _run() -> void:
 	var player: Creature = main.get_node("Creature")
-	for preset in ["Lizard", "Cat", "Elephant", "Camel", "Cheetah", "T. rex", "Kangaroo"]:
+	for preset in ["Lizard", "Cat", "Elephant", "Cheetah", "T. rex", "Kangaroo"]:
 		player.params.apply_preset(preset)
 		player.reset(Vector2.ZERO, 0.0)
 		player._physics_process(TICK)
