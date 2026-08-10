@@ -253,10 +253,14 @@ func update(posture: Posture, loco: Locomotion, physique: Physique,
 	# How long the whole of it takes. Every one of the three is the same pendulum
 	# `Locomotion` swings a leg with, because that is what is happening: the limb
 	# that folds to gather, holds to charge and opens to push is the limb the gait
-	# picks up and puts down, moved by the same muscle against the same weight.
+	# picks up and puts down, moved by the same muscle against the same weight —
+	# and through the same lever, which is why the gear rides along. The work the
+	# jump is worth is untouched by it; how quickly the limb is wound is not.
 	# The maximum charge is therefore anatomical outright — there is no clock here
 	# that is not a measurement of this animal's own leg.
-	var swing: float = loco.swing_time(_bone.y if share.y >= share.x else _bone.x)
+	var driving: int = Limb.REAR if share.y >= share.x else Limb.FRONT
+	var swing: float = loco.swing_time(
+		_bone.y if driving == Limb.REAR else _bone.x, loco.joint(driving).gear)
 	charge_time = maxf(swing * LOAD_SWINGS, 0.05)
 	gather_time = maxf(swing * GATHER_SWINGS, 0.03)
 	thrust_time = maxf(swing * THRUST_SWINGS, 0.02)

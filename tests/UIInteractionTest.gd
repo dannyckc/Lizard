@@ -256,12 +256,20 @@ func _check_anatomy(hud: EvolutionHUD) -> void:
 
 	_check_death(panel, target)
 
+	# F3 walks the loop: anatomy, then the gait instruments, then the field. The
+	# middle stop is checked as a stop — the walk panel has to actually come out,
+	# reading the same creature — and the loop has to close.
 	var f3 := InputEventKey.new()
 	f3.keycode = KEY_F3
 	f3.pressed = true
 	main._unhandled_input(f3)
-	_check(hud.active_view() == EvolutionHUD.VIEW_FIELD, "F3 did not toggle the view back")
-	_check(not panel.visible, "the anatomy drawer stayed out over the field")
+	_check(hud.active_view() == EvolutionHUD.VIEW_GAIT, "F3 did not step from anatomy to gait")
+	_check(hud.gait_panel != null and hud.gait_panel.visible, "the gait panel did not come out")
+	_check(not panel.visible, "the anatomy drawer stayed out under the gait panel")
+	_check(hud.gait_panel.subject == main.creature, "the gait panel is not reading the player's body")
+	main._unhandled_input(f3)
+	_check(hud.active_view() == EvolutionHUD.VIEW_FIELD, "F3 did not close the loop back to the field")
+	_check(not hud.gait_panel.visible, "the gait panel stayed out over the field")
 
 
 ## What the drawer says the animal is *made of*, and what its organs are doing.

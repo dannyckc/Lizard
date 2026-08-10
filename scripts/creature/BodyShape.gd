@@ -121,15 +121,15 @@ func build(spine: Spine, p: CreatureParams, scale: float, posture: Posture = nul
 		var t: float = float(i) / float(n - 1)
 		widths[i] = maxf(widths[i] * (1.0 + _swallow_at(t)), 0.6)
 
-	# The tail is the spine past the pelvis, so making it optional is a matter of
-	# clipping the silhouette early rather than resizing the chain. Where that is
-	# is BodyPlan's answer rather than a second one taken here: the lattice starts
-	# its TAIL region at the same station and the droop hangs from it, and three
-	# files disagreeing about where a tail begins is three different animals.
+	# The tail is the spine past the pelvis, so its length is a matter of clipping
+	# the silhouette early rather than resizing the chain. Where that is is
+	# BodyPlan's answer rather than a second one taken here: the lattice carves to
+	# the same station and the droop hangs from it, and three files disagreeing
+	# about where a tail ends is three different animals.
 	last_index = n - 1
-	if not p.tail_enabled:
-		last_index = clampi(
-			int(round(BodyPlan.tail_t(p.rear_limb_t) * float(n - 1))), 3, n - 1)
+	var clip: float = BodyPlan.clip_t(p)
+	if clip < 1.0:
+		last_index = clampi(int(round(clip * float(n - 1))), 3, n - 1)
 
 	# --- flesh drawn out by whatever has hold of it -------------------------
 	# Before every point below is placed, because all of them are placed off it:
@@ -286,9 +286,7 @@ static func section_profile(p: CreatureParams, scale: float,
 	var n: int = into.size()
 	if n <= 0:
 		return
-	var knots: PackedFloat32Array = PackedFloat32Array([
-		p.head_width, p.chest_width, p.waist_width, p.hip_width, p.tail_tip_width
-	])
+	var knots: PackedFloat32Array = knot_widths(p)
 	var stations: PackedFloat32Array = knot_stations(p)
 	var girth: float = p.body_width * scale
 	if n == 1:
@@ -300,13 +298,13 @@ static func section_profile(p: CreatureParams, scale: float,
 
 ## Where along the spine each width knot is measured.
 ##
-## The five parameters are already anatomy — they are called head, chest, waist,
-## hip and tail tip — and they were being read at five evenly spaced fractions of
-## the body, which is a different animal. On every build in the file that put the
-## hip knot around 0.7 while the hind limbs hung at 0.44 to 0.54, so the widest
-## part of the creature sat a fifth of a body *behind* the legs holding it up and
-## the sockets came out of the waist. The Cheetah was the worst of it: its hind
-## legs were attached at the narrowest cross-section it has.
+## The five core parameters are already anatomy — they are called head, chest,
+## waist, hip and tail tip — and they were being read at five evenly spaced
+## fractions of the body, which is a different animal. On every build in the file
+## that put the hip knot around 0.7 while the hind limbs hung at 0.44 to 0.54, so
+## the widest part of the creature sat a fifth of a body *behind* the legs holding
+## it up and the sockets came out of the waist. The Cheetah was the worst of it:
+## its hind legs were attached at the narrowest cross-section it has.
 ##
 ## Nothing was wrong with the numbers and nothing wanted a per-species offset —
 ## they were being sampled in the wrong places. So the knots go where their names
@@ -314,12 +312,55 @@ static func section_profile(p: CreatureParams, scale: float,
 ## girdle, and the tail tip. Two of those are the stations the limbs already hang
 ## from, which is what makes the silhouette agree with the skeleton for free, on
 ## every creature, including ones nobody has authored yet.
+##
+## Two knots are optional, and both are the same kind of fix the resampling was:
+## a place the profile needed a say and had none. A `neck_width` waists the body
+## between the skull and the shoulder; a `tail_base_width` pinches it just behind
+## the pelvic block — at `BodyPlan.tail_t`, where the bone runs out — so the
+## hindquarters round off as a rump and the tail hangs off it as its own
+## structure instead of the body tapering away to the tip. And a shortened tail
+## moves the tip knot to the clip, because the tip of the tail the animal *has*
+## is where its tip width belongs. Each keeps this list exactly as it was when
+## unset, which is what keeps the reference build the reference build.
+##
+## This list and `knot_widths` are one description read out twice — every branch
+## here must appear there, in the same order, or the spline is drawn through the
+## wrong anatomy.
 static func knot_stations(p: CreatureParams) -> PackedFloat32Array:
 	# Ordered and strictly increasing whatever the sliders are set to — the spline
 	# below divides by the gaps.
 	var shoulder: float = clampf(p.front_limb_t, 0.02, 0.90)
 	var hip: float = clampf(p.rear_limb_t, shoulder + 0.04, 0.96)
-	return PackedFloat32Array([0.0, shoulder, (shoulder + hip) * 0.5, hip, 1.0])
+	var stations := PackedFloat32Array([0.0])
+	if p.neck_width > 0.0:
+		stations.append(shoulder * 0.55)
+	stations.append(shoulder)
+	stations.append((shoulder + hip) * 0.5)
+	stations.append(hip)
+	var tip: float = 1.0
+	if p.tail_enabled and p.tail_length < 1.0:
+		tip = BodyPlan.clip_t(p)
+	if p.tail_base_width > 0.0:
+		var base: float = clampf(BodyPlan.tail_t(p.rear_limb_t),
+			hip + 0.02, tip - 0.02)
+		stations.append(base)
+		tip = maxf(tip, base + 0.02)
+	stations.append(tip)
+	return stations
+
+
+## The half-width at each of `knot_stations`' stations — see the contract there.
+static func knot_widths(p: CreatureParams) -> PackedFloat32Array:
+	var knots := PackedFloat32Array([p.head_width])
+	if p.neck_width > 0.0:
+		knots.append(p.neck_width)
+	knots.append(p.chest_width)
+	knots.append(p.waist_width)
+	knots.append(p.hip_width)
+	if p.tail_base_width > 0.0:
+		knots.append(p.tail_base_width)
+	knots.append(p.tail_tip_width)
+	return knots
 
 
 ## Cubic Hermite through `knots` at `stations`, with Catmull-Rom tangents.

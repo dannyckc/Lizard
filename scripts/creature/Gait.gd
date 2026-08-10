@@ -33,6 +33,13 @@ const LIMB_CONTACT_SLOP: float = 0.35
 const STEP_RETARGET_RESPONSE: float = 14.0
 const LANDING_PREDICTION_STRIDES: float = 0.65
 
+## How far a swinging foot is carried in under its own socket at the top of the
+## step, as a share of the way there, before it is scaled by the joint's own
+## travel. The fold half of a swing: the limb comes through bent, not towed
+## straight between two footprints — see the step advance, where it is spent
+## through the fold the joint actually has, so a cat tucks and a column does not.
+const SWING_TUCK: float = 0.30
+
 # --- broken ground ------------------------------------------------------------
 # Three numbers, and between them they are the difference between a body walking
 # over rubble and a body having a fit on it. Every one of them exists because the
@@ -406,7 +413,10 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 			load.x if limb.pair == Limb.FRONT else load.y, limb.pair)
 		limb.set_lengths(bone, posture.drawn_reach(bone), joint.upper)
 		limb.foot_size = limb.foot_radius(scale)
-		limb.swing_base = loco.swing_time(bone)
+		# Through this girdle's own lever: a limb whose tendons insert close to the
+		# joint is thrown through its swing sooner, and one geared for force pays
+		# for its push in exactly this line.
+		limb.swing_base = loco.swing_time(bone, joint.gear)
 		limb.reference = reference
 		# How high this socket is being carried — measured last tick off the feet
 		# that were under it, so the leg is solved to the body it is actually
@@ -655,7 +665,17 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 	# is bent into a turn. Deriving it from the parameters instead would be a
 	# second opinion about a body that is already solved, and the two would
 	# disagree exactly when the animal was doing something interesting.
-	_solve_pattern(delta, body, p)
+	#
+	# The hip the Froude number is quoted against is the height this animal
+	# *stands* at, not the height it happens to be held at this instant — the
+	# same distinction the envelope already draws, for the same reason. The
+	# pendulum an animal vaults over is its leg; a body crouched onto folded
+	# joints has not grown a shorter leg, and measuring it as though it had
+	# inflates the regime exactly when the animal is being most careful. That
+	# was the whole of why a stalking creature read as sprinting for its size
+	# and trotted through its own stalk.
+	_solve_pattern(delta, body, p,
+		_rest_clearance(leg, loco.joint(Limb.REAR).stand, p, Limb.REAR))
 
 	# --- 2. advance any step already in flight ------------------------------
 	for limb in limbs:
@@ -705,6 +725,18 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		# a sine arc for the height — a half period is exactly one hop.
 		var eased: float = smoothstep(0.0, 1.0, limb.step_t)
 		limb.ground = limb.step_from.lerp(limb.step_to, eased)
+		# A swing is not a straight tow between two footprints: the joint folds as
+		# the limb comes through, and a folded limb's foot is carried in under its
+		# own socket. How far in is how much travel the joint actually has between
+		# standing and folded — a cat's shank tucks up under its hip mid-swing, a
+		# columnar leg pendulums through nearly straight, and neither was told to.
+		# Peaking at mid-swing and gone by touchdown, so the foot still lands
+		# exactly where the stride said; the envelope clamp in `_solve_limb` has
+		# the last word, so a fold the joint has not got cannot be spent here.
+		var fold_room: float = clampf((limb.stand - limb.fold)
+			/ maxf(limb.stand, 0.0001), 0.0, 1.0)
+		limb.ground = limb.ground.lerp(anchor.pos,
+			SWING_TUCK * fold_room * sin(limb.step_t * PI) * limb.flex)
 		# Two terms now, and only the second is the step. The first is the ramp from
 		# the surface the foot left to the one it is arriving at, which is what makes
 		# a step onto a ledge a step *up* rather than a step that ends underground —
@@ -725,7 +757,7 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 	# rather than failing every limb's test is the same distinction `_skip` draws:
 	# these legs are not stepping badly, they are not stepping.
 	if airborne:
-		_carry_body(delta, wants)
+		_carry_body(delta, wants, p)
 		for limb in limbs:
 			if not _skip(limb):
 				_solve_limb(limb, body, p, scale, collision_query)
@@ -829,7 +861,7 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 	#
 	# Settling first, the chain is solved to a body that is already standing where
 	# these feet put it.
-	_carry_body(delta, wants)
+	_carry_body(delta, wants, p)
 	for limb in limbs:
 		if _skip(limb):
 			continue
@@ -859,7 +891,8 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 ## measured between the sockets on one flank, so a body curled into a turn reports
 ## the shorter distance its own feet actually have to share — which is exactly
 ## when a long-legged animal's feet start interfering.
-func _solve_pattern(delta: float, body: BodyShape, p: CreatureParams) -> void:
+func _solve_pattern(delta: float, body: BodyShape, p: CreatureParams,
+		stance_hip: float = -1.0) -> void:
 	_clock += delta
 	_beat_age += delta
 	var pace: float = 0.0
@@ -893,7 +926,8 @@ func _solve_pattern(delta: float, body: BodyShape, p: CreatureParams) -> void:
 			(body.anchors["RL"] as Spine.Frame).pos)
 	var lead: float = (lead_left - lead_right) / maxf(speed, 1.0)
 
-	footfall.update(posture, loco, p, maxf(hip_height, 1.0), speed,
+	footfall.update(posture, loco, p,
+		maxf(stance_hip if stance_hip > 0.0 else hip_height, 1.0), speed,
 		Vector2(fore, rear), gap, lead, loco.forelimbs_bear, leap.launch)
 	_measure_gather(body)
 
@@ -1013,17 +1047,20 @@ func _mark_beat(limb: Limb) -> void:
 ##
 ## Only feet that are down are asked. A limb in the air is not carrying anything,
 ## and a limb that cannot bear weight has already said so.
-func _carry_body(delta: float, wants: Vector2) -> void:
+func _carry_body(delta: float, wants: Vector2, p: CreatureParams) -> void:
 	var rear: float = _pair_support(Limb.REAR, wants.y)
-	# A girdle with nothing under it is not held up by legs — it is held up by the
-	# back. That is what the front of a two-legged animal is doing, and it is why
-	# nothing had to write a special pose for one: the shoulders ride level over
-	# the hips because the spine between them is what is carrying them, and the
-	# tail is what makes that balance possible. Everything else about the body —
-	# the height bands, the bite reach, the drawn attitude — follows without a
-	# single line knowing the creature is bipedal.
-	var front: float = rear if not loco.forelimbs_bear \
-		else _pair_support(Limb.FRONT, wants.x)
+	# A girdle with nothing under it is not held up by legs — it is held up by
+	# the back, at whatever angle this species carries its trunk. The tail is
+	# what makes that balance possible, and the angle is a trait exactly as a
+	# carried elbow is — see `trunk_lift_deg` — because how upright a biped
+	# stands is a fact about the animal rather than about its speed: a kangaroo
+	# rears its trunk over its hips and a tyrannosaur levels its own out over a
+	# heavier tail, on the same hips and the same line below. Everything else
+	# about the body — the height bands, the bite reach, the drawn attitude —
+	# follows without a single line knowing the creature is bipedal.
+	var front: float = _pair_support(Limb.FRONT, wants.x) if loco.forelimbs_bear \
+		else rear + sin(deg_to_rad(p.trunk_lift_deg)) \
+			* maxf(_span(Limb.FRONT, Limb.REAR), 0.0)
 	# Weight takes a moment to settle onto a leg, but a body that has just been
 	# built is not settling onto anything — it is already standing there. Easing
 	# in from the posture's guess instead would spend the first third of a second
@@ -1880,3 +1917,58 @@ func any_stepping() -> bool:
 		if limb.stepping:
 			return true
 	return false
+
+
+# --- readings ------------------------------------------------------------------
+# What the gait is doing right now, in the terms a person would measure it in.
+# Read by the gait HUD and by nothing that decides anything: every one of these
+# is a measurement the solver above already took, quoted rather than recomputed,
+# so the panel and the animal cannot disagree.
+
+## How long one full limb cycle is currently taking, in seconds. The measured
+## interval where there is one, the prediction until there is.
+func cycle_length() -> float:
+	return _measured_cycle()
+
+
+## Where in its own cycle the animal is, 0..1, measured from the phase of the
+## limb that last left the ground. Negative while there is no beat to be in —
+## standing, or stopped long enough that the last one is stale.
+func cycle_position() -> float:
+	var elapsed: float = _beat_phase()
+	if elapsed < 0.0:
+		return -1.0
+	return fposmod(footfall.phase(_beat_key) + elapsed, 1.0)
+
+
+## The mean pace of the legs doing the walking, 0..1 of flat out.
+func mean_pace() -> float:
+	var total: float = 0.0
+	var count: int = 0
+	for limb in limbs:
+		if _skip(limb) or not limb.bearing:
+			continue
+		total += limb.pace
+		count += 1
+	return total / float(count) if count > 0 else 0.0
+
+
+## The share of its cycle each foot is currently keeping on the ground: the
+## standing duty, less what this pace has taken off it.
+func duty_now() -> float:
+	return loco.duty_at(mean_pace())
+
+
+## The duty factor as Hildebrand would measure it: the share of its own measured
+## cycle each walking foot actually spends on the ground, one minus the swing it
+## last took over the interval it is really turning over in. Falls back to the
+## commanded duty until the legs have stepped enough to be measured.
+func duty_measured() -> float:
+	var total: float = 0.0
+	var count: int = 0
+	for limb in limbs:
+		if _skip(limb) or not limb.bearing or limb.cycle <= 0.0:
+			continue
+		total += 1.0 - clampf(limb.step_duration / maxf(limb.cycle, 0.001), 0.0, 1.0)
+		count += 1
+	return total / float(count) if count > 0 else duty_now()

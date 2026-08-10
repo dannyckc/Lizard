@@ -40,7 +40,7 @@ godot --path . --editor   # open the editor
 | `Shift` | sprint |
 | `F1` | open/close **Creature Creation** — the species, every parameter and the live specimen on one page. `Esc` also closes it |
 | `F2` | toggle debug draw |
-| `F3` | switch between the **Field** and **Anatomy** views |
+| `F3` | cycle the **Field**, **Anatomy** and **Gait** views. The Gait view is the walk as an instrument panel: the live footfall pattern in Hildebrand's numbers, a side elevation of the actual solved skeleton, and a one-cycle footfall chart — every reading measured off the gait as it runs, none of it authored. Species tabs on it swap the body mid-stride |
 | drag the specimen | turn the anatomy view: the creature is held in a sphere and the drag rolls it, so the part under the pointer follows the hand; double-click to look straight down again |
 | `R` | reset |
 | mouse wheel | zoom |
@@ -793,6 +793,17 @@ dial:
 - **`*_swing_deg`** — the fan the socket sweeps the whole limb through, which is a
   genuinely separate joint: a hip that swings far with a knee that barely bends is
   a horse, and the reverse is a rabbit.
+- **`*_insertion`** — where the muscle's tendon inserts past the joint it works,
+  as a share of the bone it pulls on. A limb moves because muscle shortens, the
+  tendon pulls on the bone, and the bone turns about the joint — bones as levers,
+  the joint as the fulcrum — so this is the machine's gearing: close in is a
+  runner's limb, the same contraction spent on sweep; further out is a digger's,
+  spent on force. A lever trades force for speed and never *work*, so the swing
+  and the ground push move in opposite directions off this one number and the
+  jump — force times distance — does not move at all. See `Articulation.Joint`,
+  whose `advantage` and `gear` are the two ends of the ratio, and
+  `Locomotion.swing_time`, where the gear enters the drive exactly as the fibre
+  composition does.
 
 #### What a column walks on
 
@@ -1670,10 +1681,14 @@ supply and decline, because those move continuously while the body does not.
 
 #### Looking at it: the Anatomy tab
 
-`F3`, or the **Anatomy** tab beside **Field** at the top left, swaps the HUD's
-field furniture for a specimen drawer — `AnatomyPanel`, with `AnatomyView` on the
-slab. The whole of it is a *reading* of a creature; there is no anatomy model
-behind the panel.
+`F3` — or the **Anatomy** tab beside **Field** and **Gait** at the top left —
+swaps the HUD's field furniture for a specimen drawer — `AnatomyPanel`, with
+`AnatomyView` on the slab. The whole of it is a *reading* of a creature; there
+is no anatomy model behind the panel. The **Gait** tab is the same claim made
+about the walk: `GaitPanel` quotes the footfall pattern, the joints, the tendon
+levers and the cycle straight off the systems that are producing them, and its
+figure is the solved limb chains projected side-on — drive the animal and watch
+the pattern change underneath it.
 
 The specimen is the creature's own `TissueGrid`. Every quad on it is a cell,
 taken from the corners the lattice re-derives each tick and put through one

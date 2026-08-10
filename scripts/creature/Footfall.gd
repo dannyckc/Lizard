@@ -107,6 +107,17 @@ const LEAD_SPREAD: float = 0.16
 ## gap is the suspended phase.
 const GALLOP_LAG: float = 0.60
 
+## When a galloping build rotates its leads. A back that is itself a working
+## part of the stride — bunching and extending through every cycle — lands its
+## fore pair in the *opposite* order to the hind, which is the rotary gallop of
+## the dorsomobile runners; a stiffer-backed galloper keeps the transverse order
+## however fast it goes. Both thresholds are shares of things already measured:
+## how much of its spine the build commits to the stride, and how far into the
+## asymmetric regime it actually is. The first sits between the Cat's back and
+## the Cheetah's, which is the real dividing line it is describing.
+const ROTARY_SPINE: float = 0.85
+const ROTARY_AT: float = 0.70
+
 ## Most feet a build will ever have off the ground at once, and the two steps on
 ## the way there. One is an animal that must be standing on three; two is any
 ## ordinary symmetrical gait; four is a suspension, and only a body that can
@@ -299,6 +310,15 @@ func update(posture: Posture, loco: Locomotion, p: CreatureParams,
 	var turn: float = clampf(lead, -1.0, 1.0) * LEAD_SPREAD * gathered
 	hind_split += turn
 	fore_split -= turn
+
+	# The dorsomobile runner's lead change. Reversing the fore split lands that
+	# pair trail-limb-first against the hind pair's order, which is the rotary
+	# cycle — and it is a commitment rather than a blend, because a lead is an
+	# order and there is no halfway order between two. Wrapped so the number
+	# still reads as a phase: 0.94 is the same landing gap as 0.06, run the
+	# other way round.
+	if loco.spine_freedom >= ROTARY_SPINE and gathered >= ROTARY_AT:
+		fore_split = fposmod(-fore_split, 1.0)
 
 	# A two-legged body has no fore girdle to be out of phase with. Both numbers
 	# still exist and are still solved — the arms are carried, and something has to

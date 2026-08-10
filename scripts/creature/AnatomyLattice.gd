@@ -349,6 +349,8 @@ func _describe(plan: BodyPlan, p: CreatureParams, scale: float, depth_ratio: flo
 		snappedf(p.body_width, 0.001), snappedf(p.head_width, 0.01),
 		snappedf(p.chest_width, 0.01), snappedf(p.waist_width, 0.01),
 		snappedf(p.hip_width, 0.01), snappedf(p.tail_tip_width, 0.01),
+		snappedf(p.tail_base_width, 0.01), snappedf(p.tail_length, 0.001),
+		snappedf(p.neck_width, 0.01),
 		p.tail_enabled, snappedf(p.front_limb_t, 0.001), snappedf(p.rear_limb_t, 0.001),
 		snappedf(p.arm_length, 0.01), snappedf(p.leg_length, 0.01),
 		snappedf(p.fore_upper_share, 0.001), snappedf(p.hind_upper_share, 0.001),
@@ -386,7 +388,7 @@ func _build(plan: BodyPlan, p: CreatureParams, scale: float, depth_ratio: float,
 	profile.resize(n)
 	BodyShape.section_profile(p, scale, profile)
 	var full_len: float = float(n - 1) * p.segment_length * scale
-	var clip: float = 1.0 if p.tail_enabled else BodyPlan.tail_t(p.rear_limb_t)
+	var clip: float = BodyPlan.clip_t(p)
 	var length: float = full_len * clip
 
 	# Where the four limbs meet the trunk, settled before either is carved so the

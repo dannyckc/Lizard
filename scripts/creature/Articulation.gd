@@ -55,6 +55,18 @@ const TIGHTEST_DEG: float = 22.0
 const SHARE_MIN: float = 0.34
 const SHARE_MAX: float = 0.66
 
+## Where the reference build's muscle inserts past the joint it works, as a share
+## of the bone it pulls on. The datum every lever below is quoted against, so a
+## species that says nothing about its tendons is geared exactly 1:1 against the
+## reference and nothing anywhere moves — the same convention `fast_twitch`
+## holds at a half.
+const INSERTION_REF: float = 0.30
+## The two ends of the range a tendon can usefully insert at. Below the floor the
+## effort arm cannot steer the bone at all; above the ceiling the tendon is
+## halfway down the segment and the "joint" is a stiff hinge in a sleeve.
+const INSERTION_MIN: float = 0.15
+const INSERTION_MAX: float = 0.50
+
 
 ## One girdle's joint: the two bones, the three angles, and what each of those
 ## angles measures as a length.
@@ -107,6 +119,29 @@ class Joint extends RefCounted:
 	## elephant being slid along the ground.
 	var push: float = 0.15
 
+	## The lever the muscle works this girdle through.
+	##
+	## A limb moves because muscle shortens, the tendon it ends in pulls on the
+	## bone it inserts on, and the bone turns about the joint. The bones are the
+	## levers and the joint is the fulcrum, so where along the bone the tendon
+	## inserts is the whole of the machine's gearing: it is the effort arm, the
+	## rest of the limb below the joint is the load arm, and their ratio decides
+	## what one contraction is worth at the foot. Close to the joint the same
+	## shortening sweeps the foot far and fast and presses lightly — a runner's
+	## limb; further out it sweeps slowly and presses hard — a digger's, or a
+	## graviportal leg that spends its leverage holding weight.
+	##
+	## A lever trades force for speed and never work, which is why exactly two
+	## things read it and a jump is not one of them: work is force times distance
+	## and the gearing cancels out of the product. What it moves is how quickly a
+	## swing can be driven through — see Locomotion.swing_time — and how hard the
+	## ground can be pushed while a foot is on it — see Locomotion.update.
+	var insertion: float = INSERTION_REF
+	## Force at the foot per unit of muscle force, against the reference lever.
+	var advantage: float = 1.0
+	## ...and the speed the same gearing buys instead: the reciprocal.
+	var gear: float = 1.0
+
 	## Sets every angle from a stance's own base angles and one girdle's leanings.
 	##
 	## `flex` is how much more flexed than its stance this girdle stands, in
@@ -115,9 +150,17 @@ class Joint extends RefCounted:
 	## folded away, which is the whole of why a heavy columnar animal can neither
 	## crouch nor jump and needed nothing written down to say so.
 	func configure(posture: Posture, flex: float, fold_range: float,
-			upper_share: float, p_swing: float, p_push: float) -> void:
+			upper_share: float, p_swing: float, p_push: float,
+			p_insertion: float = INSERTION_REF) -> void:
 		upper = clampf(upper_share, SHARE_MIN, SHARE_MAX)
 		lower = 1.0 - upper
+		# The lever, before the angles, because it is a property of where the
+		# tendon meets the bone rather than of anything the joint is doing. Both
+		# readings are the same ratio seen from the two ends of the machine, and
+		# they multiply to one — a lever trades, it never creates.
+		insertion = clampf(p_insertion, INSERTION_MIN, INSERTION_MAX)
+		advantage = insertion / INSERTION_REF
+		gear = INSERTION_REF / insertion
 		var straightest: float = deg_to_rad(STRAIGHTEST_DEG)
 		var tightest: float = deg_to_rad(TIGHTEST_DEG)
 
@@ -166,9 +209,11 @@ func configure(posture: Posture, p: CreatureParams) -> void:
 	if posture == null or p == null:
 		return
 	fore.configure(posture, deg_to_rad(p.fore_flex_deg), p.fore_fold_range,
-		p.fore_upper_share, deg_to_rad(p.fore_swing_deg), p.toe_push)
+		p.fore_upper_share, deg_to_rad(p.fore_swing_deg), p.toe_push,
+		p.fore_insertion)
 	hind.configure(posture, deg_to_rad(p.hind_flex_deg), p.hind_fold_range,
-		p.hind_upper_share, deg_to_rad(p.hind_swing_deg), p.toe_push)
+		p.hind_upper_share, deg_to_rad(p.hind_swing_deg), p.toe_push,
+		p.hind_insertion)
 
 
 ## The girdle a limb belongs to. `pair` is Limb.FRONT or Limb.REAR.

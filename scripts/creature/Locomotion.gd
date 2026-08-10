@@ -311,7 +311,16 @@ func update(posture: Posture, physique: Physique, p: CreatureParams, scale: floa
 	# is a figure that happened to be four times a Lizard's top speed. Capped at
 	# what a foot can lean on before it slips — see PUSH_CEILING — so the posture
 	# gain and the power ratio can no longer multiply into a launch.
-	accel = minf(p.acceleration * posture.drive * power, PUSH_CEILING) \
+	#
+	# The muscle reaches the ground through a lever — tendon onto bone, bone about
+	# joint — so what the foot presses with is the muscle's force times the
+	# mechanical advantage of the limbs doing the pressing. See Articulation:
+	# advantage and gear are one ratio read from its two ends, which is why the
+	# same build that pushes harder here swings slower in `swing_time`, and why
+	# neither shows up in the jump — a lever trades force for speed, never work.
+	var leverage: float = articulation.hind.advantage if not forelimbs_bear \
+		else (articulation.fore.advantage + articulation.hind.advantage) * 0.5
+	accel = minf(p.acceleration * posture.drive * power * leverage, PUSH_CEILING) \
 		* Gravity.PULL * scale
 
 	# Torque over rotational inertia. A rod's inertia goes as its mass times the
@@ -522,14 +531,22 @@ func stride(sweep: float, lead: float) -> float:
 ## can only move it one way. Divided both ways, as it was, an Elephant's legs came
 ## through a third slower than gravity alone would have brought them — which is
 ## not a heavy animal walking deliberately, it is a heavy animal wading.
-func swing_time(bone: float) -> float:
+func swing_time(bone: float, gear: float = 1.0) -> float:
 	# Fibre composition scales the drive, not the pendulum: fast-twitch muscle
 	# throws the same limb through sooner, slow-twitch gives that up — and the
 	# same bound still holds, because no composition of muscle can slow a limb
 	# below the rate gravity alone brings it through at.
+	#
+	# `gear` is the girdle's lever — see Articulation.Joint.insertion. A tendon
+	# inserted close to the joint sweeps the same bone further per unit of
+	# shortening, so it enters the drive exactly as the fibre does: it scales how
+	# quickly the throw arrives, never the pendulum underneath it, and the same
+	# floor holds for the same reason. At the reference insertion it is exactly
+	# one and this is the line it always was.
 	return SWING_PERIOD * sqrt(maxf(bone, 1.0) / Elevation.GRAVITY) \
 		/ maxf(pow(clampf(power, 0.05, 8.0), 1.0 / 3.0)
-			* lerpf(1.0 - TWITCH_SPAN, 1.0 + TWITCH_SPAN, twitch), 1.0)
+			* lerpf(1.0 - TWITCH_SPAN, 1.0 + TWITCH_SPAN, twitch)
+			* maxf(gear, 0.05), 1.0)
 
 
 ## The same swing with as much taken off it as going fast can take.

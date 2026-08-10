@@ -12,12 +12,14 @@ const PAPER := Color("f3f1ec")
 const INK := Color("14140f")
 const EDGE := Color(0.078, 0.078, 0.059, 0.13)
 
-## The two things this HUD can be looking at. The field is the animal in its
-## habitat; the anatomy is the same animal opened up. They are views of one
-## creature rather than two screens, so the switch is a tab and not a mode.
+## The three things this HUD can be looking at. The field is the animal in its
+## habitat; the anatomy is the same animal opened up; the gait is the same
+## animal's walk, measured while it happens. They are views of one creature
+## rather than three screens, so the switch is a tab and not a mode.
 const VIEW_FIELD: String = "Field"
 const VIEW_ANATOMY: String = "Anatomy"
-const VIEWS: Array[String] = [VIEW_FIELD, VIEW_ANATOMY]
+const VIEW_GAIT: String = "Gait"
+const VIEWS: Array[String] = [VIEW_FIELD, VIEW_ANATOMY, VIEW_GAIT]
 
 var params: CreatureParams
 ## The animal this HUD is reporting on, handed over so the creation menu has a
@@ -25,6 +27,7 @@ var params: CreatureParams
 var subject: Creature
 var creator: CreatureCreator
 var anatomy: AnatomyPanel
+var gait_panel: GaitPanel
 
 var _sans_base: SystemFont
 var _mono_base: Font
@@ -64,6 +67,7 @@ func _ready() -> void:
 	_build_creator_button()
 	_build_move_hint()
 	_build_anatomy()
+	_build_gait()
 	set_view(_active_view)
 	resized.connect(_fit_anatomy)
 	_fit_anatomy()
@@ -171,7 +175,7 @@ func set_view(view_name: String) -> void:
 
 
 ## What is on screen, decided in one place from the two things that decide it:
-## which view is up, and whether the creation menu is over the top of both.
+## which view is up, and whether the creation menu is over the top of all of them.
 func _apply_chrome() -> void:
 	var creating: bool = creator_open()
 	var field: bool = _active_view == VIEW_FIELD and not creating
@@ -186,16 +190,19 @@ func _apply_chrome() -> void:
 	if _move_hint != null:
 		_move_hint.visible = field
 	if _anatomy_note != null:
-		_anatomy_note.visible = not field and not creating
+		_anatomy_note.visible = _active_view == VIEW_ANATOMY and not creating
 	if anatomy != null:
-		anatomy.visible = not field and not creating
+		anatomy.visible = _active_view == VIEW_ANATOMY and not creating
 		if anatomy.visible:
 			anatomy.refresh()
+	if gait_panel != null:
+		gait_panel.visible = _active_view == VIEW_GAIT and not creating
 	_update_creator_button()
 
 
+## Steps to the next view, round the loop: field, anatomy, gait, field.
 func toggle_view() -> void:
-	set_view(VIEW_FIELD if _active_view == VIEW_ANATOMY else VIEW_ANATOMY)
+	set_view(VIEWS[(VIEWS.find(_active_view) + 1) % VIEWS.size()])
 
 
 func active_view() -> String:
@@ -210,11 +217,14 @@ func set_specimens(list: Array) -> void:
 
 
 ## Whose creature this is. The creation menu stands it on its own slab, so the
-## body being tuned is the body being looked at.
+## body being tuned is the body being looked at — and the gait panel reads the
+## same animal's walk.
 func set_subject(each: Creature) -> void:
 	subject = each
 	if creator != null:
 		creator.set_subject(each)
+	if gait_panel != null:
+		gait_panel.set_subject(each)
 
 
 func _fit_anatomy() -> void:
@@ -417,7 +427,7 @@ func _build_condition_and_legend() -> void:
 	legend.add_child(_legend_item(["⇧"], "SPRINT"))
 	legend.add_child(_legend_item(["F1"], "CREATE"))
 	legend.add_child(_legend_item(["F2"], "DEBUG"))
-	legend.add_child(_legend_item(["F3"], "ANATOMY"))
+	legend.add_child(_legend_item(["F3"], "ANATOMY / GAIT"))
 	legend.add_child(_legend_item(["R"], "RESET"))
 
 
@@ -517,6 +527,19 @@ func _build_anatomy() -> void:
 	add_child(_anatomy_note)
 
 
+## The Gait view: the walk as an instrument panel, in the same drawer rect the
+## anatomy stands in — the field stays visible beside it, so the walk being
+## measured can be watched happening. Species tabs live on it so a body can be
+## swapped mid-stride, and they go through the same gate every other species
+## change does — the creation menu names it, the world grows it.
+func _build_gait() -> void:
+	gait_panel = GaitPanel.new()
+	gait_panel.set_ui_fonts(_sans, _sans_tracked, _mono, _mono_tracked)
+	gait_panel.species_selected.connect(select_species)
+	add_child(gait_panel)
+	gait_panel.set_subject(subject)
+
+
 func _build_move_hint() -> void:
 	_move_hint = _label("MOVE TO BEGIN", 10, _sans_tracked, Color(INK, 0.34))
 	_move_hint.name = "MoveHint"
@@ -532,6 +555,8 @@ func _build_move_hint() -> void:
 
 func _on_species_chosen(preset_name: String) -> void:
 	_active_species = preset_name
+	if gait_panel != null:
+		gait_panel.set_active_species(preset_name)
 	species_selected.emit(preset_name)
 
 

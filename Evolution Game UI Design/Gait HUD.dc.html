@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #F3F1EC; }
+  * { box-sizing: border-box; }
+  a { color: #14140F; text-decoration: none; border-bottom: 1px solid rgba(20,20,15,0.22); }
+  a:hover { color: rgba(20,20,15,0.55); }
+  ::selection { background: #14140F; color: #F3F1EC; }
+</style>
+</helmet>
+<div ref="{{ stageRef }}" style="position:relative;width:100%;height:100vh;min-height:660px;overflow:hidden;background:#F3F1EC;color:#14140F;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased">
+
+  <canvas ref="{{ canvasRef }}" style="position:absolute;inset:0;width:100%;height:100%;display:block"></canvas>
+
+  <div style="position:absolute;inset:0;pointer-events:none;background:radial-gradient(115% 85% at 50% 42%, rgba(243,241,236,0) 45%, rgba(20,20,15,0.055) 100%)"></div>
+  <div style="position:absolute;inset:0;pointer-events:none;opacity:0.035;mix-blend-mode:multiply;background-image:url(&quot;data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/></filter><rect width='140' height='140' filter='url(%23n)'/></svg>&quot;)"></div>
+  <div style="position:absolute;inset:14px;pointer-events:none;border:1px solid rgba(20,20,15,0.10)"></div>
+
+  <div style="position:absolute;top:30px;left:32px;display:flex;flex-direction:column;gap:15px;pointer-events:none">
+    <div style="display:flex;align-items:center;gap:11px">
+      <div style="width:7px;height:7px;border-radius:50%;background:#8E1B12"></div>
+      <div style="font-size:11px;letter-spacing:0.34em;text-transform:uppercase;line-height:1">Evolution</div>
+      <div style="width:22px;height:1px;background:rgba(20,20,15,0.22)"></div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.16em;color:rgba(20,20,15,0.42);line-height:1">CREATURE&nbsp;&nbsp;GAIT&nbsp;&nbsp;0.1</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:4px;pointer-events:auto">
+      <a href="./Blood HUD.dc.html" style="display:flex;align-items:center;padding:7px 12px;font-size:9.5px;letter-spacing:0.22em;text-transform:uppercase;line-height:1;color:rgba(20,20,15,0.42);border-bottom:1px solid transparent">Blood</a>
+      <div style="display:flex;align-items:center;gap:7px;padding:7px 12px;font-size:9.5px;letter-spacing:0.22em;text-transform:uppercase;line-height:1;border-bottom:1px solid #14140F">
+        <div style="width:4px;height:4px;border-radius:50%;background:#8E1B12"></div>
+        Gait
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:auto auto;gap:4px 22px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.1em;line-height:1.4;color:rgba(20,20,15,0.72)">
+      <span style="opacity:0.55">POSTURE</span><span>{{ postureText }}</span>
+      <span style="opacity:0.55">PATTERN</span><span>{{ patternText }}</span>
+      <span style="opacity:0.55">FROUDE</span><span>{{ froudeText }}</span>
+      <span style="opacity:0.55">GIRDLE&nbsp;LAG</span><span>{{ lagText }}</span>
+      <span style="opacity:0.55">SPLIT&nbsp;H&middot;F</span><span>{{ splitText }}</span>
+      <span style="opacity:0.55">DUTY</span><span>{{ dutyText }}</span>
+      <span style="opacity:0.55">LIFT&nbsp;MAX</span><span>{{ liftText }}</span>
+      <span style="opacity:0.55">CYCLE</span><span>{{ cycleText }}</span>
+    </div>
+  </div>
+
+  <div style="position:absolute;top:30px;right:32px;display:flex;flex-direction:column;gap:2px;align-items:flex-end">
+    <div style="display:flex;align-items:center;gap:2px;flex-wrap:wrap;justify-content:flex-end">
+      <sc-for list="{{ creatureList }}" as="c" hint-placeholder-count="6">
+        <div onClick="{{ c.pick }}" style="position:relative;display:flex;align-items:center;gap:8px;padding:7px 11px;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;min-height:32px">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.12em;color:{{ c.tagInk }};transition:color 240ms ease">{{ c.tag }}</div>
+          <div style="font-size:9.5px;letter-spacing:0.22em;text-transform:uppercase;line-height:1;color:{{ c.ink }};transition:color 240ms ease">{{ c.name }}</div>
+          <div style="position:absolute;left:0;right:0;bottom:0;height:1px;background:{{ c.rule }};transition:background 240ms ease"></div>
+        </div>
+      </sc-for>
+    </div>
+    <div style="display:flex;align-items:center;gap:2px;justify-content:flex-end">
+      <sc-for list="{{ gaitList }}" as="g" hint-placeholder-count="4">
+        <div onClick="{{ g.pick }}" style="position:relative;display:flex;align-items:center;gap:8px;padding:7px 11px;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;min-height:32px">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.12em;color:{{ g.tagInk }};transition:color 240ms ease">{{ g.tag }}</div>
+          <div style="font-size:9.5px;letter-spacing:0.22em;text-transform:uppercase;line-height:1;color:{{ g.ink }};transition:color 240ms ease">{{ g.name }}</div>
+          <div style="position:absolute;left:0;right:0;bottom:0;height:1px;background:{{ g.rule }};transition:background 240ms ease"></div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="position:absolute;left:32px;bottom:28px;display:flex;flex-direction:column;gap:12px;max-width:min(560px,46vw);pointer-events:none">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;line-height:1.8;letter-spacing:0.08em;color:rgba(20,20,15,0.42);text-transform:uppercase;text-wrap:pretty">{{ noteText }}</div>
+    <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:7px">
+        <div style="min-width:19px;height:19px;padding:0 6px;border:1px solid rgba(20,20,15,0.30);display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:9px">&#9666;&#9656;</div>
+        <span style="font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(20,20,15,0.52)">Species</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:7px">
+        <div style="min-width:19px;height:19px;padding:0 6px;border:1px solid rgba(20,20,15,0.30);display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:9px">&#9652;&#9662;</div>
+        <span style="font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(20,20,15,0.52)">Gait</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="position:absolute;right:32px;bottom:28px;display:flex;align-items:center;gap:16px;pointer-events:none">
+    <div style="display:flex;align-items:center;gap:7px">
+      <div style="width:12px;height:2px;background:#8E1B12"></div>
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.12em;color:rgba(20,20,15,0.42)">PLANTED</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:7px">
+      <div style="width:9px;height:9px;border-radius:50%;border:1px solid rgba(142,27,18,0.7)"></div>
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.12em;color:rgba(20,20,15,0.42)">FOOTFALL</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;playbackRate&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:1,&quot;min&quot;:0.25,&quot;max&quot;:2,&quot;step&quot;:0.05,&quot;unit&quot;:&quot;\u00d7&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Playback&quot;},&quot;footTrails&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Overlay&quot;},&quot;silhouette&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Overlay&quot;}}">
+class Component extends DCLogic {
+  state = { ci: 0, gi: 1 };
+  stageRef = React.createRef();
+  canvasRef = React.createRef();
+  _ph = 0; _scroll = 0; _t = 0; _rings = []; _trails = {}; _wasDown = {};
+
+  static INK = '#14140F'; static RED = '#8E1B12';
+
+  static DATA = [
+    { name:'Lizard', tag:'01', posture:'SPRAWLED', label:'SPRAWLED \u00b7 TILT 12\u00b0 \u00b7 JOINT 102\u00b0 \u00b7 LEG 40 / ARM 34',
+      geo:{ kind:'quad', gap:92, shH:19, hipH:20, depth:26,
+        fore:{l1:27,l2:29,bend:1,footH:2,toe:11,rest:9}, hind:{l1:29,l2:33,bend:-1,footH:2,toe:12,rest:-9},
+        tail:{len:132,w:9,mode:'flat'}, neck:{len:20,ang:-0.18}, headR:8, snout:15 },
+      gaits:[
+        { key:'IDLE', pattern:'STANDING', froude:'0.00', lag:'\u2014', split:'\u2014', duty:1, dutyText:'\u2014', lift:'ALL DOWN', cycle:0, cycleText:'\u2014', speed:0, phases:[0,.5,.25,.75], liftH:0, bob:0, vert:'idle', crouch:0, seq:'\u2014',
+          note:'SPRAWLED REFERENCE BUILD. LIMBS ROW OUT BESIDE THE BODY, BELLY A FEW CELLS OFF THE FLOOR. IDLE IS STATIC SUPPORT \u2014 EVERY FOOT DOWN, NOTHING OWED A STEP.' },
+        { key:'WALK', pattern:'LATERAL-SEQUENCE WALK', froude:'0.06', lag:'0.25', split:'0.50 \u00b7 0.50', duty:.68, dutyText:'0.68', lift:'2 FEET', cycle:.85, cycleText:'0.85 S', speed:55, phases:[0,.5,.25,.75], liftH:10, bob:1.5, vert:'bob', crouch:0, seq:'RL \u00b7 FL \u00b7 RR \u00b7 FR',
+          note:'LATERAL-SEQUENCE WALK \u2014 RL\u00b7FL\u00b7RR\u00b7FR, THE SAME FOUR-BEAT ORDER AS THE HORSE ROW OF THE REFERENCE SHEET, AT A SPRAWL. THE SPINE WAVE (WAVE_GAIN 1.0) DOES PART OF THE STRIDE.' },
+        { key:'RUN', pattern:'TROT', froude:'0.38', lag:'0.50', split:'0.50 \u00b7 0.50', duty:.45, dutyText:'0.45', lift:'2 FEET', cycle:.45, cycleText:'0.45 S', speed:130, phases:[0,.5,.5,0], liftH:13, bob:2.5, vert:'bob', crouch:0, seq:'RL+FR / RR+FL',
+          note:'A TROT, FLAT OUT. LAUNCH \u2248 0.06 \u2014 SIN(TILT 12\u00b0) LEAVES NOTHING TO THROW WITH \u2014 SO THE ASYMMETRIC REGIME NEVER OPENS: DIAGONALS SWAP, NO SUSPENSION, HOWEVER HARD IT IS DRIVEN. (FOOTFALL.LAUNCH)' },
+        { key:'LOW', pattern:'STALK CREEP', froude:'0.01', lag:'0.25', split:'0.50 \u00b7 0.50', duty:.82, dutyText:'0.82', lift:'1 FOOT', cycle:1.3, cycleText:'1.30 S', speed:22, phases:[0,.5,.25,.75], liftH:5, bob:.8, vert:'bob', crouch:.45, headLow:1, seq:'RL \u00b7 FL \u00b7 RR \u00b7 FR',
+          note:'BELLY TO THE FLOOR \u2014 A SPRAWL IS ALREADY MOST OF THE WAY DOWN. CREEP AT STALK_SPEED 0.40 OF WALK, DUTY 0.82, ONE FOOT MOVES AT A TIME.' } ] },
+
+    { name:'Cat', tag:'02', posture:'SEMI-UPRIGHT', label:'SEMI-UPRIGHT \u00b7 TILT 50\u00b0 \u00b7 JOINT 132\u00b0 \u00b7 LEG 46 / ARM 40',
+      geo:{ kind:'quad', gap:78, shH:50, hipH:53, depth:30,
+        fore:{l1:27,l2:27,bend:1,footH:7,toe:9,rest:7}, hind:{l1:30,l2:33,bend:-1,footH:9,toe:10,rest:-7},
+        tail:{len:95,w:6,mode:'up'}, neck:{len:26,ang:-0.72}, headR:8.5, snout:10 },
+      gaits:[
+        { key:'IDLE', pattern:'STANDING', froude:'0.00', lag:'\u2014', split:'\u2014', duty:1, dutyText:'\u2014', lift:'ALL DOWN', cycle:0, cycleText:'\u2014', speed:0, phases:[0,.5,.25,.75], liftH:0, bob:0, vert:'idle', crouch:0, seq:'\u2014',
+          note:'FORE STRUT (FLEX \u221218\u00b0) UNDER HIND ENGINE (+18\u00b0, FOLD 1.20): TWO LEGS DOING OPPOSITE JOBS ARRIVING AT ONE LEVEL BACK. TAIL STAYS LIVE.' },
+        { key:'WALK', pattern:'LATERAL-SEQUENCE WALK', froude:'0.07', lag:'0.25', split:'0.50 \u00b7 0.50', duty:.64, dutyText:'0.64', lift:'2 FEET', cycle:.75, cycleText:'0.75 S', speed:70, phases:[0,.5,.25,.75], liftH:14, bob:2, vert:'bob', crouch:0, seq:'RL \u00b7 FL \u00b7 RR \u00b7 FR',
+          note:'LATERAL-SEQUENCE WALK ON DIGITIGRADE FEET \u2014 TOE_PUSH 0.45. QUIET, HIGH-DUTY STEPS: THE DOG ROW OF THE REFERENCE SHEET, HELD SOFTER.' },
+        { key:'RUN', pattern:'TRANSVERSE GALLOP', froude:'0.92', lag:'0.60', split:'0.10 \u00b7 0.10', duty:.28, dutyText:'0.28', lift:'4 \u2014 SUSPENDED', cycle:.42, cycleText:'0.42 S', speed:260, phases:[0,.10,.60,.70], liftH:24, bob:9, vert:'gallop', pitchA:.05, bunch:.10, crouch:0, seq:'RL RR \u2014 FL FR',
+          note:'TRANSVERSE GALLOP INTO A BOUND. LAUNCH 0.43 CLEARS LAUNCH_FULL: SPLITS COLLAPSE, HIND PAIR FIRST \u2014 THE HALF-BOUND ON THE WAY \u2014 WITH ONE GATHERED SUSPENSION.' },
+        { key:'LOW', pattern:'THE STALK', froude:'0.01', lag:'0.25', split:'0.50 \u00b7 0.50', duty:.84, dutyText:'0.84', lift:'1 FOOT', cycle:1.5, cycleText:'1.50 S', speed:26, phases:[0,.5,.25,.75], liftH:6, bob:.6, vert:'bob', crouch:.55, headLow:1, seq:'RL \u00b7 FL \u00b7 RR \u00b7 FR',
+          note:'THE STALK. THE DEEPEST WORKING CROUCH OF THE QUADRUPEDS \u2014 HIND FOLD SPENT THROUGH THE LEGS, HEAD CARRIED LEVEL AND LOCKED ON, DUTY 0.84 AT STALK_SPEED 0.40.' } ] },
+
+    { name:'Elephant', tag:'03', posture:'COLUMNAR', label:'COLUMNAR \u00b7 TILT 72\u00b0 \u00b7 JOINT 170\u00b0 \u00b7 LEG 88 / ARM 92',
+      geo:{ kind:'quad', gap:132, shH:122, hipH:112, depth:88,
+        fore:{l1:63,l2:63,bend:1,footH:5,toe:12,rest:6}, hind:{l1:59,l2:57,bend:-1,footH:5,toe:12,rest:-6},
+        tail:{len:60,w:4,mode:'flat'}, neck:{len:32,ang:-0.38}, headR:23, snout:0, trunk:92 },
+      gaits:[
+        { key:'IDLE', pattern:'STANDING', froude:'0.00', lag:'\u2014', split:'\u2014', duty:1, dutyText:'\u2014', lift:'ALL DOWN', cycle:0, cycleText:'\u2014', speed:0, phases:[0,.5,.25,.75], liftH:0, bob:0, vert:'idle', crouch:0, seq:'\u2014',
+          note:'COLUMNAR \u2014 JOINTS CARRIED AT 170\u00b0. IDLE IS WEIGHT SHIFTED PILLAR TO PILLAR; THE TRUNK, NOT THE SPINE, IS THE MOBILE PART.' },
+        { key:'WALK', pattern:'LATERAL-SEQUENCE WALK', froude:'0.04', lag:'0.25', split:'0.50 \u00b7 0.50', duty:.78, dutyText:'0.78', lift:'1 FOOT', cycle:2.0, cycleText:'2.00 S', speed:60, phases:[0,.5,.25,.75], liftH:24, bob:1.5, vert:'bob', crouch:0, seq:'RL \u00b7 FL \u00b7 RR \u00b7 FR',
+          note:'FOUR-BEAT LATERAL WALK, THREE FEET DOWN (FEET_DOWN 3, DUTY 0.78). LEVEL BACK: A KNEE THAT BARELY CLOSES BUYS NO SINK \u2014 REFERENCE ROW TWO, EXACTLY.' },
+        { key:'RUN', pattern:'AMBLE', froude:'0.11', lag:'0.33', split:'0.50 \u00b7 0.50', duty:.68, dutyText:'0.68', lift:'1 FOOT', cycle:1.35, cycleText:'1.35 S', speed:105, phases:[0,.5,.33,.83], liftH:26, bob:2.5, vert:'bob', crouch:0, seq:'RL \u00b7 FL \u00b7 RR \u00b7 FR',
+          note:"THE AMBLE. TOP SPEED NEVER CROSSES FROUDE_WALK \u2014 THE HIP IS A WHOLE LEG UP AND MASS CUBES \u2014 SO 'RUN' IS THE SAME WALK, HURRIED. NEVER AIRBORNE; NOTHING HAD TO FORBID IT." },
+        { key:'LOW', pattern:'HEAD-LOW WALK', froude:'0.00', lag:'0.25', split:'0.50 \u00b7 0.50', duty:.85, dutyText:'0.85', lift:'1 FOOT', cycle:2.4, cycleText:'2.40 S', speed:16, phases:[0,.5,.25,.75], liftH:14, bob:1, vert:'bob', crouch:.06, headLow:1, seq:'RL \u00b7 FL \u00b7 RR \u00b7 FR',
+          note:'IT CANNOT. HIND_FOLD_RANGE 0.50 \u2014 A PILLAR DOES NOT FOLD, SO THERE IS NO CROUCH TO SPEND. LAY-LOW IS A DROPPED HEAD AND A SLOWER, WIDER STEP.' } ] },
+
+    { name:'Cheetah', tag:'04', posture:'ERECT', label:'ERECT \u00b7 TILT 66\u00b0 \u00b7 JOINT 150\u00b0 \u00b7 LEG 58 / ARM 52',
+      geo:{ kind:'quad', gap:102, shH:68, hipH:72, depth:32,
+        fore:{l1:35,l2:37,bend:1,footH:9,toe:10,rest:8}, hind:{l1:38,l2:43,bend:-1,footH:11,toe:11,rest:-8},
+        tail:{len:114,w:6,mode:'flat'}, neck:{len:30,ang:-0.55}, headR:7.5, snout:9 },
+      gaits:[
+        { key:'IDLE', pattern:'STANDING', froude:'0.00', lag:'\u2014', split:'\u2014', duty:1, dutyText:'\u2014', lift:'ALL DOWN', cycle:0, cycleText:'\u2014', speed:0, phases:[0,.5,.25,.75], liftH:0, bob:0, vert:'idle', crouch:0, seq:'\u2014',
+          note:"THE CAT'S ASYMMETRY TAKEN FURTHER: NEAR-STRUT FORELEG OVER A HIND LEG THAT FOLDS TIGHTER THAN ANYTHING ELSE IN THE FILE. AT REST IT SIMPLY STANDS TALL." },
+        { key:'WALK', pattern:'LATERAL-SEQUENCE WALK', froude:'0.07', lag:'0.25', split:'0.50 \u00b7 0.50', duty:.60, dutyText:'0.60', lift:'2 FEET', cycle:.8, cycleText:'0.80 S', speed:80, phases:[0,.5,.25,.75], liftH:15, bob:2, vert:'bob', crouch:0, seq:'RL \u00b7 FL \u00b7 RR \u00b7 FR',
+          note:'LATERAL-SEQUENCE WALK, LONG AND FLAT \u2014 MOST OF THE REACH IS SAVED FOR THE OTHER GAIT.' },
+        { key:'RUN', pattern:'ROTARY GALLOP', froude:'1.35', lag:'0.66', split:'0.12 \u00b7 0.12 R', duty:.24, dutyText:'0.24', lift:'4 \u2014 SUSPENDED', cycle:.38, cycleText:'0.38 S', speed:420, phases:[0,.12,.72,.60], liftH:26, bob:12, vert:'gallop', pitchA:.085, bunch:.16, crouch:0, seq:'RL RR \u2014 FR FL',
+          note:'ROTARY GALLOP, DOUBLE SUSPENSION \u2014 GATHERED AND EXTENDED, THE CHEETAH ROW OF THE REFERENCE SHEET. THE BACK IS PART OF THE STRIDE: \u00b116% OF BODY LENGTH (BUNCH_SHARE \u00d7 SPINE_FREEDOM 1.0).' },
+        { key:'LOW', pattern:'THE STALK', froude:'0.01', lag:'0.25', split:'0.50 \u00b7 0.50', duty:.84, dutyText:'0.84', lift:'1 FOOT', cycle:1.6, cycleText:'1.60 S', speed:30, phases:[0,.5,.25,.75], liftH:7, bob:.6, vert:'bob', crouch:.5, headLow:1, seq:'RL \u00b7 FL \u00b7 RR \u00b7 FR',
+          note:'STALK \u2014 SHOULDERS DROPPED INTO THE SAME FOLD THE GALLOP GATHERS WITH, DUTY 0.84. THE CROUCH IS FED BACK INTO THE GAIT AS A SHORTER, LOWER STRIDE.' } ] },
+
+    { name:'T. rex', tag:'05', posture:'ERECT \u00b7 BIPED', label:'ERECT \u00b7 BIPED \u00b7 LEG 86 / ARM 16 \u2014 ARMS DO NOT BEAR',
+      geo:{ kind:'biped', hipH:98, depth:44,
+        hind:{l1:53,l2:51,bend:-1,footH:16,toe:28,rest:2},
+        torso:{len:82,ang:-0.24}, neck:{len:30,ang:-0.55}, headR:13, snout:34, jaw:1, armL:20,
+        tail:{len:165,w:22,mode:'counter'} },
+      gaits:[
+        { key:'IDLE', pattern:'STANDING', froude:'0.00', lag:'\u2014', split:'\u2014', duty:1, dutyText:'\u2014', lift:'ALL DOWN', cycle:0, cycleText:'\u2014', speed:0, phases:[0,.5], liftH:0, bob:0, vert:'idle', crouch:0, seq:'\u2014',
+          note:'BIPEDAL BY MEASUREMENT, NOT CATEGORY: ARM 16 &lt; LEG 86 \u00d7 BEARING_RATIO. THE TAIL IS REAL MASS BEHIND THE HIPS \u2014 THE COUNTERWEIGHT IS SILHOUETTE, NOT POSE.' },
+        { key:'WALK', pattern:'TWO-LEGGED STRIDE', froude:'0.10', lag:'\u2014', split:'0.50', duty:.62, dutyText:'0.62', lift:'1 FOOT', cycle:1.5, cycleText:'1.50 S', speed:90, phases:[0,.5], liftH:22, bob:3, vert:'bob', crouch:0, seq:'L \u00b7 R',
+          note:'TWO-LEGGED STRIDE \u2014 THE FOOTFALL PATTERN LOSES ITS FORE GIRDLE AND THE BACK CARRIES THE SHOULDERS LEVEL. DUTY IS QUOTED AGAINST TWO LEGS, NOT FOUR.' },
+        { key:'RUN', pattern:'GROUNDED RUN', froude:'0.55', lag:'\u2014', split:'0.50', duty:.50, dutyText:'0.50', lift:'1 FOOT', cycle:.85, cycleText:'0.85 S', speed:210, phases:[0,.5], liftH:30, bob:6, vert:'bob', pitchA:.02, crouch:0, seq:'L \u00b7 R',
+          note:'A GROUNDED RUN. LAUNCH SITS ON LAUNCH_MIN \u2014 NO SUSPENSION FOR THIS MASS ON TWO FEET \u2014 SO DUTY HOLDS AT 0.50: ONE FOOT ALWAYS ARRIVING AS THE OTHER LEAVES.' },
+        { key:'LOW', pattern:'LOWERED STRIDE', froude:'0.01', lag:'\u2014', split:'0.50', duty:.78, dutyText:'0.78', lift:'1 FOOT', cycle:2.0, cycleText:'2.00 S', speed:32, phases:[0,.5], liftH:12, bob:1.5, vert:'bob', crouch:.28, headLow:1, seq:'L \u00b7 R',
+          note:"THE BIRD'S CROUCH, DEEPENED: HIND FLEX +12\u00b0 FOLDS TOWARD ITS 0.80 RANGE, THE HEAD DROPS, AND THE TAIL RISES TO KEEP THE COUNTERWEIGHT HONEST." } ] },
+
+    { name:'Kangaroo', tag:'06', posture:'ERECT \u00b7 BIPED', label:'ERECT \u00b7 BIPED \u00b7 LEG 62 / ARM 22 \u00b7 HIND SPRING 0.95',
+      geo:{ kind:'biped', hipH:66, depth:30,
+        hind:{l1:41,l2:45,bend:-1,footH:14,toe:32,rest:4},
+        torso:{len:60,ang:-0.98}, neck:{len:20,ang:-1.1}, headR:7, snout:10, ears:1, armL:24,
+        tail:{len:118,w:13,mode:'ground'} },
+      gaits:[
+        { key:'IDLE', pattern:'TRIPOD REST', froude:'0.00', lag:'\u2014', split:'\u2014', duty:1, dutyText:'\u2014', lift:'ALL DOWN', cycle:0, cycleText:'\u2014', speed:0, phases:[0,.5], liftH:0, bob:0, vert:'idle', crouch:0, seq:'\u2014',
+          note:'TRIPOD REST \u2014 THE TAIL BEARS, AND THE STORE (HIND_SPRING 0.95) COSTS NOTHING STANDING STILL.' },
+        { key:'WALK', pattern:'PENTAPEDAL STRIDE', froude:'0.06', lag:'\u2014', split:'0.50', duty:.62, dutyText:'0.62', lift:'1 FOOT', cycle:1.0, cycleText:'1.00 S', speed:55, phases:[0,.5], liftH:14, bob:2, vert:'bob', crouch:.12, pent:1, seq:'L \u00b7 R (+TAIL / ARMS)',
+          note:'SLOW IS NOT A HOP: BELOW THE TRANSITION THE HIND LIMBS ALTERNATE, AND ARMS AND TAIL TOUCH DOWN AS A FIFTH LIMB \u2014 THE PENTAPEDAL CRAWL. (SIM TODAY: PLAIN ALTERNATING STRIDE.)' },
+        { key:'RUN', pattern:'HOP', froude:'1.05', lag:'\u2014', split:'0.06', duty:.30, dutyText:'0.30', lift:'2 \u2014 SUSPENDED', cycle:.55, cycleText:'0.55 S', speed:300, phases:[0,.04], liftH:26, bob:0, vert:'hop', hopH:30, squash:7, crouch:0, seq:'L+R',
+          note:'THE HOP. HIND_SPLIT COLLAPSES TO 0.06 \u2014 THE SAME MECHANISM THAT BOUNDS A CHEETAH, ON A BODY WITH TWO FEET \u2014 PAID OUT OF A LIMB THAT IS MOSTLY ROPE BELOW THE KNEE.' },
+        { key:'LOW', pattern:'Z-FOLD CREEP', froude:'0.01', lag:'\u2014', split:'0.50', duty:.80, dutyText:'0.80', lift:'1 FOOT', cycle:1.6, cycleText:'1.60 S', speed:20, phases:[0,.5], liftH:8, bob:1, vert:'bob', crouch:.5, headLow:1, pent:1, seq:'L \u00b7 R (+TAIL)',
+          note:'FOLDED ONTO ITS Z: HIND_FOLD_RANGE 1.50, THE DEEPEST CROUCH IN THE FILE \u2014 A LAY-LOW THAT IS ALSO A WOUND SPRING.' } ] },
+  ];
+
+  static GAIT_TABS = [ {tag:'G0', name:'Idle'}, {tag:'G1', name:'Walk'}, {tag:'G2', name:'Run'}, {tag:'G3', name:'Lay Low'} ];
+
+  renderVals() {
+    const { ci, gi } = this.state;
+    const D = Component.DATA, g = D[ci].gaits[gi];
+    const mk = (active) => ({
+      ink: active ? '#14140F' : 'rgba(20,20,15,0.42)',
+      tagInk: active ? '#8E1B12' : 'rgba(20,20,15,0.30)',
+      rule: active ? '#14140F' : 'transparent' });
+    return {
+      stageRef: this.stageRef, canvasRef: this.canvasRef,
+      creatureList: D.map((c, i) => Object.assign({ name: c.name, tag: c.tag, pick: () => this.setState({ ci: i }) }, mk(i === ci))),
+      gaitList: Component.GAIT_TABS.map((t, i) => Object.assign({ name: t.name, tag: t.tag, pick: () => this.setState({ gi: i }) }, mk(i === gi))),
+      postureText: D[ci].posture, patternText: g.pattern, froudeText: g.froude,
+      lagText: g.lag, splitText: g.split, dutyText: g.dutyText, liftText: g.lift,
+      cycleText: g.cycleText, noteText: g.note,
+    };
+  }
+
+  componentDidMount() {
+    const st = this.stageRef.current, cv = this.canvasRef.current;
+    this._resize = () => {
+      const r = st.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 2);
+      cv.width = r.width * dpr; cv.height = r.height * dpr;
+      this._w = r.width; this._h = r.height; this._dpr = dpr;
+    };
+    this._resize();
+    window.addEventListener('resize', this._resize);
+    this._keys = (e) => {
+      const n = Component.DATA.length;
+      if (e.key === 'ArrowRight') { this.setState(s => ({ ci: (s.ci + 1) % n })); e.preventDefault(); }
+      else if (e.key === 'ArrowLeft') { this.setState(s => ({ ci: (s.ci + n - 1) % n })); e.preventDefault(); }
+      else if (e.key === 'ArrowDown') { this.setState(s => ({ gi: (s.gi + 1) % 4 })); e.preventDefault(); }
+      else if (e.key === 'ArrowUp') { this.setState(s => ({ gi: (s.gi + 3) % 4 })); e.preventDefault(); }
+      else if (e.key >= '1' && e.key <= '6') this.setState({ ci: e.key.charCodeAt(0) - 49 });
+    };
+    window.addEventListener('keydown', this._keys);
+    this._last = performance.now();
+    const loop = (now) => {
+      this._raf = requestAnimationFrame(loop);
+      const dt = Math.min((now - this._last) / 1000, 0.05); this._last = now;
+      this._frame(dt);
+    };
+    this._raf = requestAnimationFrame(loop);
+  }
+
+  componentWillUnmount() {
+    cancelAnimationFrame(this._raf);
+    window.removeEventListener('resize', this._resize);
+    window.removeEventListener('keydown', this._keys);
+  }
+
+  _frame(dt) {
+    const cv = this.canvasRef.current; if (!cv || !this._w) return;
+    const rate = this.props.playbackRate ?? 1;
+    const spec = Component.DATA[this.state.ci], gait = spec.gaits[this.state.gi];
+    this._t += dt * rate;
+    if (gait.cycle > 0) this._ph += dt * rate;
+    this._scroll += gait.speed * dt * rate;
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
+    ctx.clearRect(0, 0, this._w, this._h);
+    const W = this._w, H = this._h, G = H * 0.60;
+    const s = Math.max(0.7, Math.min(W / 1180, H / 780, 1.2));
+    const cx = Math.max(300, (W - 360) * 0.5);
+    const u = gait.cycle > 0 ? (this._ph / gait.cycle) % 1 : 0;
+    this._ground(ctx, W, G, s);
+    this._caption(ctx, cx, G, spec, gait, s);
+    this._figure(ctx, cx, G, s, spec, gait, u);
+    this._chart(ctx, W, spec, gait, u);
+    this._drawRings(ctx, G);
+  }
+
+  _ground(ctx, W, G, s) {
+    ctx.strokeStyle = 'rgba(20,20,15,0.30)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, G + 0.5); ctx.lineTo(W, G + 0.5); ctx.stroke();
+    const sp = 56 * s, off = this._scroll % sp;
+    ctx.strokeStyle = 'rgba(20,20,15,0.14)';
+    ctx.beginPath();
+    for (let x = -off; x < W; x += sp) { ctx.moveTo(x, G + 4); ctx.lineTo(x, G + 10); }
+    ctx.stroke();
+  }
+
+  _caption(ctx, cx, G, spec, gait, s) {
+    ctx.font = '9px "IBM Plex Mono",monospace'; ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(20,20,15,0.35)';
+    ctx.fillText(spec.label, cx, G + 30);
+    ctx.fillStyle = 'rgba(20,20,15,0.55)';
+    ctx.fillText(gait.pattern + (gait.seq !== '\u2014' ? '   \u2014   ' + gait.seq : ''), cx, G + 46);
+    ctx.textAlign = 'left';
+  }
+
+  _ik(ax, ay, bx, by, l1, l2, bend) {
+    let dx = bx - ax, dy = by - ay, d = Math.hypot(dx, dy);
+    const m = l1 + l2 - 0.5;
+    if (d > m) { dx *= m / d; dy *= m / d; d = m; bx = ax + dx; by = ay + dy; }
+    d = Math.max(d, Math.abs(l1 - l2) + 0.5);
+    const a = Math.atan2(by - ay, bx - ax);
+    const cos = (l1 * l1 + d * d - l2 * l2) / (2 * l1 * d);
+    const t = Math.acos(Math.max(-1, Math.min(1, cos)));
+    const ja = a + bend * t;
+    return { jx: ax + Math.cos(ja) * l1, jy: ay + Math.sin(ja) * l1, bx, by };
+  }
+
+  _foot(gait, u, ph, T, liftH, footH, G, s) {
+    const d = gait.duty;
+    if (d >= 1 || gait.cycle === 0) return { x: 0, y: G - footH * s, down: true, p: 0 };
+    const p = ((u - ph) % 1 + 1) % 1;
+    if (p < d) return { x: T * (0.5 - p / d), y: G - footH * s, down: true, p };
+    const q = (p - d) / (1 - d), e = q * q * (3 - 2 * q);
+    return { x: T * (e - 0.5), y: G - footH * s - liftH * s * Math.sin(Math.PI * q), down: false, p };
+  }
+
+  _limb(ctx, sock, limb, gait, u, ph, G, s, near, id) {
+    const T = gait.speed * gait.cycle * gait.duty * s;
+    const f = this._foot(gait, u, ph, T, gait.liftH, limb.footH, G, s);
+    const fx = sock.x + limb.rest * s + (near ? 0 : -9 * s) + f.x;
+    const ik = this._ik(sock.x, sock.y, fx, f.y, limb.l1 * s, limb.l2 * s, limb.bend);
+    const a = near ? 0.9 : 0.30;
+    ctx.strokeStyle = 'rgba(20,20,15,' + a + ')';
+    ctx.lineWidth = (near ? 2.2 : 1.8) * s; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(sock.x, sock.y); ctx.lineTo(ik.jx, ik.jy); ctx.lineTo(ik.bx, ik.by);
+    const tip = f.down ? { x: fx + limb.toe * s, y: G } : { x: fx + limb.toe * s * 0.65, y: f.y + limb.footH * s * 0.85 };
+    ctx.lineTo(tip.x, tip.y); ctx.stroke();
+    ctx.fillStyle = 'rgba(20,20,15,' + a + ')';
+    ctx.beginPath(); ctx.arc(ik.jx, ik.jy, 2 * s, 0, 7); ctx.fill();
+    if (f.down) {
+      ctx.strokeStyle = near ? '#8E1B12' : 'rgba(142,27,18,0.35)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(fx - 6 * s, G + 4); ctx.lineTo(fx + (limb.toe + 4) * s, G + 4); ctx.stroke();
+    }
+    if (gait.cycle > 0) {
+      const was = this._wasDown[id];
+      if (f.down && was === false) this._rings.push({ wx: fx + this._scroll, y: G, t0: this._t });
+      this._wasDown[id] = f.down;
+      if ((this.props.footTrails ?? true) && near) {
+        const tr = this._trails[id] = this._trails[id] || [];
+        tr.push([fx, f.y]); if (tr.length > 70) tr.shift();
+      }
+    }
+    if ((this.props.footTrails ?? true) && near) {
+      const tr = this._trails[id];
+      if (tr && tr.length > 2) {
+        ctx.strokeStyle = 'rgba(20,20,15,0.09)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(tr[0][0], tr[0][1]);
+        for (let i = 1; i < tr.length; i++) ctx.lineTo(tr[i][0], tr[i][1]);
+        ctx.stroke();
+      }
+    }
+  }
+
+  _drawRings(ctx, G) {
+    this._rings = this._rings.filter(r => this._t - r.t0 < 0.6);
+    for (const r of this._rings) {
+      const age = this._t - r.t0, x = r.wx - this._scroll;
+      ctx.strokeStyle = 'rgba(142,27,18,' + (0.5 * (1 - age / 0.6)).toFixed(3) + ')';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(x, G, 4 + age * 46, 0, 7); ctx.stroke();
+    }
+  }
+
+  _tail(ctx, hip, geo, gait, G, s, t, u, pitch) {
+    const tl = geo.tail; if (!tl) return;
+    const idle = gait.vert === 'idle';
+    let tipX = hip.x - tl.len * s, tipY, c1x = hip.x - tl.len * 0.45 * s, c1y;
+    if (tl.mode === 'up') { tipY = hip.y - tl.len * 0.42 * s + Math.sin(t * 2.4) * 5 * s; c1y = hip.y + 8 * s; }
+    else if (tl.mode === 'counter') { tipY = hip.y - (gait.headLow ? 26 : 6) * s + Math.sin(u * 6.283) * 6 * s * (gait.speed ? 1 : 0.2) + pitch * 40 * s; c1y = hip.y - 2 * s; }
+    else if (tl.mode === 'ground') {
+      if (gait.vert === 'hop') { tipY = hip.y + 10 * s + pitch * 30 * s; c1y = hip.y + 26 * s; }
+      else { tipX = hip.x - tl.len * 0.8 * s; tipY = G; c1y = hip.y + tl.len * 0.3 * s; }
+    }
+    else { tipY = hip.y + tl.len * 0.16 * s + Math.sin(t * 1.6) * 3 * s * (idle ? 1 : 0.4); c1y = hip.y + 6 * s; }
+    const midX = (hip.x + tipX) / 2, midY = (c1y + tipY) / 2;
+    ctx.strokeStyle = 'rgba(20,20,15,0.8)'; ctx.lineCap = 'round';
+    ctx.lineWidth = tl.w * s * 0.85;
+    ctx.beginPath(); ctx.moveTo(hip.x, hip.y); ctx.quadraticCurveTo(c1x, c1y, midX, midY); ctx.stroke();
+    ctx.lineWidth = tl.w * s * 0.38;
+    ctx.beginPath(); ctx.moveTo(midX, midY); ctx.quadraticCurveTo((midX + tipX) / 2, (midY + tipY) / 2, tipX, tipY); ctx.stroke();
+    if (tl.mode === 'ground' && gait.vert !== 'hop') {
+      ctx.strokeStyle = '#8E1B12'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(tipX - 6 * s, G + 4); ctx.lineTo(tipX + 8 * s, G + 4); ctx.stroke();
+    }
+  }
+
+  _head(ctx, base, geo, gait, s, t, u) {
+    const low = gait.headLow ? 0.5 : 0;
+    let ang = geo.neck.ang + low;
+    if (gait.vert === 'idle') ang += Math.sin(t * 0.7) * 0.08;
+    const hx = base.x + Math.cos(ang) * geo.neck.len * s, hy = base.y + Math.sin(ang) * geo.neck.len * s;
+    ctx.strokeStyle = 'rgba(20,20,15,0.85)'; ctx.lineWidth = 1.8 * s;
+    ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(hx, hy); ctx.stroke();
+    const r = geo.headR * s;
+    if ((this.props.silhouette ?? true)) {
+      ctx.fillStyle = 'rgba(20,20,15,0.07)';
+      ctx.beginPath(); ctx.arc(hx, hy, r, 0, 7); ctx.fill();
+    }
+    ctx.lineWidth = 1.5 * s;
+    ctx.beginPath(); ctx.arc(hx, hy, r, 0, 7); ctx.stroke();
+    ctx.fillStyle = '#14140F';
+    ctx.beginPath(); ctx.arc(hx + r * 0.35, hy - r * 0.2, 1.6 * s, 0, 7); ctx.fill();
+    if (geo.snout) {
+      ctx.lineWidth = (geo.jaw ? 5 : 2.2) * s;
+      ctx.beginPath(); ctx.moveTo(hx + r * 0.7, hy + r * 0.15);
+      ctx.lineTo(hx + r * 0.7 + geo.snout * s, hy + r * 0.35 + (geo.jaw ? 2 : 0) * s); ctx.stroke();
+      if (geo.jaw) {
+        ctx.lineWidth = 1.4 * s;
+        ctx.beginPath(); ctx.moveTo(hx + r * 0.5, hy + r * 0.75);
+        ctx.lineTo(hx + r * 0.5 + geo.snout * 0.8 * s, hy + r * 0.9); ctx.stroke();
+      }
+    }
+    if (geo.ears) {
+      ctx.lineWidth = 1.6 * s;
+      ctx.beginPath(); ctx.moveTo(hx - r * 0.3, hy - r * 0.8); ctx.lineTo(hx - r * 0.5, hy - r * 2.1);
+      ctx.moveTo(hx + r * 0.3, hy - r * 0.85); ctx.lineTo(hx + r * 0.25, hy - r * 2.2); ctx.stroke();
+    }
+    if (geo.trunk) {
+      const sway = Math.sin(t * 1.1 + u * 6.283) * 7 * s;
+      const drop = gait.headLow ? 14 * s : 0;
+      ctx.strokeStyle = 'rgba(20,20,15,0.8)'; ctx.lineCap = 'round'; ctx.lineWidth = 5.5 * s;
+      ctx.beginPath(); ctx.moveTo(hx + r * 0.75, hy + r * 0.1);
+      ctx.quadraticCurveTo(hx + r * 1.5 + sway * 0.4, hy + geo.trunk * 0.55 * s,
+        hx + r * 0.9 + sway, hy + geo.trunk * s * 0.95 + drop);
+      ctx.stroke();
+    }
+    return { x: hx, y: hy };
+  }
+
+  _figure(ctx, cx, G, s, spec, gait, u) {
+    const geo = spec.geo, t = this._t, sil = this.props.silhouette ?? true;
+    const crouch = gait.crouch || 0;
+    const pitch = (gait.pitchA || 0) * Math.sin(u * 6.283 + 2.2);
+    let breathe = gait.vert === 'idle' ? Math.sin(t * 1.3) * 1.3 * s : 0;
+    let dy = breathe;
+    if (gait.vert === 'gallop') dy += -gait.bob * s * Math.sin(u * 6.283 + 1.0);
+    if (gait.vert === 'hop') {
+      const d = gait.duty;
+      if (u < d) dy += gait.squash * s * Math.sin(Math.PI * u / d);
+      else { const q = (u - d) / (1 - d); dy += -gait.hopH * s * 4 * q * (1 - q); }
+    }
+    if (geo.kind === 'quad') {
+      const bunch = gait.bunch ? (1 - gait.bunch * (0.5 + 0.5 * Math.sin(u * 6.283 + 3.6))) : 1;
+      const gap = geo.gap * bunch * s;
+      const bobF = gait.vert === 'bob' ? -gait.bob * s * Math.sin(4 * Math.PI * (u - (gait.phases[2] + gait.phases[3]) / 2)) : 0;
+      const bobH = gait.vert === 'bob' ? -gait.bob * s * Math.sin(4 * Math.PI * (u - (gait.phases[0] + gait.phases[1]) / 2)) : 0;
+      const idleShift = gait.vert === 'idle' && geo.trunk ? Math.sin(t * 0.5) * 1.5 * s : 0;
+      const sh = { x: cx + gap / 2, y: G - geo.shH * (1 - crouch) * s + dy + bobF - pitch * gap * 0.5 };
+      const hip = { x: cx - gap / 2, y: G - geo.hipH * (1 - crouch) * s + dy + bobH + pitch * gap * 0.5 + idleShift };
+      this._limb(ctx, hip, geo.hind, gait, u, gait.phases[0], G, s, false, 'RL');
+      this._limb(ctx, sh, geo.fore, gait, u, gait.phases[2], G, s, false, 'FL');
+      if (sil) {
+        ctx.strokeStyle = 'rgba(20,20,15,0.07)'; ctx.lineWidth = geo.depth * s; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(hip.x, hip.y); ctx.lineTo(sh.x, sh.y); ctx.stroke();
+      }
+      this._tail(ctx, hip, geo, gait, G, s, t, u, pitch);
+      ctx.strokeStyle = 'rgba(20,20,15,0.85)'; ctx.lineWidth = 1.7 * s; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(hip.x, hip.y); ctx.lineTo(sh.x, sh.y); ctx.stroke();
+      this._head(ctx, sh, geo, gait, s, t, u);
+      this._limb(ctx, hip, geo.hind, gait, u, gait.phases[1], G, s, true, 'RR');
+      this._limb(ctx, sh, geo.fore, gait, u, gait.phases[3], G, s, true, 'FR');
+    } else {
+      const bob = gait.vert === 'bob' ? -gait.bob * s * Math.sin(4 * Math.PI * u) : 0;
+      const hip = { x: cx, y: G - geo.hipH * (1 - crouch) * s + dy + bob };
+      let ta = geo.torso.ang + (gait.headLow ? 0.35 : 0) + (gait.vert === 'hop' ? 0.28 : 0) + pitch;
+      if (gait.vert === 'idle' && geo.tail.mode === 'ground') ta -= 0.12;
+      const chest = { x: hip.x + Math.cos(ta) * geo.torso.len * s, y: hip.y + Math.sin(ta) * geo.torso.len * s };
+      this._limb(ctx, hip, geo.hind, gait, u, gait.phases[0], G, s, false, 'L');
+      if (sil) {
+        ctx.strokeStyle = 'rgba(20,20,15,0.07)'; ctx.lineWidth = geo.depth * s; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(hip.x, hip.y); ctx.lineTo(chest.x, chest.y); ctx.stroke();
+      }
+      this._tail(ctx, hip, geo, gait, G, s, t, u, pitch);
+      ctx.strokeStyle = 'rgba(20,20,15,0.85)'; ctx.lineWidth = 1.7 * s; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(hip.x, hip.y); ctx.lineTo(chest.x, chest.y); ctx.stroke();
+      this._head(ctx, chest, geo, gait, s, t, u);
+      this._arms(ctx, chest, geo, gait, G, s, t, u);
+      this._limb(ctx, hip, geo.hind, gait, u, gait.phases[1], G, s, true, 'R');
+    }
+  }
+
+  _arms(ctx, chest, geo, gait, G, s, t, u) {
+    const L = geo.armL * s;
+    let w = 0;
+    if (gait.pent) { w = Math.max(0, Math.sin(2 * Math.PI * (u - 0.05))); w = Math.min(1, w * 1.6); }
+    const foldX = chest.x + L * 0.35, foldY = chest.y + L * 0.9;
+    const tx = foldX + w * 14 * s, ty = foldY + w * (G - foldY);
+    const ik = this._ik(chest.x, chest.y, tx, ty, L * 0.55, L * 0.55, 1);
+    ctx.strokeStyle = 'rgba(20,20,15,0.7)'; ctx.lineWidth = 1.6 * s; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(chest.x, chest.y); ctx.lineTo(ik.jx, ik.jy); ctx.lineTo(ik.bx, ik.by); ctx.stroke();
+    if (w > 0.95) {
+      ctx.strokeStyle = '#8E1B12'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(tx - 5 * s, G + 4); ctx.lineTo(tx + 5 * s, G + 4); ctx.stroke();
+    }
+  }
+
+  _chart(ctx, W, spec, gait, u) {
+    const labels = spec.geo.kind === 'quad' ? ['RL', 'RR', 'FL', 'FR'] : ['L', 'R'];
+    const rows = labels.length;
+    const w = 316, x0 = W - 32 - w, y0 = 150, rh = 20, h = 30 + rows * rh + 22;
+    ctx.fillStyle = 'rgba(243,241,236,0.92)'; ctx.fillRect(x0, y0, w, h);
+    ctx.strokeStyle = 'rgba(20,20,15,0.13)'; ctx.lineWidth = 1; ctx.strokeRect(x0 + 0.5, y0 + 0.5, w, h);
+    ctx.fillStyle = '#8E1B12'; ctx.fillRect(x0 + 14, y0 + 14, 5, 5);
+    ctx.fillStyle = '#14140F'; ctx.font = '9px "IBM Plex Mono",monospace';
+    ctx.fillText('F O O T F A L L  \u2014  O N E  C Y C L E', x0 + 27, y0 + 20);
+    const lx = x0 + 52, rx = x0 + w - 16, span = rx - lx;
+    for (let i = 0; i < rows; i++) {
+      const y = y0 + 30 + i * rh + rh / 2;
+      ctx.fillStyle = 'rgba(20,20,15,0.45)';
+      ctx.fillText(labels[i], x0 + 14, y + 3);
+      ctx.strokeStyle = 'rgba(20,20,15,0.12)';
+      ctx.beginPath(); ctx.moveTo(lx, y); ctx.lineTo(rx, y); ctx.stroke();
+      if (gait.cycle > 0 && gait.duty < 1) {
+        const ph = gait.phases[i], d = gait.duty;
+        const p = ((u - ph) % 1 + 1) % 1, down = p < d;
+        ctx.fillStyle = down ? '#8E1B12' : 'rgba(20,20,15,0.75)';
+        const a = ph, b = ph + d;
+        if (b <= 1) ctx.fillRect(lx + a * span, y - 3, d * span, 6);
+        else { ctx.fillRect(lx + a * span, y - 3, (1 - a) * span, 6); ctx.fillRect(lx, y - 3, (b - 1) * span, 6); }
+      } else {
+        ctx.fillStyle = 'rgba(20,20,15,0.75)'; ctx.fillRect(lx, y - 3, span, 6);
+      }
+    }
+    if (gait.cycle > 0) {
+      ctx.strokeStyle = 'rgba(142,27,18,0.85)';
+      ctx.beginPath(); ctx.moveTo(lx + u * span, y0 + 27); ctx.lineTo(lx + u * span, y0 + 30 + rows * rh); ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(20,20,15,0.30)';
+    const ticks = ['0', '\u00bc', '\u00bd', '\u00be', '1'];
+    for (let i = 0; i < 5; i++) ctx.fillText(ticks[i], lx + (i / 4) * span - 2, y0 + h - 8);
+  }
+}
+</script>
+</body>
+</html>

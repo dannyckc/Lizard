@@ -42,6 +42,23 @@ extends Resource
 @export_range(0.5, 20.0, 0.5) var tail_tip_width: float = 1.5
 ## Tail is optional — off clips the silhouette just behind the hips.
 @export var tail_enabled: bool = true
+## How much of the spine behind the pelvic block the tail actually uses, 0..1.
+## The whole of it by default, which is the legacy body — every build used to
+## taper away over everything aft of its hips, so an elephant wore a tail the
+## size of its own trunk. Short is a stump on rounded hindquarters; the clipped
+## stations still exist in the chain, they are simply not flesh.
+@export_range(0.05, 1.0, 0.01) var tail_length: float = 1.0
+## Half-width of the tail where it leaves the buttocks. Zero keeps the legacy
+## profile — the tail as a smooth continuation of the hip taper, which is right
+## for a lizard and wrong for almost everything else. Set, it pinches the
+## profile just behind the pelvic block, so the hindquarters round off as a rump
+## and the tail reads as its own structure hung from it.
+@export_range(0.0, 20.0, 0.5) var tail_base_width: float = 0.0
+## Optional half-width of the neck, measured between the skull and the shoulder.
+## Zero keeps the legacy profile, where the head blends into the chest along one
+## smooth spline. Set below the head width it waists the silhouette behind the
+## skull, which is what makes a head read as a head from above.
+@export_range(0.0, 30.0, 0.5) var neck_width: float = 0.0
 ## Where along the spine (0 = head, 1 = tail tip) the limbs attach.
 @export_range(0.02, 0.5, 0.01) var front_limb_t: float = 0.16
 @export_range(0.2, 0.9, 0.01) var rear_limb_t: float = 0.46
@@ -73,6 +90,14 @@ extends Resource
 ## separating a creature that can glide and fly from one that can only leap:
 ## with none, the two airborne states are simply unreachable — see Elevation.
 @export_range(0.0, 2.0, 0.05) var wing_lift: float = 0.0
+## How steeply a trunk with nothing standing under its shoulders is carried off
+## the level, in degrees. Read only when the forelimbs bear no weight — a
+## quadruped's shoulders are held by its legs and this says nothing to it — so
+## it is the biped's carried angle, the same kind of trait a flexed elbow is: a
+## kangaroo rears its trunk over its hips, a tyrannosaur levels its own out over
+## a heavier tail, and the difference is this number rather than a pose. See
+## Gait._carry_body, which holds the fore girdle to it.
+@export_range(0.0, 60.0, 1.0) var trunk_lift_deg: float = 0.0
 
 # ---------------------------------------------------------------- limbs ----
 @export_group("Limbs")
@@ -132,6 +157,21 @@ extends Resource
 ## is the foot rolling forward onto its toe. Zero is a flat-footed animal that
 ## simply swings its legs.
 @export_range(0.0, 1.0, 0.01) var toe_push: float = 0.15
+## Where this girdle's muscle inserts past the joint it works, as a share of the
+## bone it pulls on — the effort arm of the lever every limb is.
+##
+## Muscle pulls tendon, tendon pulls bone, bone turns about the joint: the last
+## of the four is geometry and this is the number that sets it. Close in is a
+## limb geared for speed — the same contraction sweeps the foot further and
+## faster and presses more lightly, which is a runner's shank; further out is
+## the same limb geared for force, which is a digger's forearm and a heavy
+## leg's hold on the ground. 0.30 is the reference build's insertion, at which
+## the lever changes nothing at all. See Articulation, which derives the
+## advantage and the gear, and note what it deliberately cannot change: a
+## lever trades force for speed and never work, so a jump — force times
+## distance — is untouched by it.
+@export_range(0.15, 0.5, 0.01) var fore_insertion: float = 0.30
+@export_range(0.15, 0.5, 0.01) var hind_insertion: float = 0.30
 
 # ---------------------------------------------------------------- elastic ----
 # What in this animal stores work and gives it back — see Spring. There used to
@@ -361,10 +401,13 @@ const SCHEMA: Array = [
 	{"group": "Body"},
 	{"prop": "body_width", "label": "Width scale", "min": 0.3, "max": 2.5, "step": 0.01},
 	{"prop": "head_width", "label": "Head", "min": 2.0, "max": 40.0, "step": 0.5},
+	{"prop": "neck_width", "label": "Neck (0 = smooth)", "min": 0.0, "max": 30.0, "step": 0.5},
 	{"prop": "chest_width", "label": "Chest", "min": 2.0, "max": 40.0, "step": 0.5},
 	{"prop": "waist_width", "label": "Waist", "min": 1.0, "max": 40.0, "step": 0.5},
 	{"prop": "hip_width", "label": "Hip", "min": 1.0, "max": 40.0, "step": 0.5},
+	{"prop": "tail_base_width", "label": "Tail base (0 = smooth)", "min": 0.0, "max": 20.0, "step": 0.5},
 	{"prop": "tail_tip_width", "label": "Tail tip", "min": 0.5, "max": 20.0, "step": 0.5},
+	{"prop": "tail_length", "label": "Tail length", "min": 0.05, "max": 1.0, "step": 0.01},
 	{"prop": "tail_enabled", "label": "Tail", "bool": true},
 	{"prop": "front_limb_t", "label": "Shoulder pos", "min": 0.02, "max": 0.5, "step": 0.01},
 	{"prop": "rear_limb_t", "label": "Hip pos", "min": 0.2, "max": 0.9, "step": 0.01},
@@ -374,6 +417,7 @@ const SCHEMA: Array = [
 
 	{"group": "Height"},
 	{"prop": "neck_lift", "label": "Neck lift", "min": 0.0, "max": 0.6, "step": 0.01},
+	{"prop": "trunk_lift_deg", "label": "Trunk lift (deg)", "min": 0.0, "max": 60.0, "step": 1.0},
 	{"prop": "wing_lift", "label": "Wing lift", "min": 0.0, "max": 2.0, "step": 0.05},
 
 	{"group": "Limbs"},
@@ -392,6 +436,8 @@ const SCHEMA: Array = [
 	{"prop": "fore_swing_deg", "label": "Fore swing (deg)", "min": 20.0, "max": 110.0, "step": 1.0},
 	{"prop": "hind_swing_deg", "label": "Hind swing (deg)", "min": 20.0, "max": 110.0, "step": 1.0},
 	{"prop": "toe_push", "label": "Toe push-off", "min": 0.0, "max": 1.0, "step": 0.01},
+	{"prop": "fore_insertion", "label": "Fore tendon lever", "min": 0.15, "max": 0.5, "step": 0.01},
+	{"prop": "hind_insertion", "label": "Hind tendon lever", "min": 0.15, "max": 0.5, "step": 0.01},
 
 	{"group": "Elastic"},
 	{"prop": "fore_spring", "label": "Fore spring", "min": 0.0, "max": 1.0, "step": 0.01},
@@ -472,8 +518,16 @@ const PRESETS: Dictionary = {
 		"segment_count": 12, "segment_length": 14.0, "max_bend_deg": 26.0,
 		"spine_stiffness": 0.88, "spine_damping": 0.64, "body_wave": 5.0,
 		"wave_frequency": 0.9, "wave_speed": 2.0,
-		"head_width": 11.0, "chest_width": 15.0, "waist_width": 12.0,
-		"hip_width": 14.0, "tail_tip_width": 1.2,
+		# A rope of a tail hung off a rounded rump, not a body tapering away: the
+		# base knot steps the profile down behind the pelvis to a third of the
+		# hip and it barely tapers from there — a cat's tail is famously the
+		# same thickness most of its length, and that near-constant section is
+		# also real counterweight behind the hips, which the hind-driven leap is
+		# standing on. The waisted neck is the same fix at the other end — a
+		# round skull on a neck, not a head blending into the chest.
+		"head_width": 11.0, "neck_width": 8.0, "chest_width": 15.0,
+		"waist_width": 12.0, "hip_width": 15.0,
+		"tail_base_width": 5.0, "tail_tip_width": 2.2,
 		"front_limb_t": 0.17, "rear_limb_t": 0.50,
 		"arm_length": 40.0, "leg_length": 46.0, "stance_width": 0.85,
 		# The two ends of this animal are not the same limb, and that is the whole
@@ -505,6 +559,10 @@ const PRESETS: Dictionary = {
 		"fore_swing_deg": 56.0, "hind_swing_deg": 74.0,
 		# Digitigrade: it stands on its toes already, so there is a real push there.
 		"toe_push": 0.45,
+		# The hind tendons come in close to the joint: a lever geared a shade for
+		# speed, which is what lets the engine end of this animal turn its legs
+		# over quicker than the strut end without carrying different muscle.
+		"hind_insertion": 0.28,
 		# ...and a good deal of rope behind. The hind limb that folds tighter than
 		# its stance and swings through the wider fan is also the one carrying the
 		# store, which is not a coincidence: a spring is wound by folding a joint,
@@ -554,9 +612,22 @@ const PRESETS: Dictionary = {
 		"posture": Posture.COLUMNAR,
 		"segment_count": 16, "segment_length": 19.0, "max_bend_deg": 10.0,
 		"spine_stiffness": 0.95, "spine_damping": 0.50, "body_wave": 3.0,
-		"head_width": 24.0, "chest_width": 32.0, "waist_width": 29.0,
-		"hip_width": 31.0, "tail_tip_width": 2.0,
-		"front_limb_t": 0.22, "rear_limb_t": 0.54,
+		"head_width": 24.0, "chest_width": 34.0, "waist_width": 29.0,
+		# Rounded hindquarters and a stump. The old build tapered from the hips
+		# to the chain's end like everything else adapted from the lizard, which
+		# wore this animal a tail the size of its own trunk; the reference sheet
+		# gives it a rope half a girdle-gap long. The base knot rounds the rump
+		# off at the pelvis and the length clips the flesh there — the spine
+		# behind it still exists, it is simply not elephant.
+		"hip_width": 31.0, "tail_base_width": 3.0, "tail_tip_width": 2.0,
+		"tail_length": 0.55,
+		# Shoulders brought up close behind the skull. An elephant is a huge head
+		# carried on almost no neck, and the whole of that is where the pectoral
+		# girdle sits: at 0.22 the head rode a fifth of the animal ahead of its
+		# own shoulders, which is a browser's reach, not an elephant's — the
+		# sheet parks the skull's edge a few pixels off the shoulder. The trunk
+		# between the girdles gains what the neck gives up.
+		"front_limb_t": 0.14, "rear_limb_t": 0.54,
 		# Held nearly vertical, so the clearance is most of the leg and the
 		# plan-view reach is under a third of it — which is what makes the feet land
 		# close underneath the body.
@@ -597,6 +668,12 @@ const PRESETS: Dictionary = {
 		# It walks on its toes over a fibrous pad, and with the joints doing so
 		# little this is most of what actually pushes the animal along.
 		"toe_push": 0.60,
+		# ...and the tendons insert well out along the bone, at both ends of the
+		# animal. A lever geared for force rather than sweep, which is what a limb
+		# whose whole job is holding weight against the ground should be — the
+		# swing pays for it, and on a leg this heavy the pendulum was already the
+		# slower term, so the price was being paid anyway.
+		"fore_insertion": 0.36, "hind_insertion": 0.36,
 		# The elastic tissue in these legs is real and entirely useless for
 		# jumping, which is the interesting half of what this build demonstrates. A
 		# store gives its work back by pushing a joint open — see Spring.payout —
@@ -646,12 +723,22 @@ const PRESETS: Dictionary = {
 	# spine-driven bound as it comes up through its own Froude number.
 	"Cheetah": {
 		"posture": Posture.ERECT,
-		"segment_count": 14, "segment_length": 15.0, "max_bend_deg": 34.0,
+		# A segment up on the reference: the sheet draws this animal long — a
+		# stretched trunk between the girdles and a tail even with it — and the
+		# extra station is where both come from. The back stays at full freedom;
+		# more joints at the same bend is how it clears the rotary threshold
+		# with room to spare.
+		"segment_count": 15, "segment_length": 15.0, "max_bend_deg": 34.0,
 		"spine_stiffness": 0.80, "spine_damping": 0.70, "body_wave": 4.0,
 		"wave_frequency": 0.9, "wave_speed": 2.2,
-		"head_width": 9.0, "chest_width": 14.0, "waist_width": 9.0,
-		"hip_width": 13.0, "tail_tip_width": 1.4,
-		"front_limb_t": 0.16, "rear_limb_t": 0.52,
+		# The greyhound outline: deep chest, drawn waist, small skull on a
+		# waisted neck — and a tail as long as the trunk and no thicker than a
+		# rope, hung off its own base knot instead of tapering out of the hips.
+		# It is a rudder at 400 px/s, and it reads as one now.
+		"head_width": 9.0, "neck_width": 6.5, "chest_width": 14.0,
+		"waist_width": 9.0, "hip_width": 13.0,
+		"tail_base_width": 3.0, "tail_tip_width": 1.4,
+		"front_limb_t": 0.15, "rear_limb_t": 0.48,
 		"arm_length": 52.0, "leg_length": 58.0,
 		"stance_width": 0.70,
 		# The cat's asymmetry taken further: a foreleg that is nearly a strut over a
@@ -664,6 +751,11 @@ const PRESETS: Dictionary = {
 		"fore_upper_share": 0.50, "hind_upper_share": 0.44,
 		"fore_swing_deg": 62.0, "hind_swing_deg": 84.0,
 		"toe_push": 0.70,
+		# The highest-geared limbs in the file: tendons right in against the
+		# joints, so every contraction is spent on sweep. It is the same trade the
+		# long light shin is making — force given up for foot speed — and it is
+		# most of why this build's legs turn over the way they do.
+		"fore_insertion": 0.28, "hind_insertion": 0.25,
 		"fore_spring": 0.40, "hind_spring": 0.65,
 		"move_speed": 130.0, "acceleration": 0.09,
 		"turn_speed_falloff": 0.50, "turn_responsiveness": 13.0, "turn_pivot": 44.0,
@@ -698,9 +790,21 @@ const PRESETS: Dictionary = {
 		"segment_count": 15, "segment_length": 18.0, "max_bend_deg": 12.0,
 		"spine_stiffness": 0.93, "spine_damping": 0.55, "body_wave": 2.5,
 		"wave_frequency": 0.7, "wave_speed": 1.4,
-		"head_width": 17.0, "chest_width": 19.0, "waist_width": 15.0,
-		"hip_width": 20.0, "tail_tip_width": 1.5,
-		"front_limb_t": 0.20, "rear_limb_t": 0.46,
+		# The one build whose tail *should* read as a continuation of the body —
+		# a theropod tail is the back half of the animal, thick at the hips and
+		# tapering over its whole length — so it keeps the legacy profile with no
+		# base knot, and gets more of the spine instead: hips brought forward
+		# put two fifths of the animal behind them, which is what makes the
+		# counterweight genuinely counterweigh. The neck knot pinches behind a
+		# skull that is most of the front end.
+		"head_width": 17.0, "neck_width": 12.0, "chest_width": 19.0,
+		"waist_width": 15.0, "hip_width": 20.0, "tail_tip_width": 1.5,
+		"front_limb_t": 0.20, "rear_limb_t": 0.42,
+		# Nearly level, and deliberately not zero: the reference sheet carries
+		# this trunk a hair over a tenth of a turn nose-up, which is what a beam
+		# balanced over a heavier tail reads as. The counterweight below is what
+		# affords it.
+		"trunk_lift_deg": 13.0,
 		"arm_length": 16.0, "leg_length": 86.0,
 		# Narrow, but not on the midline. A two-legged animal tracks close to its
 		# own centreline and cannot track *through* it: the feet have to stay either
@@ -716,6 +820,9 @@ const PRESETS: Dictionary = {
 		"fore_upper_share": 0.52, "hind_upper_share": 0.48,
 		"fore_swing_deg": 50.0, "hind_swing_deg": 70.0,
 		"toe_push": 0.60,
+		# Geared a shade for force: four tonnes on two feet is a load path first
+		# and a swing second, and the lever leans the way the load does.
+		"hind_insertion": 0.32,
 		# A bird's leg, and the store goes with the crouch: real but modest, on a
 		# body far too heavy for it to be worth much. What comes out is a creature
 		# that can get itself off the ground and has no business doing it often.
@@ -750,9 +857,21 @@ const PRESETS: Dictionary = {
 		"segment_count": 12, "segment_length": 16.0, "max_bend_deg": 20.0,
 		"spine_stiffness": 0.88, "spine_damping": 0.62, "body_wave": 2.0,
 		"wave_frequency": 0.8, "wave_speed": 1.6,
-		"head_width": 7.0, "chest_width": 13.0, "waist_width": 11.0,
-		"hip_width": 16.0, "tail_tip_width": 2.5,
-		"front_limb_t": 0.20, "rear_limb_t": 0.44,
+		# A thick muscular tail that is nevertheless its own structure: the base
+		# knot steps it down from the rump — a stout root that stays deeper than
+		# anything the Lizard trails, because this tail is the third leg of the
+		# tripod rest and a working counterweight to the hop, not a tapering
+		# body. Small skull on a real neck, heavy hindquarters over a drawn
+		# waist.
+		"head_width": 7.0, "neck_width": 5.0, "chest_width": 13.0,
+		"waist_width": 11.0, "hip_width": 16.0,
+		"tail_base_width": 12.5, "tail_tip_width": 3.5,
+		"front_limb_t": 0.20, "rear_limb_t": 0.42,
+		# Reared: the trunk is carried most of the way to upright over the hips,
+		# which is what a kangaroo *is* from the side — a Z of leg, a near
+		# vertical body and a tail closing the tripod. The heavier tail above is
+		# the other half of the same stance.
+		"trunk_lift_deg": 50.0,
 		"arm_length": 22.0, "leg_length": 62.0,
 		"stance_width": 0.50,
 		# Folded to a Z and built to open: the deepest crouch and the longest foot
@@ -762,6 +881,9 @@ const PRESETS: Dictionary = {
 		"fore_upper_share": 0.52, "hind_upper_share": 0.42,
 		"fore_swing_deg": 50.0, "hind_swing_deg": 78.0,
 		"toe_push": 0.85,
+		# Tendons in close on the hind pair — the gastrocnemius end of the same
+		# rope the spring row below describes, geared for the sweep a hop is.
+		"hind_insertion": 0.26,
 		# Nearly all rope. The whole hind limb below the knee is a spring wound
 		# along the longest foot in the file, which is the other half of what makes
 		# this a hop rather than a stride — and the reason the same animal is a

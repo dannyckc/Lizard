@@ -63,6 +63,7 @@ const STRUCTURAL: Array[String] = [
 	"fore_fold_range", "hind_fold_range",
 	"fore_upper_share", "hind_upper_share",
 	"fore_swing_deg", "hind_swing_deg",
+	"fore_insertion", "hind_insertion",
 ]
 
 ## The three readings every species is quoted by on the rail. Chosen because they

@@ -173,11 +173,16 @@ func _check_two_legs_is_a_measurement(player: Creature) -> void:
 		"a two-legged animal took %d steps on its arms" % rex["fore_steps"])
 	_check(int(rex["hind_steps"]) > 8,
 		"a two-legged animal barely walked (%d hind steps)" % rex["hind_steps"])
-	# The shoulders are carried by the back rather than by the arms, so the body
-	# stays level over the hips instead of standing nose-down on limbs a fifth of
-	# the length of its legs.
-	_check(absf(float(rex["pitch"])) < 0.06,
-		"a two-legged animal stood nose-down (pitch %.3f)" % rex["pitch"])
+	# The shoulders are carried by the back rather than by the arms — at the
+	# angle the species holds its trunk, never dropped nose-down onto limbs a
+	# fifth the length of its legs. The measured slope is the carried angle's
+	# own sine (the rise is spread over the same span the pitch divides by), so
+	# the check is against the build's number rather than against level, and a
+	# species carried level still gets exactly the old assertion.
+	var carried: float = sin(deg_to_rad(player.params.trunk_lift_deg))
+	_check(absf(float(rex["pitch"]) - carried) < 0.06,
+		"a two-legged animal stood off its carried trunk angle (pitch %.3f against %.3f)"
+			% [rex["pitch"], carried])
 	# ...and the arms are held, not dragged: their feet hang below the shoulder
 	# rather than being solved to a floor they cannot come near.
 	_check(float(rex["fore_foot_height"]) > 4.0,

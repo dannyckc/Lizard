@@ -401,6 +401,23 @@ static func tail_t(rear_limb_t: float) -> float:
 	return clampf(rear_limb_t + float(PELVIS_AFT) / float(TORSO_COLS), 0.0, 1.0)
 
 
+## Where along the spine the *flesh* ends: the tail begins at `tail_t` and runs
+## for `tail_length` of whatever spine is left, so a short-tailed animal is a
+## rump and a stump rather than a body that tapers away to its own chain's end.
+## A disabled tail is a zero-length one, and 1.0 is the whole chain — exactly
+## the two answers this question had before a length existed.
+##
+## Static and the only answer, for the same reason `tail_t` is: the silhouette
+## clips here, the lattice carves to here, and the width profile lands its tip
+## knot here, and three files each doing that arithmetic is three tails.
+static func clip_t(p: CreatureParams) -> float:
+	if not p.tail_enabled:
+		return tail_t(p.rear_limb_t)
+	if p.tail_length >= 1.0:
+		return 1.0
+	return lerpf(tail_t(p.rear_limb_t), 1.0, clampf(p.tail_length, 0.05, 1.0))
+
+
 ## Body column a fraction along the *clipped* spine falls in — the bridge between
 ## the animation rig's coordinates and the lattice's.
 func torso_column(t: float) -> int:

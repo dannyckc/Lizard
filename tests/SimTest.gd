@@ -282,7 +282,13 @@ func _run_case(preset_name: String) -> void:
 	# tidying four feet back underneath a body takes a beat more. What is actually
 	# being watched for is a foot that never catches up, and none does: the walk
 	# and the moving turn both sit under two strides.
-	if max_foot_drift > 4.2:
+	#
+	# The settle spike also moves with the girdle's own lever now — a hind pair
+	# geared for speed (see Articulation.Joint.insertion) swings sooner against
+	# the same shrunk stride, and the Cat's reads a few tenths higher for it.
+	# The bound is above that and still an order under a genuine tow, which runs
+	# to the dozens and never comes down.
+	if max_foot_drift > 5.0:
 		failures.append("%s dragged a foot %.1f strides behind its ideal" % [label, max_foot_drift])
 	# Resonance ran to 7-19x before the wave was made a true kinematic offset;
 	# accumulation down the chain accounts for a little under 3x.
