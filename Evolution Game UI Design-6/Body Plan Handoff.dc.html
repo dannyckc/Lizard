@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="./doc-page.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; }
+  doc-page:not(:defined) { visibility: hidden; }
+  a { color: #14140F; text-decoration: none; border-bottom: 1px solid rgba(20,20,15,0.25); }
+  a:hover { color: rgba(20,20,15,0.55); }
+  ::selection { background: #14140F; color: #F3F1EC; }
+</style>
+</helmet>
+<doc-page margin="0.8in">
+<div style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:#14140F;-webkit-font-smoothing:antialiased">
+
+  <div style="display:flex;align-items:center;gap:11px;margin:0 0 6px 0">
+    <div style="width:7px;height:7px;border-radius:50%;background:#8E1B12"></div>
+    <div style="font-size:11px;letter-spacing:0.34em;text-transform:uppercase;line-height:1">Evolution</div>
+    <div style="width:22px;height:1px;background:rgba(20,20,15,0.22)"></div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.16em;color:rgba(20,20,15,0.42);line-height:1">IMPLEMENTATION&nbsp;&nbsp;HANDOFF&nbsp;&nbsp;0.1</div>
+  </div>
+  <h1 style="font-size:34px;font-weight:500;letter-spacing:0.02em;margin:18px 0 10px 0;text-transform:uppercase">Template Body Plan</h1>
+  <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.08em;color:rgba(20,20,15,0.55);line-height:1.7">
+    THE BODY &middot; THE SKELETON &middot; THE GAIT &mdash; EVERY PROPERTY A CREATURE IS BUILT FROM, AND WHAT IS DERIVED FROM IT.<br />
+    SOURCE: dannyckc/Lizard @ main &middot; scripts/creature/ &middot; COMPANION: <a href="./Gait HUD.dc.html">GAIT HUD</a>
+  </div>
+
+  <div style="border:1px solid rgba(20,20,15,0.25);padding:16px 20px;margin:26px 0 0 0;break-inside:avoid">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.2em;color:#8E1B12;margin:0 0 10px 0">THE ONE RULE OF THIS SYSTEM</div>
+    <p style="font-size:14.5px;line-height:1.6;margin:0;text-wrap:pretty">A creature is <strong>one authored resource</strong> (<span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">CreatureParams</span>) &mdash; bones, weights and angles. Everything else is <strong>derived per tick</strong>: no preset carries a gait, a footfall order, a stride length, a height, or a &ldquo;bipedal&rdquo; flag. An Elephant ambles because its knees do not fold; a T.&nbsp;rex is bipedal because its arms measure too short to bear. Implement the derivations, not the outcomes.</p>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 0 0 0;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.06em">
+      <div style="border:1px solid #14140F;padding:6px 10px;background:#14140F;color:#F3F1EC">CREATURE&shy;PARAMS <span style="opacity:0.6">authored</span></div>
+      <div style="opacity:0.4">&rarr;</div>
+      <div style="border:1px solid rgba(20,20,15,0.35);padding:6px 10px">POSTURE <span style="opacity:0.5">table</span></div>
+      <div style="opacity:0.4">&rarr;</div>
+      <div style="border:1px solid rgba(20,20,15,0.35);padding:6px 10px">BODYPLAN <span style="opacity:0.5">lattice</span></div>
+      <div style="opacity:0.4">&rarr;</div>
+      <div style="border:1px solid rgba(20,20,15,0.35);padding:6px 10px">PHYSIQUE <span style="opacity:0.5">mass</span></div>
+      <div style="opacity:0.4">&rarr;</div>
+      <div style="border:1px solid rgba(20,20,15,0.35);padding:6px 10px">LOCOMOTION <span style="opacity:0.5">stride</span></div>
+      <div style="opacity:0.4">&rarr;</div>
+      <div style="border:1px solid rgba(20,20,15,0.35);padding:6px 10px">FOOTFALL <span style="opacity:0.5">3 numbers</span></div>
+    </div>
+  </div>
+
+  <!-- ============================================================ 01 BODY -->
+  <div style="display:flex;align-items:baseline;gap:14px;margin:44px 0 4px 0;border-bottom:1px solid #14140F;padding:0 0 8px 0">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8E1B12">01</div>
+    <h2 style="font-size:19px;font-weight:500;letter-spacing:0.1em;text-transform:uppercase;margin:0">The Body</h2>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.12em;color:rgba(20,20,15,0.42);margin-left:auto">AUTHORED &middot; CreatureParams.gd</div>
+  </div>
+  <p style="font-size:14.5px;line-height:1.6;margin:14px 0;text-wrap:pretty">The body is a <strong>spine chain</strong> of verlet particles (point&nbsp;0 is the head and the driver) wearing a <strong>width profile</strong>: knots sampled head&nbsp;&rarr;&nbsp;tail with a Catmull-Rom spline. Mass is never a parameter &mdash; it is the drawn silhouette&rsquo;s volume &times; <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">density</span> &times; surviving tissue, so a broader body is a heavier body and a chewed-open one is lighter.</p>
+  <table style="width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:11px;line-height:1.5">
+    <thead>
+      <tr>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.18em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 12px 6px 0;border-bottom:1px solid rgba(20,20,15,0.3)">PROPERTY</th>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.18em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 12px 6px 0;border-bottom:1px solid rgba(20,20,15,0.3)">DEFAULT</th>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.18em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 0 6px 0;border-bottom:1px solid rgba(20,20,15,0.3)">WHAT IT IS</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td colspan="3" style="padding:12px 0 4px 0;font-size:9px;letter-spacing:0.2em;color:#8E1B12">SPINE</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1);white-space:nowrap">segment_count &middot; segment_length</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1);white-space:nowrap">14 &middot; 15 px</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Chain length; ranges 6&ndash;28, 4&ndash;40 px</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">spine_stiffness &middot; spine_damping</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.85 &middot; 0.70</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Solver feel: rigidity per pass, trailing inertia</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">max_bend_deg</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">22&deg;</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Bend limit per joint. &times;(segments&minus;1)/2&pi; = spine_freedom &mdash; feeds launch, bunch, rotary gallop</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">body_wave &middot; wave_frequency &middot; wave_speed</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">6.0 &middot; 0.8 &middot; 1.6</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Lateral undulation; scaled by the posture&rsquo;s wave_gain (1.0 sprawled &rarr; 0.08 columnar)</td></tr>
+      <tr><td colspan="3" style="padding:12px 0 4px 0;font-size:9px;letter-spacing:0.2em;color:#8E1B12">SILHOUETTE &mdash; CATMULL-ROM KNOTS, HEAD &rarr; TAIL</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">head &middot; neck &middot; chest &middot; waist &middot; hip</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">13 &middot; 0 &middot; 15 &middot; 10.5 &middot; 12.5</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Half-widths. neck 0 = smooth head&ndash;chest blend; set below head to waist the skull</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">tail_base &middot; tail_tip &middot; tail_length</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0 &middot; 1.5 &middot; 1.00</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">base 0 = legacy hip taper; set, it pinches behind the pelvis so the tail is its own structure. length = share of spine aft of pelvis that is flesh</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">body_width</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">1.0</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Global multiplier on the whole profile</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">front_limb_t &middot; rear_limb_t</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.16 &middot; 0.46</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Where the girdles hang, as fractions of the spine (0 head, 1 tail tip). Everything skeletal downstream moves with these</td></tr>
+      <tr><td colspan="3" style="padding:12px 0 4px 0;font-size:9px;letter-spacing:0.2em;color:#8E1B12">HEIGHT</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">neck_lift &middot; trunk_lift_deg &middot; wing_lift</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0 &middot; 0&deg; &middot; 0</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Head carry above shoulder (fraction of body length); the biped&rsquo;s trunk angle (read only when forelimbs bear nothing); wings &mdash; 0 means flight states are unreachable</td></tr>
+      <tr><td colspan="3" style="padding:12px 0 4px 0;font-size:9px;letter-spacing:0.2em;color:#8E1B12">PHYSIQUE</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">density</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">1.0</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">mass = silhouette volume &times; density &times; surviving tissue</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">muscle_power</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">1.0</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">strength = muscle_power &times; mass^&#8532; &mdash; strong <em>for its size</em>. power = strength/mass drives everything slow about a big animal</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">fast_twitch</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.50</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Fibre mix; enters the limb-swing drive term only (&plusmn;8%)</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">heart_power</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">1.0</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Circulation build; stamina &amp; recovery, never speed</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">fat_reserve</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">1.0</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Multiplies the plan&rsquo;s fat profile; a real layer in the depth stack (weight + bite padding)</td></tr>
+    </tbody>
+  </table>
+  <p style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.06em;color:rgba(20,20,15,0.45);margin:10px 0 0 0;line-height:1.7">COMBAT + DENTITION GROUPS EXIST IN THE SAME SCHEMA (bite, jaws, teeth) &mdash; OUT OF SCOPE FOR THIS HANDOFF.</p>
+
+  <!-- ======================================================== 02 SKELETON -->
+  <div style="display:flex;align-items:baseline;gap:14px;margin:44px 0 4px 0;border-bottom:1px solid #14140F;padding:0 0 8px 0;break-after:avoid">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8E1B12">02</div>
+    <h2 style="font-size:19px;font-weight:500;letter-spacing:0.1em;text-transform:uppercase;margin:0">The Skeletal Structure</h2>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.12em;color:rgba(20,20,15,0.42);margin-left:auto">DERIVED &middot; BodyPlan.gd</div>
+  </div>
+  <p style="font-size:14.5px;line-height:1.6;margin:14px 0;text-wrap:pretty"><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">BodyPlan</span> is the only file that names a body part. The animal is a <strong>tissue lattice</strong>: one body patch of <strong>32&nbsp;&times;&nbsp;7 cells</strong> (8 head-cap + 20 torso + 4 tail-cap columns), plus four limb patches of <strong>10&nbsp;&times;&nbsp;3</strong> (6 bone + 4 foot columns). Rows are odd so one row straddles the spine and carries the vertebral column and the cord inside it. The skeleton is <em>sparse by design</em> &mdash; a flood fill from the snout must reach every bone cell, and a bite landing in a rib gap reaches the muscle the ribs do not cover.</p>
+
+  <sc-if value="{{ diagrams }}" hint-placeholder-val="{{ true }}">
+  <div style="break-inside:avoid;border:1px solid rgba(20,20,15,0.25);padding:18px 20px;margin:0 0 18px 0">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.2em;color:rgba(20,20,15,0.45);margin:0 0 12px 0">BODY PATCH &mdash; 32 COLS &times; 7 ROWS &middot; DEFAULT GIRDLES (front_limb_t 0.16 / rear_limb_t 0.46)</div>
+    <div style="display:grid;grid-template-columns:repeat(32, 1fr);gap:1px;max-width:520px">
+      <sc-for list="{{ latticeCells }}" as="c" hint-placeholder-count="32">
+        <div style="aspect-ratio:1;background:{{ c.bg }}"></div>
+      </sc-for>
+    </div>
+    <div style="display:flex;max-width:520px;margin:6px 0 0 0;font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:0.12em;color:rgba(20,20,15,0.5)">
+      <div style="width:25%;border-top:2px solid rgba(20,20,15,0.35);padding:4px 0 0 0">HEAD</div>
+      <div style="width:18.75%;border-top:2px solid rgba(20,20,15,0.2);padding:4px 0 0 0">THORAX</div>
+      <div style="width:6.25%;border-top:2px solid rgba(20,20,15,0.35);padding:4px 0 0 0">LUM</div>
+      <div style="width:12.5%;border-top:2px solid rgba(20,20,15,0.2);padding:4px 0 0 0">PELVIS</div>
+      <div style="width:37.5%;border-top:2px solid rgba(20,20,15,0.35);padding:4px 0 0 0">TAIL</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin:14px 0 0 0;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(20,20,15,0.55)">
+      <div style="display:flex;align-items:center;gap:6px"><div style="width:9px;height:9px;background:#14140F"></div>BONE</div>
+      <div style="display:flex;align-items:center;gap:6px"><div style="width:9px;height:9px;background:#8E1B12"></div>ORGAN (BRAIN &middot; HEART)</div>
+      <div style="display:flex;align-items:center;gap:6px"><div style="width:9px;height:9px;background:rgba(20,20,15,0.1)"></div>FLESH</div>
+    </div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.2em;color:rgba(20,20,15,0.45);margin:18px 0 12px 0">LIMB PATCH &times;4 (FL FR RL RR) &mdash; 6 BONE + 4 FOOT COLS &times; 3 ROWS &middot; CORE ROW CARRIES BONE + NEUROVASCULAR BUNDLE</div>
+    <div style="display:grid;grid-template-columns:repeat(10, 1fr);gap:1px;max-width:164px">
+      <sc-for list="{{ limbCells }}" as="c" hint-placeholder-count="10">
+        <div style="aspect-ratio:1;background:{{ c.bg }}"></div>
+      </sc-for>
+    </div>
+  </div>
+  </sc-if>
+
+  <table style="width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:11px;line-height:1.5">
+    <thead>
+      <tr>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.18em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 12px 6px 0;border-bottom:1px solid rgba(20,20,15,0.3);width:26%">STRUCTURE</th>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.18em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 0 6px 0;border-bottom:1px solid rgba(20,20,15,0.3)">RULE</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td style="padding:5px 12px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1);vertical-align:top">Skull</td><td style="padding:5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Fills the head cap inboard of the cheeks &mdash; SKULL_SPAN 0.72 of lateral width</td></tr>
+      <tr><td style="padding:5px 12px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1);vertical-align:top">Vertebral column</td><td style="padding:5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">One cell wide (SPINE_ROW 3), the whole length, neck to tail tip. The cord runs inside it &mdash; shielded until the bone itself breaks</td></tr>
+      <tr><td style="padding:5px 12px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1);vertical-align:top">Girdles</td><td style="padding:5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Full-width bars (GIRDLE_SPAN 0.95) under the limb sockets. Positions derive from front/rear_limb_t; clamped by GIRDLE_MARGIN 2 (off trunk ends), GIRDLE_GAP 3 (apart)</td></tr>
+      <tr><td style="padding:5px 12px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1);vertical-align:top">Ribs</td><td style="padding:5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Alternating odd torso columns strictly between the girdles (RIB_SPAN 0.78), never adjacent to a girdle bar &mdash; the gaps are biteable on purpose</td></tr>
+      <tr><td style="padding:5px 12px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1);vertical-align:top">Limb bone core</td><td style="padding:5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Centre row of each limb patch, bone columns only; flesh either side; foot columns unboned</td></tr>
+      <tr><td style="padding:5px 12px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1);vertical-align:top">Regions (9)</td><td style="padding:5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">head &middot; thorax &middot; lumbar &middot; pelvis &middot; tail + FL FR RL RR. Boundaries derive from the girdles: pelvic block straddles its bar (1 col fore, 3 aft); lumbar = 2 cols ahead of it; tail_t = rear_limb_t + 3/20. Only THORAX_COL 0 is constant</td></tr>
+      <tr><td style="padding:5px 12px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1);vertical-align:top">Organs</td><td style="padding:5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">BRAIN: back of the skull cap, cols 6&ndash;8, rows 2&ndash;5 &mdash; squarely inside bone. HEART: rib column 5 of the torso, rows 2&ndash;5 &mdash; the ribcage stands between a bite and it</td></tr>
+      <tr><td style="padding:5px 12px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1);vertical-align:top">Nerves &amp; vessels</td><td style="padding:5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">One parent tree, two roots: nerves root at HEAD (cord shielded in vertebrae), vessels at THORAX (aorta unshielded against them). Trunk chains head&ndash;thorax&ndash;lumbar&ndash;pelvis&ndash;tail; forelimbs hang off thorax, hindlimbs off pelvis. Limb runs cross the girdle via link_cells &mdash; nerve, vessel and bone fail together at the shoulder</td></tr>
+      <tr><td style="padding:5px 12px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1);vertical-align:top">Muscle groups</td><td style="padding:5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">One axial group per trunk region + two per limb (upper = swings the limb from the socket, lower = works elbow/knee). A leg chewed at the shank still walks badly; chewed at the shoulder it barely moves</td></tr>
+      <tr><td style="padding:5px 12px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1);vertical-align:top">Fat</td><td style="padding:5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Along the trunk [0.30, 0.75, 1.00, 0.85, 0.25] by region &times; across (midline 0.55 of flank) &times; species fat_reserve; limbs 0.28, feet 0.12; tail fat tapers with the tail</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ======================================================= 03 POSTURE -->
+  <div style="display:flex;align-items:baseline;gap:14px;margin:44px 0 4px 0;border-bottom:1px solid #14140F;padding:0 0 8px 0;break-after:avoid">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8E1B12">03</div>
+    <h2 style="font-size:19px;font-weight:500;letter-spacing:0.1em;text-transform:uppercase;margin:0">Posture &amp; Articulation</h2>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.12em;color:rgba(20,20,15,0.42);margin-left:auto">Posture.gd &middot; Articulation via CreatureParams</div>
+  </div>
+  <p style="font-size:14.5px;line-height:1.6;margin:14px 0;text-wrap:pretty">One trait &mdash; the angle the limbs are carried out of the ground plane &mdash; and everything else is read off it. <strong>plan_reach</strong> = limb &times; cos(tilt) (footprint from above), <strong>clearance</strong> = limb &times; sin(tilt) (the animal&rsquo;s height &mdash; there is no height number), <strong>track</strong> = plan_reach &times; cos(tilt) (how far outboard the feet fall). Posture is an anatomical category, not a tuning group &mdash; and it never says how many legs the animal walks on.</p>
+  <table style="width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:10.5px;line-height:1.5">
+    <thead>
+      <tr>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 10px 6px 0;border-bottom:1px solid rgba(20,20,15,0.3)">STANCE</th>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 10px 6px 0;border-bottom:1px solid rgba(20,20,15,0.3)">TILT</th>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 10px 6px 0;border-bottom:1px solid rgba(20,20,15,0.3)">JOINT &middot; LOCK &middot; FOLD</th>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 10px 6px 0;border-bottom:1px solid rgba(20,20,15,0.3)">INSET</th>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 10px 6px 0;border-bottom:1px solid rgba(20,20,15,0.3)">DEPTH</th>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 10px 6px 0;border-bottom:1px solid rgba(20,20,15,0.3)">WAVE</th>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 10px 6px 0;border-bottom:1px solid rgba(20,20,15,0.3)">FEET DN</th>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 10px 6px 0;border-bottom:1px solid rgba(20,20,15,0.3)">AGILITY</th>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 0 6px 0;border-bottom:1px solid rgba(20,20,15,0.3)">DRIVE</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0 SPRAWLED</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">12&deg;</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">102 &middot; 140 &middot; 35&deg;</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.60</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">1.00</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">2</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">1.00</td><td style="padding:5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">1.00</td></tr>
+      <tr><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">1 SEMI-UPRIGHT</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">50&deg;</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">132 &middot; 158 &middot; 38&deg;</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.42</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.92</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.30</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">2</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">1.30</td><td style="padding:5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">1.45</td></tr>
+      <tr><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">2 ERECT</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">66&deg;</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">150 &middot; 168 &middot; 40&deg;</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.22</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.88</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.10</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">1</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">1.15</td><td style="padding:5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">1.35</td></tr>
+      <tr><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">3 COLUMNAR</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">72&deg;</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">170 &middot; 177 &middot; 58&deg;</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.18</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">1.05</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.08</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">3</td><td style="padding:5px 10px 5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.55</td><td style="padding:5px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.55</td></tr>
+    </tbody>
+  </table>
+  <p style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.06em;color:rgba(20,20,15,0.45);margin:8px 0 18px 0;line-height:1.7">ALSO PER ROW: coupling_gain 1.0/1.15/1.25/0.45 &middot; step_height_gain 1.0/1.35/1.15/0.55 &middot; neck_reach 0.10/0.16/0.24/0.20. FEET_DOWN IS A LEANING (BASE OF DUTY FACTOR), NOT A LIMIT.</p>
+
+  <p style="font-size:14.5px;line-height:1.6;margin:14px 0;text-wrap:pretty">The species then leans on the stance <strong>per girdle</strong> &mdash; a girdle is the unit a real skeleton varies at. The trait is always the <em>angle at the joint</em>, never a length:</p>
+  <table style="width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:11px;line-height:1.5">
+    <thead>
+      <tr>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.18em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 12px 6px 0;border-bottom:1px solid rgba(20,20,15,0.3)">PROPERTY (FORE / HIND)</th>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.18em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 12px 6px 0;border-bottom:1px solid rgba(20,20,15,0.3)">DEFAULT</th>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.18em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 0 6px 0;border-bottom:1px solid rgba(20,20,15,0.3)">WHAT IT IS</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">arm_length &middot; leg_length &middot; stance_width</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">34 &middot; 40 &middot; 1.0</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Total two-bone chain lengths; rest-stance width factor</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">fore/hind_flex_deg</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0 / 0</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">How much more flexed than the stance the joint is carried; negative = straighter (a strut)</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">fore/hind_fold_range</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">1.0 / 1.0</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Fold vs the stance&rsquo;s fold. Under 1 = graviportal (no crouch, no gather, no spring); over 1 = a spring</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">fore/hind_upper_share</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.52 / 0.52</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Share of the limb in the upper bone. High = weight carried close (heavy builds); low = a runner&rsquo;s light shank</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">fore/hind_swing_deg</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">62&deg; / 62&deg;</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Half-angle of the socket&rsquo;s swing fan from rest</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">toe_push</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.15</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Share of foot that is toe. The straight-legged animal&rsquo;s only propulsion</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">fore/hind_insertion</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.30 / 0.30</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Tendon lever arm. Close in = geared for sweep/speed; far out = geared for force. Trades force for speed, never work &mdash; jumps untouched</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">fore/hind_spring &middot; spring_latch</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.15 / 0.20 &middot; 0</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Share of drive through elastic tissue; latch = store released by catch, not joint travel (insect jumps)</td></tr>
+    </tbody>
+  </table>
+  <div style="border-left:2px solid #8E1B12;padding:10px 0 10px 18px;margin:18px 0 0 0;break-inside:avoid">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.2em;color:#8E1B12;margin:0 0 6px 0">BIPEDALISM IS A MEASUREMENT</div>
+    <p style="font-size:14px;line-height:1.6;margin:0;text-wrap:pretty"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px">arm_length &ge; leg_length &times; BEARING_RATIO (0.46)</span> &rarr; the forelimbs bear. Below it they are carried, folded against the chest, and duty, footfall and weight are quoted against two legs. No bipedal flag exists anywhere.</p>
+  </div>
+
+  <!-- ========================================================== 04 GAIT -->
+  <div style="display:flex;align-items:baseline;gap:14px;margin:44px 0 4px 0;border-bottom:1px solid #14140F;padding:0 0 8px 0;break-after:avoid">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8E1B12">04</div>
+    <h2 style="font-size:19px;font-weight:500;letter-spacing:0.1em;text-transform:uppercase;margin:0">The Gait</h2>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.12em;color:rgba(20,20,15,0.42);margin-left:auto">DERIVED &middot; Footfall.gd + Locomotion.gd</div>
+  </div>
+  <p style="font-size:14.5px;line-height:1.6;margin:14px 0;text-wrap:pretty">Every terrestrial gait is <strong>three numbers</strong>, re-derived each tick &mdash; no gait is a mode, preset, or name anything checks for:</p>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin:0 0 18px 0">
+    <div style="border:1px solid rgba(20,20,15,0.25);padding:14px 16px">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;margin:0 0 6px 0">girdle_lag</div>
+      <div style="font-size:12.5px;line-height:1.55;color:rgba(20,20,15,0.75)">How far the fore girdle follows the hind. 0 = pace, 0.25 = lateral-sequence walk, 0.5 = trot, 0.60 = gallop (forelimbs land late &mdash; the suspension)</div>
+    </div>
+    <div style="border:1px solid rgba(20,20,15,0.25);padding:14px 16px">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;margin:0 0 6px 0">hind_split</div>
+      <div style="font-size:12.5px;line-height:1.55;color:rgba(20,20,15,0.75)">Phase between the two hind limbs. 0.5 = alternating; collapses toward 0.06 as the animal goes asymmetric &mdash; hind pair first (the half-bound)</div>
+    </div>
+    <div style="border:1px solid rgba(20,20,15,0.25);padding:14px 16px">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;margin:0 0 6px 0">fore_split</div>
+      <div style="font-size:12.5px;line-height:1.55;color:rgba(20,20,15,0.75)">Same for the forelimbs; collapses as aerial&sup2;. Sign vs hind_split under a turn = rotary vs transverse gallop</div>
+    </div>
+  </div>
+  <p style="font-size:14.5px;line-height:1.6;margin:14px 0;text-wrap:pretty">What decides them &mdash; four measured inputs: <strong>Froude</strong> (v&sup2;/g&middot;hip &mdash; the regime; the only place speed enters), <strong>launch</strong> (sin(tilt) &times; spine_freedom &times; leap capability &mdash; can a girdle throw the body), <strong>caution</strong> (1 at a walk: must be statically supported), and <strong>interference</strong> (would same-side feet collide &mdash; why a camel paces). Phases: RL&nbsp;=&nbsp;0, RR&nbsp;=&nbsp;hind_split, FL&nbsp;=&nbsp;girdle_lag, FR&nbsp;=&nbsp;girdle_lag&nbsp;+&nbsp;fore_split.</p>
+  <table style="width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:10.5px;line-height:1.5">
+    <thead>
+      <tr>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 12px 6px 0;border-bottom:1px solid rgba(20,20,15,0.3);width:34%">CONSTANT</th>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 12px 6px 0;border-bottom:1px solid rgba(20,20,15,0.3);width:16%">VALUE</th>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 0 6px 0;border-bottom:1px solid rgba(20,20,15,0.3)">MEANING</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">FROUDE_WALK / FROUDE_RUN</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.12 / 0.85</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Walk&rarr;run and symmetric&rarr;asymmetric transitions (scaled to these bodies, not Earth)</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">LAUNCH_MIN / LAUNCH_FULL</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.15 / 0.45</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Asymmetric gait available / committed; between = half-bound</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">GALLOP_LAG &middot; SPLIT_FLOOR &middot; LEAD_SPREAD</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.60 &middot; 0.06 &middot; 0.16</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Full-gallop lag; a pair never lands on one tick; turn opens the splits, signed by the lead</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">ROTARY_SPINE / ROTARY_AT</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.85 / 0.70</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Spine freedom + gathering past these &rarr; fore split reverses: rotary gallop (sits between Cat and Cheetah)</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">LIFT tiers &middot; SUSPENSION_AT</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">1 / 2 / 4 &middot; 0.55</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Careful / symmetric / suspended max feet aloft; suspension only past 0.55 aerial</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">BEAT_WINDOW &middot; INTERFERENCE_FREE/FULL</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.12 &middot; 0.20/0.55</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Two limbs closer in phase = one footfall; interference band that commits a pacer</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">BEARING_RATIO</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.46</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">The biped threshold (&sect;03)</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">DUTY_MIN/MAX &middot; DUTY_LOAD &middot; DUTY_PACE/SPRINT</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.35/0.86 &middot; 0.10 &middot; 0.22/0.28</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">duty = feet_down/bearing_limbs + load&times;(1&minus;power), falling with pace</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">SWING_PERIOD &middot; SWING_HURRY &middot; SWING_FLOOR</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">1.6 &middot; 0.60 &middot; 0.045s</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">A leg is a pendulum: swing &prop; &radic;(length/g), driven by muscle^&#8531; &times; twitch &times; gear; hurried at most 60%</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">STRIDE_SINK &middot; STRIDE_SHARE</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.12 &middot; 0.80</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Stride bought by sinking into the stance limb &mdash; spent out of the joint&rsquo;s own fold, so a column buys none</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">PUSH_CEILING</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.55 g</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Traction cap on acceleration &mdash; a foot leans on friction, past &asymp;own weight it slips</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">BUNCH_SHARE &middot; FLEXIBLE_SPINE</td><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">0.16 &middot; 2&pi;</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">A fully free back adds/removes &plusmn;16% of body length per stride when girdles work as pairs</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:14.5px;line-height:1.6;margin:16px 0;text-wrap:pretty"><strong>The one hard law:</strong> a body cannot outrun its own legs. <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">leg_speed = foot travel / hurried cycle</span> is a ceiling on the body; <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">move_speed</span> is what the species <em>asks</em> for and gets the lower of the two. The only authored coordination traits are <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">foot_lead</span> (0.45 &mdash; how far ahead feet aim) and <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">beat_coupling</span> (0.55 &mdash; how tightly partners keep a shared beat), plus rest-stance biases (+0.30 front / &minus;0.25 rear). Lay-low is not a gait: it is a crouch spent out of <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">hind_fold_range</span> at <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">STALK_SPEED 0.40</span> of walk.</p>
+  <table style="width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:10.5px;line-height:1.5;break-inside:avoid">
+    <thead>
+      <tr>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 12px 6px 0;border-bottom:1px solid rgba(20,20,15,0.3);width:34%">READS AS (describe())</th>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 0 6px 0;border-bottom:1px solid rgba(20,20,15,0.3)">WHEN</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">hop / two-legged stride</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">forelimbs don&rsquo;t bear; hind_split &lt; 0.2 / otherwise</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">pronk / bound</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">both splits &lt; 0.2; lag near 0 / otherwise</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">rotary / transverse gallop</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">aerial &gt; 0.25; splits on opposite sides of 0.5 / same side</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">pace / trot / lateral-sequence walk</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">lag &lt; 0.12 (or &gt; 0.88) / lag &gt; 0.38 / otherwise</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ====================================================== 05 SIX BUILDS -->
+  <sc-if value="{{ buildSheets }}" hint-placeholder-val="{{ true }}">
+  <div style="break-before:page">
+    <div style="display:flex;align-items:baseline;gap:14px;margin:44px 0 4px 0;border-bottom:1px solid #14140F;padding:0 0 8px 0">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8E1B12">05</div>
+      <h2 style="font-size:19px;font-weight:500;letter-spacing:0.1em;text-transform:uppercase;margin:0">The Six Template Builds</h2>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.12em;color:rgba(20,20,15,0.42);margin-left:auto">CreatureParams.PRESETS &middot; gait readouts per GAIT HUD</div>
+    </div>
+    <p style="font-size:14.5px;line-height:1.6;margin:14px 0;text-wrap:pretty">Each preset is bones, weights and angles only &mdash; the gait column is what the system derives from them, quoted per gait as the Gait HUD shows it. Paired values read <strong>fore / hind</strong>. Knots read head &middot; neck &middot; chest &middot; waist &middot; hip &middot; tail-base &middot; tip (&mdash; = 0, smooth).</p>
+  </div>
+  </sc-if>
+</div>
+<sc-if value="{{ buildSheets }}" hint-placeholder-val="{{ true }}">
+<div style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:#14140F;-webkit-font-smoothing:antialiased">
+  <sc-for list="{{ builds }}" as="b" hint-placeholder-count="6">
+    <div style="break-inside:avoid;border:1px solid rgba(20,20,15,0.3);padding:16px 20px 14px 20px;margin:0 0 16px 0">
+      <div style="display:flex;align-items:baseline;gap:12px;border-bottom:1px solid rgba(20,20,15,0.2);padding:0 0 10px 0;margin:0 0 12px 0">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#8E1B12">{{ b.tag }}</div>
+        <div style="font-size:15px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase">{{ b.name }}</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.1em;color:rgba(20,20,15,0.5);margin-left:auto">{{ b.stance }}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 22px;font-family:'IBM Plex Mono',monospace;font-size:10px;line-height:1.9;letter-spacing:0.03em">
+        <div>
+          <div style="font-size:8.5px;letter-spacing:0.2em;color:#8E1B12;margin:0 0 3px 0">BODY</div>
+          <div><span style="opacity:0.5">SPINE&nbsp;</span>{{ b.spine }}</div>
+          <div><span style="opacity:0.5">WAVE&nbsp;</span>{{ b.wave }}</div>
+          <div><span style="opacity:0.5">KNOTS&nbsp;</span>{{ b.knots }}</div>
+          <div><span style="opacity:0.5">TAIL&nbsp;</span>{{ b.tail }}</div>
+          <div><span style="opacity:0.5">GIRDLES&nbsp;</span>{{ b.girdles }}</div>
+        </div>
+        <div>
+          <div style="font-size:8.5px;letter-spacing:0.2em;color:#8E1B12;margin:0 0 3px 0">LIMBS &middot; F / H</div>
+          <div><span style="opacity:0.5">LENGTH&nbsp;</span>{{ b.limbs }}</div>
+          <div><span style="opacity:0.5">FLEX&nbsp;</span>{{ b.flex }}&nbsp;&nbsp;<span style="opacity:0.5">FOLD&nbsp;</span>{{ b.fold }}</div>
+          <div><span style="opacity:0.5">UPPER&nbsp;</span>{{ b.upper }}&nbsp;&nbsp;<span style="opacity:0.5">SWING&nbsp;</span>{{ b.swing }}</div>
+          <div><span style="opacity:0.5">TOE&nbsp;</span>{{ b.toe }}&nbsp;&nbsp;<span style="opacity:0.5">INSERT&nbsp;</span>{{ b.insert }}</div>
+          <div><span style="opacity:0.5">SPRING&nbsp;</span>{{ b.spring }}</div>
+        </div>
+        <div>
+          <div style="font-size:8.5px;letter-spacing:0.2em;color:#8E1B12;margin:0 0 3px 0">PHYSIQUE &middot; DRIVE</div>
+          <div><span style="opacity:0.5">DENSITY&nbsp;</span>{{ b.density }}&nbsp;&nbsp;<span style="opacity:0.5">MUSCLE&nbsp;</span>{{ b.muscle }}</div>
+          <div><span style="opacity:0.5">HEART&nbsp;</span>{{ b.heart }}&nbsp;&nbsp;<span style="opacity:0.5">FAT&nbsp;</span>{{ b.fat }}</div>
+          <div><span style="opacity:0.5">MOVE&nbsp;</span>{{ b.move }}&nbsp;&nbsp;<span style="opacity:0.5">ACCEL&nbsp;</span>{{ b.accel }}</div>
+          <div><span style="opacity:0.5">SPRINT&nbsp;</span>{{ b.sprint }}&nbsp;&nbsp;<span style="opacity:0.5">NECK&nbsp;</span>{{ b.neck }}</div>
+          <div><span style="opacity:0.5">CARRY&nbsp;</span>{{ b.carry }}</div>
+        </div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:9.5px;line-height:1.5;margin:12px 0 0 0">
+        <thead>
+          <tr>
+            <th style="text-align:left;font-size:8px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:6px 8px 4px 0;border-bottom:1px solid rgba(20,20,15,0.25)">GAIT</th>
+            <th style="text-align:left;font-size:8px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:6px 8px 4px 0;border-bottom:1px solid rgba(20,20,15,0.25)">PATTERN</th>
+            <th style="text-align:left;font-size:8px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:6px 8px 4px 0;border-bottom:1px solid rgba(20,20,15,0.25)">FROUDE</th>
+            <th style="text-align:left;font-size:8px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:6px 8px 4px 0;border-bottom:1px solid rgba(20,20,15,0.25)">LAG</th>
+            <th style="text-align:left;font-size:8px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:6px 8px 4px 0;border-bottom:1px solid rgba(20,20,15,0.25)">SPLIT H&middot;F</th>
+            <th style="text-align:left;font-size:8px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:6px 8px 4px 0;border-bottom:1px solid rgba(20,20,15,0.25)">DUTY</th>
+            <th style="text-align:left;font-size:8px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:6px 8px 4px 0;border-bottom:1px solid rgba(20,20,15,0.25)">LIFT</th>
+            <th style="text-align:left;font-size:8px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:6px 8px 4px 0;border-bottom:1px solid rgba(20,20,15,0.25)">CYCLE</th>
+            <th style="text-align:left;font-size:8px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:6px 0 4px 0;border-bottom:1px solid rgba(20,20,15,0.25)">SEQUENCE</th>
+          </tr>
+        </thead>
+        <tbody>
+          <sc-for list="{{ b.gaits }}" as="g" hint-placeholder-count="4">
+            <tr>
+              <td style="padding:4px 8px 4px 0;border-bottom:1px solid rgba(20,20,15,0.08);color:#8E1B12">{{ g.key }}</td>
+              <td style="padding:4px 8px 4px 0;border-bottom:1px solid rgba(20,20,15,0.08)">{{ g.pattern }}</td>
+              <td style="padding:4px 8px 4px 0;border-bottom:1px solid rgba(20,20,15,0.08)">{{ g.froude }}</td>
+              <td style="padding:4px 8px 4px 0;border-bottom:1px solid rgba(20,20,15,0.08)">{{ g.lag }}</td>
+              <td style="padding:4px 8px 4px 0;border-bottom:1px solid rgba(20,20,15,0.08)">{{ g.split }}</td>
+              <td style="padding:4px 8px 4px 0;border-bottom:1px solid rgba(20,20,15,0.08)">{{ g.duty }}</td>
+              <td style="padding:4px 8px 4px 0;border-bottom:1px solid rgba(20,20,15,0.08)">{{ g.lift }}</td>
+              <td style="padding:4px 8px 4px 0;border-bottom:1px solid rgba(20,20,15,0.08)">{{ g.cycle }}</td>
+              <td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.08)">{{ g.seq }}</td>
+            </tr>
+          </sc-for>
+        </tbody>
+      </table>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.06em;line-height:1.7;color:rgba(20,20,15,0.5);margin:10px 0 0 0;text-transform:uppercase;text-wrap:pretty">{{ b.note }}</div>
+    </div>
+  </sc-for>
+</div>
+</sc-if>
+<div style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:#14140F;-webkit-font-smoothing:antialiased">
+
+  <!-- =================================================== 06 IMPLEMENTATION -->
+  <div style="display:flex;align-items:baseline;gap:14px;margin:44px 0 4px 0;border-bottom:1px solid #14140F;padding:0 0 8px 0;break-after:avoid">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8E1B12">06</div>
+    <h2 style="font-size:19px;font-weight:500;letter-spacing:0.1em;text-transform:uppercase;margin:0">Implementation Notes</h2>
+  </div>
+  <ol style="font-size:14px;line-height:1.7;margin:14px 0;padding:0 0 0 22px">
+    <li style="margin:0 0 8px 0;text-wrap:pretty"><strong>Build in derivation order:</strong> params schema &rarr; posture table lookup &rarr; lattice from silhouette + girdle t&rsquo;s &rarr; physique (mass off the drawn volume) &rarr; locomotion (duty, swing, stride, leg_speed ceiling) &rarr; footfall (the three numbers, per tick) &rarr; animation reads phases.</li>
+    <li style="margin:0 0 8px 0;text-wrap:pretty"><strong>Refresh order matters:</strong> Locomotion refreshes once per tick from the <em>previous</em> tick&rsquo;s physique (deliberate one-tick lag); Footfall.update runs after the body is solved, taking hip height, speed, reach, girdle gap, lead and spring.</li>
+    <li style="margin:0 0 8px 0;text-wrap:pretty"><strong>Nothing selects an outcome.</strong> If an implementation needs a &ldquo;gait state&rdquo; enum, an &ldquo;is bipedal&rdquo; flag, or a per-species stride/step/leap number, it has diverged from this spec &mdash; those were all removed from the source for causing exactly the bugs their comments describe.</li>
+    <li style="margin:0 0 8px 0;text-wrap:pretty"><strong>Footfall is a scorer, not a driver:</strong> a foot must already be due (drifted past its stride) before the pattern picks which of the due feet goes first (off_beat). Two limbs within 0.12 of a cycle are one beat; two closer than swing_share may be aloft together.</li>
+    <li style="margin:0 0 8px 0;text-wrap:pretty"><strong>Kangaroo slow walk &mdash; design recommendation:</strong> the HUD draws it pentapedal (tail + arms as the fifth limb); the sim currently does a plain alternating stride. Flagged for implementation, not yet in source.</li>
+  </ol>
+  <table style="width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:10.5px;line-height:1.5;break-inside:avoid">
+    <thead>
+      <tr>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 12px 6px 0;border-bottom:1px solid rgba(20,20,15,0.3);width:40%">SOURCE FILE</th>
+        <th style="text-align:left;font-size:9px;letter-spacing:0.16em;font-weight:500;color:rgba(20,20,15,0.45);padding:8px 0 6px 0;border-bottom:1px solid rgba(20,20,15,0.3)">OWNS</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">scripts/creature/CreatureParams.gd</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Every authored number + SCHEMA (drives the creation menu) + PRESETS</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">scripts/creature/BodyPlan.gd</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">Lattice dims, skeleton layout, regions, organs, nerve/vessel trees, muscle groups, fat</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">scripts/creature/Posture.gd</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">The stance table + plan_reach / clearance / track projections</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">scripts/creature/Locomotion.gd</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">power, duty, swing, stride, excursion, leg_speed, BEARING_RATIO, bunch</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">scripts/creature/Footfall.gd</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">girdle_lag &middot; hind_split &middot; fore_split, lift limits, beats, describe()</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">scripts/creature/Creature.gd</td><td style="padding:4px 0;border-bottom:1px solid rgba(20,20,15,0.1)">STALK_SPEED 0.40 + the crouch that lay-low spends</td></tr>
+    </tbody>
+  </table>
+  <div style="display:flex;align-items:center;gap:11px;margin:36px 0 0 0;padding:14px 0 0 0;border-top:1px solid rgba(20,20,15,0.2)">
+    <div style="width:5px;height:5px;border-radius:50%;background:#8E1B12"></div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.16em;color:rgba(20,20,15,0.42)">EVOLUTION &middot; TEMPLATE BODY PLAN &middot; HANDOFF 0.1 &middot; SOURCE dannyckc/Lizard @ main</div>
+  </div>
+</div>
+</doc-page>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;buildSheets&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Content&quot;},&quot;diagrams&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Content&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const HEAD = 8, TORSO = 20, COLS = 32, ROWS = 7, shoulder = 3, pelvis = 9;
+    const bone = (col, row) => {
+      const v = Math.abs((row - 3) / 3);
+      if (col < HEAD) return v <= 0.72;
+      if (row === 3) return true;
+      const t = col - HEAD;
+      if (t >= TORSO) return false;
+      if (t === shoulder || t === pelvis) return v <= 0.95;
+      return t > shoulder + 1 && t < pelvis - 1 && t % 2 === 1 && v <= 0.78;
+    };
+    const organ = (col, row) => (col >= 6 && col < 8 && row >= 2 && row < 5) || (col === HEAD + 5 && row >= 2 && row < 5);
+    const latticeCells = [];
+    for (let row = 0; row < ROWS; row++) for (let col = 0; col < COLS; col++)
+      latticeCells.push({ bg: organ(col, row) ? '#8E1B12' : bone(col, row) ? '#14140F' : 'rgba(20,20,15,0.10)' });
+    const limbCells = [];
+    for (let row = 0; row < 3; row++) for (let col = 0; col < 10; col++)
+      limbCells.push({ bg: row === 1 && col < 6 ? '#14140F' : col >= 6 ? 'rgba(20,20,15,0.22)' : 'rgba(20,20,15,0.10)' });
+
+    const G = (key, pattern, froude, lag, split, duty, lift, cycle, seq) => ({ key, pattern, froude, lag, split, duty, lift, cycle, seq });
+    const builds = [
+      { tag: '01', name: 'Lizard', stance: 'SPRAWLED \u00b7 TILT 12\u00b0 \u00b7 JOINT 102\u00b0',
+        spine: '14 \u00d7 15 PX \u00b7 BEND 22\u00b0', wave: '6.0 / 0.8 / 1.6',
+        knots: '13 \u00b7 \u2014 \u00b7 15 \u00b7 10.5 \u00b7 12.5 \u00b7 \u2014 \u00b7 1.5', tail: 'LEN 1.00',
+        girdles: 'T 0.16 / 0.46', limbs: '34 / 40 \u00b7 STANCE 1.00',
+        flex: '0\u00b0/0\u00b0', fold: '1.00/1.00', upper: '.52/.52', swing: '62/62\u00b0',
+        toe: '0.15', insert: '.30/.30', spring: '.15 / .20',
+        density: '1.00', muscle: '1.00', heart: '1.00', fat: '1.0',
+        move: '90', accel: '.12G', sprint: '1.55\u00d7', neck: '0', carry: 'HEAD IN BODY PLANE',
+        note: 'The reference build \u2014 every other number in the file is quoted against it. Sprawl rows sideways: sin(12\u00b0) starves launch, so flat out is a trot and the asymmetric regime never opens. The spine wave (wave_gain 1.0) does part of the stride.',
+        gaits: [
+          G('IDLE', 'STANDING', '0.00', '\u2014', '\u2014', '\u2014', 'ALL DOWN', '\u2014', '\u2014'),
+          G('WALK', 'LATERAL-SEQ WALK', '0.06', '0.25', '0.50 \u00b7 0.50', '0.68', '2 FEET', '0.85 S', 'RL \u00b7 FL \u00b7 RR \u00b7 FR'),
+          G('RUN', 'TROT', '0.38', '0.50', '0.50 \u00b7 0.50', '0.45', '2 FEET', '0.45 S', 'RL+FR / RR+FL'),
+          G('LOW', 'STALK CREEP', '0.01', '0.25', '0.50 \u00b7 0.50', '0.82', '1 FOOT', '1.30 S', 'RL \u00b7 FL \u00b7 RR \u00b7 FR') ] },
+      { tag: '02', name: 'Cat', stance: 'SEMI-UPRIGHT \u00b7 TILT 50\u00b0 \u00b7 JOINT 132\u00b0',
+        spine: '12 \u00d7 14 PX \u00b7 BEND 26\u00b0', wave: '5.0 / 0.9 / 2.0',
+        knots: '11 \u00b7 8 \u00b7 15 \u00b7 12 \u00b7 15 \u00b7 5 \u00b7 2.2', tail: 'LEN 1.00 \u00b7 ROPE OFF A RUMP',
+        girdles: 'T 0.17 / 0.50', limbs: '40 / 46 \u00b7 STANCE 0.85',
+        flex: '\u221218\u00b0/+18\u00b0', fold: '.95/1.20', upper: '.50/.45', swing: '56/74\u00b0',
+        toe: '0.45', insert: '.30/.28', spring: '.35 / .55',
+        density: '0.68', muscle: '1.56', heart: '0.95', fat: '0.8',
+        move: '85', accel: '.08G', sprint: '1.80\u00d7', neck: '0.10', carry: 'HEAD CLEAR OF SHOULDER',
+        note: 'Fore strut (\u221218\u00b0) under hind engine (+18\u00b0, fold 1.20): two legs doing opposite jobs arriving at one level back. Digitigrade \u2014 toe_push 0.45. Ambush physique: half again the muscle for its weight behind a slightly small heart.',
+        gaits: [
+          G('IDLE', 'STANDING', '0.00', '\u2014', '\u2014', '\u2014', 'ALL DOWN', '\u2014', '\u2014'),
+          G('WALK', 'LATERAL-SEQ WALK', '0.07', '0.25', '0.50 \u00b7 0.50', '0.64', '2 FEET', '0.75 S', 'RL \u00b7 FL \u00b7 RR \u00b7 FR'),
+          G('RUN', 'TRANSVERSE GALLOP', '0.92', '0.60', '0.10 \u00b7 0.10', '0.28', '4 \u2014 SUSP.', '0.42 S', 'RL RR \u2014 FL FR'),
+          G('LOW', 'THE STALK', '0.01', '0.25', '0.50 \u00b7 0.50', '0.84', '1 FOOT', '1.50 S', 'RL \u00b7 FL \u00b7 RR \u00b7 FR') ] },
+      { tag: '03', name: 'Elephant', stance: 'COLUMNAR \u00b7 TILT 72\u00b0 \u00b7 JOINT 170\u00b0',
+        spine: '16 \u00d7 19 PX \u00b7 BEND 10\u00b0', wave: '3.0 / 0.8 / 1.6',
+        knots: '24 \u00b7 \u2014 \u00b7 34 \u00b7 29 \u00b7 31 \u00b7 3 \u00b7 2.0', tail: 'LEN 0.55 \u2014 RUMP + STUMP',
+        girdles: 'T 0.14 / 0.54', limbs: '92 / 88 \u00b7 STANCE 0.75',
+        flex: '\u22123\u00b0/+4\u00b0', fold: '.45/.50', upper: '.58/.56', swing: '46/50\u00b0',
+        toe: '0.60', insert: '.36/.36', spring: '.30 / .30',
+        density: '1.66', muscle: '1.31', heart: '1.20', fat: '1.6',
+        move: '65', accel: '.14G', sprint: '1.30\u00d7', neck: '0.14', carry: 'SHOULDERS AT SKULL',
+        note: 'Joints at 170\u00b0 that barely fold (0.45/0.50): no crouch, no gather, no sink \u2014 stride is limb swing plus toe_push 0.60. Its top speed never crosses FROUDE_WALK, so the run is an amble and nothing had to forbid a gallop. Graviportal upper shares carry the weight high.',
+        gaits: [
+          G('IDLE', 'STANDING', '0.00', '\u2014', '\u2014', '\u2014', 'ALL DOWN', '\u2014', '\u2014'),
+          G('WALK', 'LATERAL-SEQ WALK', '0.04', '0.25', '0.50 \u00b7 0.50', '0.78', '1 FOOT', '2.00 S', 'RL \u00b7 FL \u00b7 RR \u00b7 FR'),
+          G('RUN', 'AMBLE', '0.11', '0.33', '0.50 \u00b7 0.50', '0.68', '1 FOOT', '1.35 S', 'RL \u00b7 FL \u00b7 RR \u00b7 FR'),
+          G('LOW', 'HEAD-LOW WALK', '0.00', '0.25', '0.50 \u00b7 0.50', '0.85', '1 FOOT', '2.40 S', 'RL \u00b7 FL \u00b7 RR \u00b7 FR') ] },
+      { tag: '04', name: 'Cheetah', stance: 'ERECT \u00b7 TILT 66\u00b0 \u00b7 JOINT 150\u00b0',
+        spine: '15 \u00d7 15 PX \u00b7 BEND 34\u00b0', wave: '4.0 / 0.9 / 2.2',
+        knots: '9 \u00b7 6.5 \u00b7 14 \u00b7 9 \u00b7 13 \u00b7 3 \u00b7 1.4', tail: 'LEN 1.00 \u2014 ROPE RUDDER',
+        girdles: 'T 0.15 / 0.48', limbs: '52 / 58 \u00b7 STANCE 0.70',
+        flex: '\u22128\u00b0/+28\u00b0', fold: '1.05/1.45', upper: '.50/.44', swing: '62/84\u00b0',
+        toe: '0.70', insert: '.28/.25', spring: '.40 / .65',
+        density: '0.57', muscle: '1.89', heart: '0.70', fat: '0.4',
+        move: '130', accel: '.09G', sprint: '2.00\u00d7', neck: '0.08', carry: 'GREYHOUND OUTLINE',
+        note: 'spine_freedom clears ROTARY_SPINE 0.85: past 0.70 gathering the fore split reverses \u2014 rotary gallop, double suspension, the back adding \u00b116% of body length per stride. Highest-geared limbs in the file (inserts .28/.25). Smallest heart behind the most muscle: it stops first.',
+        gaits: [
+          G('IDLE', 'STANDING', '0.00', '\u2014', '\u2014', '\u2014', 'ALL DOWN', '\u2014', '\u2014'),
+          G('WALK', 'LATERAL-SEQ WALK', '0.07', '0.25', '0.50 \u00b7 0.50', '0.60', '2 FEET', '0.80 S', 'RL \u00b7 FL \u00b7 RR \u00b7 FR'),
+          G('RUN', 'ROTARY GALLOP', '1.35', '0.66', '0.12 \u00b7 0.12 R', '0.24', '4 \u2014 SUSP.', '0.38 S', 'RL RR \u2014 FR FL'),
+          G('LOW', 'THE STALK', '0.01', '0.25', '0.50 \u00b7 0.50', '0.84', '1 FOOT', '1.60 S', 'RL \u00b7 FL \u00b7 RR \u00b7 FR') ] },
+      { tag: '05', name: 'T. rex', stance: 'ERECT \u00b7 BIPED BY MEASUREMENT',
+        spine: '15 \u00d7 18 PX \u00b7 BEND 12\u00b0', wave: '2.5 / 0.7 / 1.4',
+        knots: '17 \u00b7 12 \u00b7 19 \u00b7 15 \u00b7 20 \u00b7 \u2014 \u00b7 1.5', tail: 'LEN 1.00 \u2014 LEGACY TAPER, REAL MASS',
+        girdles: 'T 0.20 / 0.42', limbs: '16 / 86 \u00b7 STANCE 0.72',
+        flex: '+50\u00b0/+12\u00b0', fold: '1.00/.80', upper: '.52/.48', swing: '50/70\u00b0',
+        toe: '0.60', insert: '.30/.32', spring: '.18 / .22',
+        density: '1.01', muscle: '1.46', heart: '1.05', fat: '0.9',
+        move: '205', accel: '.18G', sprint: '1.35\u00d7', neck: '0.16', carry: 'TRUNK LIFT 13\u00b0',
+        note: 'ARM 16 < LEG 86 \u00d7 0.46 \u2014 bipedal with no flag anywhere. Hips at 0.42 put two fifths of the animal behind them: the tail genuinely counterweighs, which is what affords the near-level trunk (13\u00b0). Arms articulate (+50\u00b0 flex) and are academically folded against the chest.',
+        gaits: [
+          G('IDLE', 'STANDING', '0.00', '\u2014', '\u2014', '\u2014', 'ALL DOWN', '\u2014', '\u2014'),
+          G('WALK', 'TWO-LEGGED STRIDE', '0.10', '\u2014', '0.50', '0.62', '1 FOOT', '1.50 S', 'L \u00b7 R'),
+          G('RUN', 'GROUNDED RUN', '0.55', '\u2014', '0.50', '0.50', '1 FOOT', '0.85 S', 'L \u00b7 R'),
+          G('LOW', 'LOWERED STRIDE', '0.01', '\u2014', '0.50', '0.78', '1 FOOT', '2.00 S', 'L \u00b7 R') ] },
+      { tag: '06', name: 'Kangaroo', stance: 'ERECT \u00b7 BIPED \u00b7 HIND SPRING 0.95',
+        spine: '12 \u00d7 16 PX \u00b7 BEND 20\u00b0', wave: '2.0 / 0.8 / 1.6',
+        knots: '7 \u00b7 5 \u00b7 13 \u00b7 11 \u00b7 16 \u00b7 12.5 \u00b7 3.5', tail: 'LEN 1.00 \u2014 STOUT ROOT, TRIPOD LEG',
+        girdles: 'T 0.20 / 0.42', limbs: '22 / 62 \u00b7 STANCE 0.50',
+        flex: '+46\u00b0/+30\u00b0', fold: '1.00/1.50', upper: '.52/.42', swing: '50/78\u00b0',
+        toe: '0.85', insert: '.30/.26', spring: '.25 / .95',
+        density: '0.64', muscle: '2.09', heart: '0.95', fat: '0.8',
+        move: '170', accel: '.09G', sprint: '2.35\u00d7', neck: '0.12', carry: 'TRUNK LIFT 50\u00b0',
+        note: 'The deepest crouch (fold 1.50) and the longest foot (toe 0.85) in the file, with a hind limb that is mostly rope below the knee (spring 0.95): the hop is the cheetah\u2019s split collapse on two legs. Slow walk drawn pentapedal in the HUD \u2014 recommendation; sim currently alternates.',
+        gaits: [
+          G('IDLE', 'TRIPOD REST', '0.00', '\u2014', '\u2014', '\u2014', 'ALL DOWN', '\u2014', 'TAIL BEARS'),
+          G('WALK', 'PENTAPEDAL STRIDE', '0.06', '\u2014', '0.50', '0.62', '1 FOOT', '1.00 S', 'L \u00b7 R (+TAIL/ARMS)'),
+          G('RUN', 'HOP', '1.05', '\u2014', '0.06', '0.30', '2 \u2014 SUSP.', '0.55 S', 'L+R'),
+          G('LOW', 'Z-FOLD CREEP', '0.01', '\u2014', '0.50', '0.80', '1 FOOT', '1.60 S', 'L \u00b7 R (+TAIL)') ] },
+    ];
+
+    return {
+      latticeCells, limbCells, builds,
+      diagrams: this.props.diagrams ?? true,
+      buildSheets: this.props.buildSheets ?? true,
+    };
+  }
+}
+</script>
+</body>
+</html>
