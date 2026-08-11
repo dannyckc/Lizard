@@ -477,7 +477,8 @@ func update(delta: float, body: BodyShape, move_dir: Vector2, speed_norm: float,
 		# happen — see Locomotion.stance_limit. The two are spent out of one disc,
 		# and a stance that uses the whole of it is an animal with no stride and
 		# feet that are dragged by its own wave.
-		limb.set_stance(a, p, minf(
+		limb.set_stance(a,
+			loco.foot_bias.x if limb.pair == Limb.FRONT else loco.foot_bias.y, minf(
 			posture.plan_reach(bone * limb.working) * limb.reach,
 			loco.stance_limit(limb.plan_limit, limb.sway) / maxf(lean, 0.0001)), lean)
 		limb.inboard_limit = body.socket_out.get(limb.key, 0.0) * posture.adduction()
@@ -1059,8 +1060,13 @@ func _carry_body(delta: float, wants: Vector2, p: CreatureParams) -> void:
 	# heavier tail, on the same hips and the same line below. Everything else
 	# about the body — the height bands, the bite reach, the drawn attitude —
 	# follows without a single line knowing the creature is bipedal.
+	# ...and the angle is the species' own or the one its own weight demands,
+	# whichever is steeper — see Locomotion.carried_deg. A build whose mass hangs
+	# out in front of its hips has to rear until the overhang is something its
+	# feet can be placed under, and being told to stand level is being told to
+	# fall forward slowly.
 	var front: float = _pair_support(Limb.FRONT, wants.x) if loco.forelimbs_bear \
-		else rear + sin(deg_to_rad(p.trunk_lift_deg)) \
+		else rear + sin(deg_to_rad(loco.carried_deg(p))) \
 			* maxf(_span(Limb.FRONT, Limb.REAR), 0.0)
 	# Weight takes a moment to settle onto a leg, but a body that has just been
 	# built is not settling onto anything — it is already standing there. Easing
@@ -1672,7 +1678,7 @@ func _steady_stance(limb: Limb, p: CreatureParams, lean: float) -> float:
 		loco.stance_limit(limb.plan_limit, 0.0) / maxf(lean, 0.0001))
 	var lat: float = wide * lean
 	var fore: float = sqrt(maxf(wide * wide - lat * lat, 0.0)) \
-		* (p.front_foot_bias if limb.pair == Limb.FRONT else p.rear_foot_bias)
+		* (loco.foot_bias.x if limb.pair == Limb.FRONT else loco.foot_bias.y)
 	return lat * lat + fore * fore
 
 
@@ -1703,7 +1709,7 @@ func _rest_clearance(bone: float, extension: float, p: CreatureParams,
 	var stance: float = posture.plan_reach(reach)
 	var lat: float = stance * cos(posture.tilt) * p.stance_width
 	var fore: float = sqrt(maxf(stance * stance - lat * lat, 0.0)) \
-		* (p.front_foot_bias if pair == Limb.FRONT else p.rear_foot_bias)
+		* (loco.foot_bias.x if pair == Limb.FRONT else loco.foot_bias.y)
 	var out: float = sqrt(minf(lat * lat + fore * fore, reach * reach))
 	return sqrt(maxf(reach * reach - out * out, 0.0))
 

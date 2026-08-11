@@ -326,14 +326,46 @@ var absorbed: float = 0.75
 ## walking, so the two consumers cannot disagree about it.
 var spine_freedom: float = 1.0
 
+## Where this body's resting feet are actually placed, fore and aft of their own
+## sockets: x the fore pair, y the hind, in the same units `front_foot_bias` and
+## `rear_foot_bias` are quoted in.
+##
+## The species' own numbers, corrected by the one thing they are not allowed to
+## disagree with. Where a creature chooses to stand is a trait — a little forward
+## at the shoulder, a little back at the hip, which is what puts a quadruped's
+## feet at the four corners of its own weight — but a build whose every foot ends
+## up on one side of its centre of gravity is not standing in an unusual way, it
+## is falling over slowly. So the bias is kept wherever the weight is already
+## bracketed, which is every preset in the file, and pushed out to meet the weight
+## where it is not. See Plumb.bias_shift, which is the whole of the correction.
+var foot_bias: Vector2 = Vector2(0.3, -0.25)
+
+## The least angle a two-legged build has to carry its trunk at to be standing
+## rather than toppling, in degrees — see Plumb.carriage_deg.
+##
+## A floor under `trunk_lift_deg` and never a replacement for it. An animal is
+## free to stand more upright than its balance requires, and a kangaroo does; it
+## is not free to stand with its whole mass hanging off the front of its hips and
+## call the result a posture. Zero on every quadruped, which has a second girdle
+## and no question to answer.
+var carriage_deg: float = 0.0
+
 
 ## Re-derives everything from the body that has just been solved.
 ##
 ## `physique` carries the mass and the muscle, and it already has this creature's
 ## damage folded into both — a limb that is present and not answering contributes
 ## its weight and none of its pull — so nothing here has to ask about injuries.
+##
+## `plumb` carries where that weight is, and it is read for exactly two things —
+## where the resting feet go and how a two-legged trunk is carried. Both are
+## constraints rather than derivations: a build that already balances is left
+## alone in every particular, and one that does not is moved the least distance
+## that makes it stand. Left null (a bare locomotion in a test) the species' own
+## numbers answer, which is what this file did before there was a centre of
+## gravity to check them against.
 func update(posture: Posture, physique: Physique, p: CreatureParams, scale: float,
-		joints: Articulation = null) -> void:
+		joints: Articulation = null, plumb: Plumb = null) -> void:
 	if posture == null or physique == null or p == null:
 		return
 	power = clampf(physique.strength / maxf(physique.mass, 0.0001), 0.05, 8.0)
@@ -360,6 +392,12 @@ func update(posture: Posture, physique: Physique, p: CreatureParams, scale: floa
 	forelimbs_bear = bears_on_forelimbs(p)
 	bearing_limbs = 4 if forelimbs_bear else 2
 
+	# Where the feet go, and how a trunk with nothing under its shoulders is
+	# carried. Both are the species' own numbers held to one thing they may not
+	# contradict — that the animal's weight ends up over its feet — and both are
+	# settled here, before the stride, the duty and the tail prop that read them.
+	_stand_under_the_weight(posture, p, scale, plumb)
+
 	# Whether the tail is a limb this body can stand on. Three measurements
 	# multiplied, and each is a fact the sheet already states somewhere else:
 	#
@@ -381,7 +419,11 @@ func update(posture: Posture, physique: Physique, p: CreatureParams, scale: floa
 		var hip_stand: float = p.leg_length * articulation.hind.stand * sin(posture.tilt)
 		var flesh: float = p.segment_length * float(p.segment_count - 1) \
 			* (1.0 - p.rear_limb_t) * p.tail_length
-		var drop: float = flesh * sin(deg_to_rad(p.trunk_lift_deg))
+		# The angle the trunk is *actually* carried at, which is the species' own
+		# unless its balance demands steeper — see `carried_deg`. A build that has
+		# to rear to stand up drops its tail further, and the prop it gets from
+		# doing so is the same measurement it always was.
+		var drop: float = flesh * sin(deg_to_rad(carried_deg(p)))
 		tail_prop = smoothstep(PROP_REACH_MIN, PROP_REACH_FULL,
 				drop / maxf(hip_stand, 1.0)) \
 			* smoothstep(PROP_GIRTH_MIN, PROP_GIRTH_FULL,
@@ -450,6 +492,91 @@ func update(posture: Posture, physique: Physique, p: CreatureParams, scale: floa
 	# without either of them carrying a flexibility number.
 	spine_freedom = clampf(deg_to_rad(p.max_bend_deg) * float(p.segment_count - 1)
 		/ FLEXIBLE_SPINE, 0.0, 1.0)
+
+
+## Puts the feet under the weight, and rears the trunk far enough that there is
+## weight to put them under.
+##
+## Two constraints, one argument. An animal is held up at the places its feet
+## touch the ground, and its weight comes down at one place — see Plumb, which
+## measures where off the same cells the scales weigh. If the second is not
+## between the first, nothing about the creature is standing: it is a body that
+## has been *positioned* on its legs, and every consequence downstream — the
+## height, the drawn attitude, the bands, the stride — is being read off a pose
+## that could not happen.
+##
+## Both are floors and neither is a derivation, which is the difference between
+## constraining a build and retuning one. A species that already balances keeps
+## every number it was given, to the digit; a species that does not is moved the
+## least distance that lets it stand, and no further. That is what makes this
+## safe to apply to a body somebody is dragging sliders on: the creation menu can
+## produce an animal that is all head, and what comes out is a creature reaching
+## its forefeet out under its own jaw rather than one nosing into the floor.
+##
+## Nothing here mentions a species, a gait or a number of legs. The forelimb pair
+## is asked to keep the weight behind it and the hind pair to keep it in front,
+## and on a two-legged build there is no forelimb pair to ask — so the hips take
+## the whole question and answer it the only way one girdle can, by rearing.
+func _stand_under_the_weight(posture: Posture, p: CreatureParams, scale: float,
+		plumb: Plumb) -> void:
+	foot_bias = Vector2(p.front_foot_bias, p.rear_foot_bias)
+	carriage_deg = 0.0
+	if plumb == null:
+		return
+	# The animal's own long axis, exactly as the lattice measures it — the span
+	# the girdle stations and the centre of gravity are both fractions of.
+	var length: float = p.segment_length * float(maxi(p.segment_count, 2) - 1) \
+		* scale * BodyPlan.clip_t(p)
+	if length <= 0.001:
+		return
+
+	# The hind pair first, because on a biped it is the only pair there is. What
+	# it may reach is the plan-view radius of its own leg at the angle this stance
+	# holds it: a foot can be set down anywhere inside that disc and nowhere
+	# outside it, which is the anatomical limit rather than a chosen one.
+	var hind_reach: float = _fore_aft_reach(posture, p, scale, Limb.REAR)
+	if not forelimbs_bear:
+		# One girdle, one beam, and everything on both sides of it hanging off the
+		# hip. Two things follow and they are the same statement twice: the feet go
+		# under the weight, and where the feet cannot reach, the trunk rears until
+		# the weight comes back to them. Rearing is the only thing a body in that
+		# arrangement can do about where its mass is — see Plumb.carriage_deg —
+		# and the angle is settled first because the stance is measured through it.
+		carriage_deg = plumb.carriage_deg(p.rear_limb_t, length, hind_reach)
+		foot_bias.y = plumb.stand_under(p.rear_limb_t, length, hind_reach,
+			deg_to_rad(carried_deg(p)))
+		return
+	foot_bias.x = maxf(p.front_foot_bias, plumb.bias_floor(p.front_limb_t, length,
+		_fore_aft_reach(posture, p, scale, Limb.FRONT), true))
+	foot_bias.y = minf(p.rear_foot_bias,
+		-plumb.bias_floor(p.rear_limb_t, length, hind_reach, false))
+	foot_bias = foot_bias.clampf(-1.0, 1.0)
+
+
+## The fore-and-aft radius one pair's resting foot is placed out of.
+##
+## The same split the stance itself makes — see Limb.set_stance — asked of the
+## parameters rather than of a solved limb, because what reads it is a constraint
+## on the stance and cannot wait for the stance to exist. Out to the side goes as
+## much of the plan reach as the swing plane has not rotated away; what is left
+## over is the fore-and-aft, and it is what the bias is a fraction of.
+func _fore_aft_reach(posture: Posture, p: CreatureParams, scale: float,
+		pair: int) -> float:
+	var bone: float = (p.arm_length if pair == Limb.FRONT else p.leg_length) * scale
+	var stance: float = posture.plan_reach(bone * articulation.of(pair).stand)
+	var lat: float = stance * cos(posture.tilt) * p.stance_width
+	return sqrt(maxf(stance * stance - lat * lat, 0.0))
+
+
+## The angle this build's trunk is carried at when nothing is under its
+## shoulders, in degrees: what the species asks for, or what its balance demands,
+## whichever is steeper.
+##
+## A kangaroo rears further than it has to and is welcome to; nothing may rear
+## less than it has to. See `carriage_deg`, and see Gait._carry_body, which is
+## the one place a trunk angle turns into a height.
+func carried_deg(p: CreatureParams) -> float:
+	return maxf(p.trunk_lift_deg, carriage_deg)
 
 
 ## Whether a body of these proportions walks on its forelimbs at all.

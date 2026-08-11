@@ -294,6 +294,15 @@ var built_units: float = 0.0
 var standing_units: float = 0.0
 ## Density-weighted axial (trunk) census, intact: what sizes the limbs.
 var axial_units: float = 0.0
+## Length of the animal's own long axis, px — snout base to the clipped tail,
+## which is the span `front_limb_t` and `rear_limb_t` are fractions of. Kept
+## because a cell's canonical x is in pixels and every consumer that wants to
+## compare it to a girdle wants it as a fraction of this. See Plumb.
+var axis_length: float = 0.0
+## Bumped every time the cells are re-laid. What lets anything derived from the
+## whole lattice — a centre of gravity, a chain, a supply tree — tell a body that
+## has changed from one that has merely been asked again.
+var revision: int = 0
 
 ## What the lattice was built from, so `ensure` can tell a redundant call from a
 ## body that actually changed.
@@ -390,6 +399,8 @@ func _build(plan: BodyPlan, p: CreatureParams, scale: float, depth_ratio: float,
 	var full_len: float = float(n - 1) * p.segment_length * scale
 	var clip: float = BodyPlan.clip_t(p)
 	var length: float = full_len * clip
+	axis_length = length
+	revision += 1
 
 	# Where the four limbs meet the trunk, settled before either is carved so the
 	# body and the legs cannot disagree about it — see `_socket_of`.

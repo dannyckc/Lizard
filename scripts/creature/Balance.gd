@@ -79,6 +79,13 @@ const RECOVERY_SWINGS: float = 1.8
 ## does, and this is that, said once and on purpose.
 const SPENT_RECOVERY: float = 2.1
 
+## How much faster the recovery clock runs on a body being toppled as hard as a
+## body can be toppled. See `_urgency` — a creature whose weight is still over
+## its feet gets the whole window this file was calibrated with, and one that is
+## already going over gets a fraction of it, which is the difference between a
+## stumble and a fall and used to be no difference at all.
+const TOPPLE_URGENCY: float = 3.0
+
 ## How much of a girdle's joint travel is spent folding under a body it cannot
 ## hold. All of it at total failure: legs going out from under an animal is
 ## exactly a joint arriving at its own stop.
@@ -123,7 +130,7 @@ func reset() -> void:
 ## differently: a creature in the air is not failing to stand, it is not standing,
 ## and the clock does not run — which is what makes a leap safe to take.
 func update(delta: float, limbs: Array[Limb], body: BodyShape, spine: Spine,
-		physique: Physique, state: BodyState, loco: Locomotion,
+		plumb: Plumb, state: BodyState, loco: Locomotion,
 		swing: float, airborne: bool, alive: bool) -> void:
 	failed = false
 	grace = maxf(swing, 0.05) * RECOVERY_SWINGS * lerpf(SPENT_RECOVERY, 1.0,
@@ -138,7 +145,7 @@ func update(delta: float, limbs: Array[Limb], body: BodyShape, spine: Spine,
 		hold = 1.0
 		return
 
-	need = _reactions(body, spine, physique, loco)
+	need = _reactions(body, spine, plumb, loco)
 	able = _capacity(limbs, state, loco)
 	hold = minf(
 		1.0 if need.x <= 0.0001 else clampf(able.x / need.x, 0.0, 1.0),
@@ -150,30 +157,73 @@ func update(delta: float, limbs: Array[Limb], body: BodyShape, spine: Spine,
 	if hold >= STANDING_MIN:
 		unheld = 0.0
 		return
-	unheld += delta
+	# How fast that clock runs is gravity's answer rather than a constant, and it
+	# is the one thing the recovery window could never say for itself. An animal
+	# whose weight is still very nearly over its feet has all the time its legs
+	# need; one whose centre of gravity is right out past its own support is
+	# already turning about the edge of it, and how quickly is a lever — the
+	# overhang against the height it hangs at, which is exactly `Gravity.topple`.
+	#
+	# Never *slower* than the swing clock, because the swing clock is the real
+	# limit on getting a leg back underneath yourself and no amount of being
+	# nearly balanced buys extra time to do it in.
+	unheld += delta * _urgency(plumb)
 	failed = unheld >= grace
+
+
+## How much faster than its own swing a body is running out of time.
+##
+## One at rest over its feet, and rising with the topple — the horizontal
+## acceleration gravity is giving the centre of gravity about the edge of the
+## support it has left. Quoted against the pull itself so the ratio means
+## something: half of `PULL` is the hardest a body can ever be toppled, which is
+## a centre of gravity as far out as it is high, and that is where this runs at
+## its ceiling.
+##
+## Off `Plumb` entirely, so it is nothing at all on a body whose line is inside
+## its feet — which is every walking animal on every ordinary stride, and the
+## whole reason this can be added to the clock without shortening a single gait.
+func _urgency(plumb: Plumb) -> float:
+	if plumb == null or not plumb.posed or plumb.feet == 0 or plumb.clearance >= 0.0:
+		return 1.0
+	var over: float = Gravity.topple(plumb.overhang.length(), plumb.height)
+	return 1.0 + (TOPPLE_URGENCY - 1.0) * clampf(over / (Gravity.PULL * 0.5), 0.0, 1.0)
 
 
 ## What each girdle has to carry, as a share of the whole animal.
 ##
 ## The lever rule on a beam over two supports: weight nearer the shoulders lands on
-## the shoulders. Where the weight is comes off the same chain of discs the mass
-## does — see `Physique.centroid` — so a long tail genuinely shifts the load onto
-## the hips and a big head genuinely shifts it forward, and neither needed saying.
+## the shoulders. Where the weight is is the animal's actual centre of gravity —
+## see `Plumb`, which counts it off the same cells the scales weigh — so a long
+## tail genuinely shifts the load onto the hips, a big head genuinely shifts it
+## forward, a dense skull shifts it further than a light one of the same size, and
+## a haunch bitten hollow stops counting the moment the flesh is gone. None of
+## those needed saying.
+##
+## It was the middle of the drawn silhouette until this file had a centre of
+## gravity to read, and the difference is not academic. An outline has no density,
+## so bone and fat weighed the same; it has no legs, so a quarter of the animal was
+## missing from a measurement of where the animal was; and it does not change when
+## the creature is eaten, so a body chewed open behind the hips went on loading its
+## hind legs with weight that was lying on the floor.
 ##
 ## A girdle whose limbs do not reach the ground carries nothing, and everything it
 ## would have carried goes to the other one. That is not a special case for
 ## two-legged animals; it is the same sentence `Gait` already says about where the
 ## shoulders of one are held — by the back — and it falls out of `forelimbs_bear`
 ## without this file knowing what a biped is.
-func _reactions(body: BodyShape, spine: Spine, physique: Physique,
+func _reactions(body: BodyShape, spine: Spine, plumb: Plumb,
 		loco: Locomotion) -> Vector2:
 	var anchors: Dictionary = body.anchors
 	if not anchors.has("FL") or not anchors.has("RL"):
 		return Vector2(0.5, 0.5)
 	var fore: Vector2 = (anchors["FL"].pos + anchors["FR"].pos) * 0.5
 	var rear: Vector2 = (anchors["RL"].pos + anchors["RR"].pos) * 0.5
-	centre = Physique.centroid(body, spine)
+	# A body whose cells have not been posed yet has no world centre to read and
+	# is not standing on anything either; the middle of the girdles is the honest
+	# answer for that one tick, and it is the answer this file gave for every tick
+	# before there was a lattice to ask.
+	centre = plumb.centre if plumb != null and plumb.posed else (fore + rear) * 0.5
 	if loco != null and not loco.forelimbs_bear:
 		return Vector2(0.0, 1.0)
 	var axis: Vector2 = fore - rear

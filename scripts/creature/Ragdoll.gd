@@ -108,8 +108,10 @@ func _lay_flat(limb: Limb, a: Spine.Frame, p: CreatureParams, scale: float) -> v
 	limb.plan_limit = limb.total_length * limb.lock
 	limb.inboard_limit = 0.0
 	# Straight out to the side: a limp limb has no swing plane to have rotated,
-	# so the whole of its rest radius is lateral.
-	limb.set_stance(a, p, limb.total_length * limb.stand, 1.0)
+	# so the whole of its rest radius is lateral — and with none of it left over
+	# there is no fore-and-aft bias to spend. A carcass is not standing anywhere,
+	# so where a live animal would have put its feet says nothing about it.
+	limb.set_stance(a, 0.0, limb.total_length * limb.stand, 1.0)
 
 
 ## Takes over four limbs exactly where the gait left them.

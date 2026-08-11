@@ -26,11 +26,20 @@
 ##     not when it reaches the number zero. `floor_height` is that surface, and it
 ##     is asked for on every integration rather than assumed, because the habitat
 ##     has terrain in it.
+##   * **The pull acts at a place.** For a lump of meat that is a distinction
+##     without a difference — a falling thing falls, and where the middle of it is
+##     changes nothing. For a body standing on something it is the whole
+##     difference between staying up and going over, because a supported body is
+##     not free to fall and *is* free to turn about the edge of its support. Where
+##     the weight of an animal is is `Plumb`; what the pull does to it from there
+##     is `topple` below.
 ##
 ## Nothing here stores a mass. Weight decides how hard a thing is to *move* — that
 ## is `Physique`, and the contact solver already divides by it — but it does not
 ## decide how fast it falls, and a simulation in which a heavy part sank faster
-## than a light one would be wrong about the one thing everybody can check.
+## than a light one would be wrong about the one thing everybody can check. That
+## holds for the topple too, and for the same arithmetic: the mass is on both
+## sides of it and cancels.
 class_name Gravity
 extends RefCounted
 
@@ -73,6 +82,42 @@ static func launch_rate(peak: float) -> float:
 ## The other way round: how high something that is going this fast will get.
 static func peak_of(rate: float) -> float:
 	return rate * rate / (2.0 * PULL)
+
+
+## How hard a body is being tipped over, in px/s² sideways at its own centre of
+## gravity.
+##
+## The one thing the pull could not say for itself. Everything above treats a
+## body as a height with a speed, which is the whole truth about a thing falling
+## through open air and not quite the truth about one standing on something: a
+## creature on its feet is not free to fall, it is free to *turn* about the edge
+## of whatever is holding it up, and whether it does is a question about where
+## its weight is rather than about how high it is.
+##
+## So this is gravity asked at a point. `over` is how far the centre of gravity
+## hangs past the edge it is pivoting on and `high` is how far above that edge it
+## hangs; the pull acts at the centre, the edge takes the reaction, and what comes
+## out is one line of statics — torque `g·over` against a moment of inertia
+## `over² + high²`, resolved back to the horizontal at the centre itself.
+##
+## Two consequences are worth stating because they are the whole reason a body
+## reads as heavy. A centre exactly over the edge is not tipped at all however
+## high it is, which is why a balanced animal can stand on very little. And the
+## hardest anything can ever be tipped is half the pull, at a centre as far out as
+## it is high — past that the body is not toppling, it is on its way to lying
+## down. Nothing here integrates: what a topple *does* belongs to whatever is
+## being tipped, and there is exactly one thing in the game that is. See Balance.
+##
+## No mass, for the same reason nothing else here has one: it cancels out of both
+## sides of the same equation, and a heavy animal does not fall over faster than a
+## light one of the same shape.
+static func topple(over: float, high: float) -> float:
+	var lever: float = maxf(high, 0.0)
+	var arm: float = maxf(over, 0.0)
+	var span: float = arm * arm + lever * lever
+	if span < 0.0001:
+		return 0.0
+	return PULL * arm * lever / span
 
 
 ## How long until a body at `height` moving at `rate` reaches `floor_height`, in

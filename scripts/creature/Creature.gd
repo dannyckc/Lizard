@@ -113,6 +113,12 @@ var dentition: Dentition = null
 ## rest of the derived state, so the contact and grip passes read the physique of
 ## the pose they are correcting, exactly as they already read its bounds.
 var physique: Physique = Physique.new()
+## Where all that weight actually is, counted off the same cells: the centre of
+## gravity in the animal's own frame and posed into the world, and how far inside
+## its own feet the line it drops comes down. What `Physique` is to how much
+## there is, this is to where it is — see Plumb, which is the ground truth
+## everything about balance is now argued from.
+var plumb: Plumb = Plumb.new()
 ## What that body can do about moving itself: how hard it accelerates and turns,
 ## how far it strides, how long its feet stay down. Read off the physique above
 ## and the posture, once per tick and ahead of everything that uses it — not
@@ -546,7 +552,16 @@ func rebuild() -> void:
 	# about walking: the stance the legs are solved to, and so the height the whole
 	# picture is registered to, is one of its answers.
 	_update_physique()
-	locomotion.update(posture, physique, params, size_scale, articulation)
+	# And before *that* again, where the weight the legs are about to be placed
+	# under actually is. The stance is constrained by it — see Plumb, and see
+	# Locomotion, which is what spends the constraint — so the census has to have
+	# been counted before anything decides where a foot goes. Nothing is posed
+	# here: the body has not been solved yet, and what the constraint reads is the
+	# build's own centre, which does not need it to have been. Not invalidated
+	# first, and deliberately: a rebuild that did not change the animal did not
+	# change where its weight is either, and the census knows whether it did.
+	plumb.measure(anatomy.tissue.lattice, anatomy.tissue)
+	locomotion.update(posture, physique, params, size_scale, articulation, plumb)
 	gait.loco = locomotion
 	# ...and what all of that comes to about leaving the ground. After the
 	# locomotion because it is built on it, and before anything that reads it:
@@ -567,6 +582,7 @@ func rebuild() -> void:
 	# rebuild cannot wash it off — but its world geometry is now stale.
 	anatomy.update(self)
 	_update_physique()
+	_update_plumb()
 	_update_stature()
 	_update_bounds()
 
@@ -586,6 +602,34 @@ func _update_physique() -> void:
 	for limb in gait.limbs:
 		limb.load = physique.limb_load.x if limb.pair == Limb.FRONT \
 			else physique.limb_load.y
+
+
+## Re-reads where all that weight is, and whether it is over the feet.
+##
+## After the physique, because the census it counts through is the one the
+## physique has just made sure of, and after the anatomy, because the columns it
+## poses through are the ones the anatomy has just solved into the world. Before
+## the balance, which is its first consumer.
+##
+## The measurement is skipped on any tick where neither the build nor the damage
+## has changed, which is nearly all of them; what runs every tick is the posing,
+## and that is seventy-odd weighted points. See Plumb.
+func _update_plumb() -> void:
+	plumb.measure(anatomy.tissue.lattice, anatomy.tissue)
+	var legs: Array[Limb] = gait.limbs if gait != null else ([] as Array[Limb])
+	plumb.pose(anatomy.tissue, legs)
+	if gait == null:
+		return
+	# A tail the animal is genuinely standing on is a fifth contact, and it is
+	# the reason a pentapedal crawl is a stance at all rather than a slow topple.
+	# The tip, because that is the end that reaches the floor — and only while
+	# the walk is actually leaning on it, which `crawl` is already the
+	# measurement of.
+	var prop: Vector2 = Vector2.INF
+	if gait.footfall.crawl > 0.5 and body != null and spine != null \
+			and body.last_index < spine.size():
+		prop = spine.points[body.last_index]
+	plumb.stand(gait.limbs, size_scale, prop)
 
 
 ## Re-reads how much of all that the animal can keep up.
@@ -667,6 +711,10 @@ func reset(at: Vector2 = Vector2.ZERO, facing: float = 0.0) -> void:
 	# at wherever it used to be. The clock especially: carrying a stumble across a
 	# reset would drop a creature that had just been placed.
 	balance.reset()
+	# ...and the same sentence about the weight. A body placed somewhere has its
+	# centre of gravity where it now is rather than out past the feet it used to
+	# have, and the census it is counted off is about to be put back whole.
+	plumb.reset()
 	anatomy.reset()
 	# A body put back is a body that has got its breath back. Beside the anatomy
 	# because it is read off the anatomy: leaving a spent store on a creature whose
@@ -728,7 +776,10 @@ func _physics_process(delta: float) -> void:
 	# physique, and that lag is deliberate — mass and muscle are properties of a
 	# body being eaten over seconds, not of this frame, and the alternative is
 	# solving the whole tick before knowing how fast it was allowed to move.
-	locomotion.update(posture, physique, params, size_scale, articulation)
+	# Where the weight is comes in on the same terms and for the same reason: the
+	# stance the legs are about to be solved to is constrained by it, and the
+	# constraint is a statement about the build rather than about this frame.
+	locomotion.update(posture, physique, params, size_scale, articulation, plumb)
 	gait.loco = locomotion
 	# ...and what all of that comes to about leaving the ground. After the
 	# locomotion because it is built on it, and before anything that reads it:
@@ -854,6 +905,11 @@ func _physics_process(delta: float) -> void:
 	anatomy.update(self, delta)
 	_release_severed()
 	_update_physique()
+	# Where that weight is. Between the census and everything that argues about
+	# balance, because it is the one reading both halves need: the physique has
+	# just settled what the animal is made of, and nothing below this line may
+	# guess where it is.
+	_update_plumb()
 	_update_bounds()
 	_update_stamina(delta)
 	# Whether any of that is standing up. After the physique because what a leg has
@@ -861,7 +917,7 @@ func _physics_process(delta: float) -> void:
 	# is is where the feet have actually been put. What it measures is spent through
 	# `_limb_load` on the next tick, alongside the crouch and the jump, because a
 	# body losing its footing folds its legs and there is only one channel for that.
-	balance.update(delta, gait.limbs, body, spine, physique, anatomy.state, locomotion,
+	balance.update(delta, gait.limbs, body, spine, plumb, anatomy.state, locomotion,
 		locomotion.swing_time(maxf(params.leg_length, params.arm_length) * size_scale),
 		elevation.is_airborne(), alive)
 	# Last of the derived state, because it is a consequence of all of it. Two ways
@@ -1076,6 +1132,11 @@ func _dead_process(delta: float) -> void:
 	anatomy.update(self, delta)
 	_release_severed()
 	_update_physique()
+	# A carcass has a centre of gravity like anything else, and it moves as the
+	# body is eaten. Nothing asks it whether it is over its feet — it is not
+	# standing on them — but the drawer, the probes and the scavengers all read
+	# where the weight of the thing on the floor actually is.
+	_update_plumb()
 	_update_bounds()
 	# A carcass is described by the same line the living body is. Nothing is being
 	# spent, and the store goes anyway: what holds a reserve up is the blood

@@ -454,40 +454,18 @@ static func body_volume(body: BodyShape, spine: Spine) -> float:
 	return total
 
 
-## Where that volume actually is, on the ground plane.
+## Where that volume actually is used to be answered here, by the same chain of
+## discs with each slab weighted by where it sat. It is not any more, and the
+## reason is worth leaving behind: it was a measurement of the *outline*. A
+## silhouette has no density, so a skull weighed the same as the cheek around it;
+## it has no legs, so a tenth of the animal was missing from a reading of where
+## the animal was; it has no height, so nothing could be said about tipping at
+## all; and it does not change when the creature is eaten, so a body chewed open
+## behind the hips went on being balanced by flesh that was lying on the floor.
 ##
-## The same chain of discs as above with each slab weighted by where it sits
-## instead of only by how big it is — so it is a measurement of the drawn animal
-## rather than a fraction of the distance between two girdles. That distinction is
-## the whole reason it exists: a two-legged animal balances because its tail is
-## behind its hips and its head is in front of them, and no interpolation between
-## the shoulder and the hip can ever say so. This can, because it is the sum of
-## where the body is.
-##
-## It follows the spine wherever the spine has bent to, which is right and is also
-## a mechanic: a creature curled hard round to one side is genuinely carrying its
-## weight over there.
-static func centroid(body: BodyShape, spine: Spine) -> Vector2:
-	var last: int = mini(body.last_index, spine.size() - 1)
-	if last < 1:
-		return spine.points[0] if spine.size() > 0 else Vector2.ZERO
-	var total: float = 0.0
-	var sum := Vector2.ZERO
-	for i in range(last):
-		var w: float = (body.widths[i] + body.widths[i + 1]) * 0.5
-		var slab: float = w * w * spine.points[i].distance_to(spine.points[i + 1])
-		total += slab
-		sum += (spine.points[i] + spine.points[i + 1]) * 0.5 * slab
-	# The two caps, at the two ends. A snout is a real hemisphere of animal out in
-	# front of the first cross-section and a tail tip is one behind the last, and on
-	# a short-bodied creature with a big head they are a serious share of it.
-	var snout: float = body.widths[0]
-	var tip: float = body.widths[last]
-	var snout_cap: float = snout * snout * snout * (2.0 / 3.0)
-	var tip_cap: float = tip * tip * tip * (2.0 / 3.0)
-	total += snout_cap + tip_cap
-	sum += spine.points[0] * snout_cap + spine.points[last] * tip_cap
-	return sum / total if total > 0.0001 else spine.points[0]
+## Where the weight is is now counted off the cells, exactly as how much of it
+## there is always was — see Plumb, which is the one centre of gravity in the
+## game. Two of them that agreed today would be two of them.
 
 
 ## Share of that same volume lying on one side of a station along the body.

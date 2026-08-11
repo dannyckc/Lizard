@@ -704,10 +704,14 @@ func bone_error() -> float:
 ## radius its leg rests at is a body that cannot be standing where it is standing,
 ## and the height solve answers by pinning the animal at full stretch, where it
 ## has nothing left to walk with.
-func set_stance(a: Spine.Frame, p: CreatureParams, stance: float, lean: float) -> void:
+## `bias` is how much of what is left after the lateral offset the foot spends
+## fore or aft. The species' own, corrected where its own weight demands it —
+## see Locomotion.foot_bias, which is where the two are reconciled. Handed in
+## rather than read off the parameters because a limb is not the place a stance
+## is argued about; it is the place one is put.
+func set_stance(a: Spine.Frame, bias: float, stance: float, lean: float) -> void:
 	rest_lat = stance * lean
-	rest_fore = sqrt(maxf(stance * stance - rest_lat * rest_lat, 0.0)) \
-		* (p.front_foot_bias if pair == FRONT else p.rear_foot_bias)
+	rest_fore = sqrt(maxf(stance * stance - rest_lat * rest_lat, 0.0)) * bias
 	var dir: Vector2 = a.perp * (side * rest_lat) + a.fwd * rest_fore
 	if dir.length_squared() < 0.000001:
 		dir = a.perp * side
