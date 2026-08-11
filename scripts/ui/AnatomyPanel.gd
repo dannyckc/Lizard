@@ -80,8 +80,10 @@ const FAILING: float = 0.5
 const LEVEL: float = 0.017
 
 const WIDTH: float = 378.0
-const INSET: float = 44.0
-## What the stage would like, and what it will shrink to on a short window.
+## What the stage would like, and what it will shrink to on a short window. It is
+## a floor and not a ceiling: the stage is the one section of the drawer that
+## expands, so on a tall window everything the rest of the column does not want
+## goes to the specimen.
 const STAGE_HEIGHT: float = 326.0
 const STAGE_MIN_HEIGHT: float = 120.0
 
@@ -219,8 +221,10 @@ func select_specimen(index: int) -> void:
 	_apply_specimen()
 
 
-## Shrinks the specimen stage to whatever a short window has left over, so the
-## readouts under it are never pushed off the screen.
+## Told how tall the dock is. Shrinks the specimen stage to whatever a short
+## window has left over, so the readouts under it are never pushed off the
+## screen; on a window with room to spare there is nothing to do, because the
+## stage is the drawer's one expanding section and already has it.
 func fit_to_height(available: float) -> void:
 	if _stage == null:
 		return
@@ -377,14 +381,16 @@ static func _blood_word(state: BodyState) -> String:
 
 ## Where the eye has got to. Roll is only named once there is some — it is the one
 ## of the three that cannot be asked for, so on a specimen nobody has turned over
-## it would be a reading of nothing.
+## it would be a reading of nothing. And on one nobody has turned at all the three
+## are the drawer's own opening angles rather than a hand's, so what is printed is
+## the name of the view and the two ways of moving it.
 func _orbit_word() -> String:
 	if view == null:
 		return ""
 	var roll: float = view.roll
 	var near: bool = not is_equal_approx(view.zoom, 1.0)
-	if not view.orbited() and absf(roll) < LEVEL and not near:
-		return "TOP DOWN · DRAG TO TURN · WHEEL TO ZOOM"
+	if view.at_default_orbit():
+		return "THREE-QUARTER · DRAG TO TURN · WHEEL TO ZOOM"
 	var word: String = "SPIN %d° · TILT %+d°" % [
 		int(round(rad_to_deg(view.spin))), int(round(rad_to_deg(view.tilt)))]
 	if absf(roll) >= LEVEL:
@@ -420,17 +426,15 @@ static func _mean_delivery(network: AnatomyNetwork) -> float:
 
 # ---------------------------------------------------------------- layout ----
 
+## How wide a column the drawer takes in the dock — see HudDock, which is where
+## every drawer's rect is decided and what the field asks how much of the window
+## it has lost.
+func dock_width() -> float:
+	return WIDTH
+
+
 func _place() -> void:
-	anchor_left = 1.0
-	anchor_right = 1.0
-	anchor_top = 0.5
-	anchor_bottom = 0.5
-	offset_left = -(WIDTH + INSET)
-	offset_right = -INSET
-	offset_top = 0.0
-	offset_bottom = 0.0
-	grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	grow_vertical = Control.GROW_DIRECTION_BOTH
+	HudDock.place(self, WIDTH)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
 	var style := StyleBoxFlat.new()

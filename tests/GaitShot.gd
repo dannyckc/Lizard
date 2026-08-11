@@ -11,11 +11,14 @@ const OUT: String = "user://gait"
 ## Frames driven before each shot, so the animal is well into its gait.
 const WARM: int = 240
 const BETWEEN: int = 90
+## Frames the crouch is held for before the push-off — see Jump.
+const CHARGE: int = 24
 
 var main: Node
 var frames: int = 0
 var preset: String = "Lizard"
 var shot: int = 0
+var shot_air: bool = false
 var saved: Array = []
 
 
@@ -52,9 +55,18 @@ func _process(_delta: float) -> bool:
 	player.command.throttle = 1.0
 	player.command.sprint = "--sprint" in args and frames > WARM
 	player.command.stalk = "--stalk" in args and frames > WARM * 2 + BETWEEN
+	# The jump is held and let go, the way the key is: the crouch charges the
+	# spring and the release is the push-off.
+	if "--jump" in args:
+		player.command.climb = 1.0 if frames > WARM and frames <= WARM + CHARGE else 0.0
 
 	if frames == WARM:
 		_shoot("walk")
+	elif "--jump" in args and frames > WARM + CHARGE and not shot_air \
+			and player.elevation.height > 0.0 and player.elevation.rate <= 0.0:
+		# At the apex, which is where the figure has the furthest to lift.
+		shot_air = true
+		_shoot("air")
 	elif frames == WARM * 2 and "--sprint" in args:
 		_shoot("run")
 	elif frames == WARM * 3 and "--stalk" in args:
@@ -72,6 +84,7 @@ func _shoot(word: String) -> void:
 	root.get_viewport().get_texture().get_image().save_png(path)
 	saved.append(ProjectSettings.globalize_path(path))
 	var player: Creature = main.get_node("Creature")
-	print("%s %s: %s · Fr %.2f · duty %.2f · cycle %.2f" % [preset, word,
+	print("%s %s: %s · Fr %.2f · duty %.2f · cycle %.2f · height %.1f" % [preset, word,
 		player.gait.footfall.describe(), player.gait.footfall.froude,
-		player.gait.duty_measured(), player.gait.cycle_length()])
+		player.gait.duty_measured(), player.gait.cycle_length(),
+		player.elevation.height])

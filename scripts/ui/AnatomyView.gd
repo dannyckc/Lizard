@@ -70,6 +70,8 @@
 ## `roll` are readings off it, and the guide in the corner is the animal's own
 ## three axes put through the same projection. Framing is the same sphere and
 ## therefore does not move while the specimen turns.
+##
+## It opens off the square, at DEFAULT_ORBIT — see `default_orbit`.
 class_name AnatomyView
 extends Control
 
@@ -179,6 +181,16 @@ const AXIS_INSET: float = 31.0
 const AXIS_FAINT: float = 0.30
 ## Orbit under which the projection is the plain top-down one.
 const FLAT: float = 0.002
+## Where the eye stands before anybody has touched it, in the same three readings
+## the drawer prints back: a three-quarter view from above and off the flank, with
+## the specimen laid across the page rather than up it. Straight down was the
+## honest default for a body drawn flat, and it is the wrong one for a body with a
+## third axis in it — an overhead view is the one angle at which none of the depth
+## the lattice carries can be seen at all. Degrees, because they are the units the
+## readout names them in and the units anybody re-picking them would work in.
+const DEFAULT_SPIN: float = 41.0
+const DEFAULT_TILT: float = 48.0
+const DEFAULT_ROLL: float = -125.0
 ## How far every shell of an X-ray is thinned to, so the body reads through.
 const XRAY_ALPHA: float = 0.26
 
@@ -503,6 +515,7 @@ var _hover_face: int = -1
 func _init() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	clip_contents = true
+	orient = default_orbit()
 
 
 func _ready() -> void:
@@ -542,11 +555,32 @@ func reset_fit() -> void:
 	_census_of = -1
 
 
-## Puts the eye back over the animal's back, looking straight down — and back to
-## the stage's own fit, because leaning in is part of where the eye is.
+## Puts the eye back where the drawer opens it — and back to the stage's own fit,
+## because leaning in is part of where the eye is.
 func reset_orbit() -> void:
-	orient = Basis()
+	orient = default_orbit()
 	set_zoom(1.0)
+
+
+## The viewpoint the drawer opens at, built from the three readings it prints.
+##
+## Composed in the order the readouts are taken in, which is what makes the three
+## constants mean what they say: the spin and the tilt aim the eye — see `_aim` —
+## and the roll is a turn about the eye itself, so it lays the specimen across the
+## page without disturbing where the page is being looked at from. Send this basis
+## in and `spin`, `tilt` and `roll` read back the three numbers exactly.
+static func default_orbit() -> Basis:
+	return Basis(Vector3(0.0, 0.0, 1.0), deg_to_rad(DEFAULT_ROLL)) \
+		* Basis(Vector3(1.0, 0.0, 0.0), deg_to_rad(DEFAULT_TILT)) \
+		* Basis(Vector3(0.0, 1.0, 0.0), deg_to_rad(DEFAULT_SPIN))
+
+
+## Whether the eye is still where the drawer opened it. What the panels ask before
+## naming the angles: on an untouched specimen the three readings are the default
+## rather than anything the player did, and printing them back would be reporting
+## the file instead of the hand.
+func at_default_orbit() -> bool:
+	return orient.is_equal_approx(default_orbit()) and is_equal_approx(zoom, 1.0)
 
 
 ## Leans the eye in or back. The scale is re-derived here rather than waited for,

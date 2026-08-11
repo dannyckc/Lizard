@@ -203,10 +203,27 @@ func _aim_cursor() -> void:
 func _process(delta: float) -> void:
 	# The editorial HUD treats the creature as a specimen: keep it centred while
 	# easing away the tiny high-frequency motion from the procedural head.
-	camera.global_position = camera.global_position.lerp(creature.head_pos, 1.0 - exp(-3.2 * delta))
+	camera.global_position = camera.global_position.lerp(_camera_focus(), 1.0 - exp(-3.2 * delta))
 
 	_update_hud()
 	queue_redraw()
+
+
+## Where the camera is trying to look: the animal, pushed over by half whatever
+## column the HUD has taken out of the window, so it sits in the middle of the
+## paper that is left rather than in the middle of the glass. The HUD says how
+## far in screen pixels and the zoom turns that into a distance in the world.
+##
+## The same lerp carries this as carries the animal's own movement, which is the
+## whole reason it is a shift of what the camera is *looking at* rather than a
+## rect the field is drawn into: opening a drawer slides the picture across at
+## the speed the camera already follows a walk at, and closing one slides it back
+## from wherever it had got to. Nothing snaps, and there is no second easing to
+## keep in step with the first.
+func _camera_focus() -> Vector2:
+	if hud == null:
+		return creature.head_pos
+	return creature.head_pos + Vector2(hud.field_shift() / camera.zoom.x, 0.0)
 
 
 func _update_hud() -> void:
@@ -307,7 +324,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				scent_field.clear()
 				sound_field.clear()
 				_footfall_counts.clear()
-				camera.global_position = creature.head_pos
+				camera.global_position = _camera_focus()
 				hud.reset_hint()
 	elif event is InputEventMouseButton:
 		if event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_UP:

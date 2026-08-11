@@ -38,6 +38,17 @@ var _mono_tracked: Font
 
 var _stats: Dictionary = {}
 var _view_buttons: Dictionary = {}
+## Every drawer that opens in the right-hand dock, in the order they were built.
+## They are held as one list rather than named one at a time, because everything
+## the HUD does with a drawer — size it to the window, ask what it costs the field
+## — is the same for all of them and has to stay that way for the next one.
+##
+## A drawer is any Control that stands itself in the dock with `HudDock.place`,
+## says how wide it asked for with `dock_width()`, and takes the dock's height
+## through `fit_to_height()`. Add it to this list and it is placed under the view
+## buttons, sized to the window and paid for out of the field without another
+## line anywhere.
+var _drawers: Array[Control] = []
 var _active_species: String = "Lizard"
 var _active_view: String = VIEW_FIELD
 var _hint_target: float = 1.0
@@ -62,6 +73,7 @@ func _ready() -> void:
 	_build_fonts()
 	_build_frame()
 	_build_identity_and_stats()
+	_build_view_tabs()
 	_build_condition_and_legend()
 	_build_creator()
 	_build_creator_button()
@@ -69,8 +81,8 @@ func _ready() -> void:
 	_build_anatomy()
 	_build_gait()
 	set_view(_active_view)
-	resized.connect(_fit_anatomy)
-	_fit_anatomy()
+	resized.connect(_fit_drawers)
+	_fit_drawers()
 
 
 func _process(delta: float) -> void:
@@ -227,9 +239,28 @@ func set_subject(each: Creature) -> void:
 		gait_panel.set_subject(each)
 
 
-func _fit_anatomy() -> void:
-	if anatomy != null:
-		anatomy.fit_to_height(size.y - 96.0)
+## Every drawer is sized to the window rather than to a fixed rect: they all stand
+## in the same dock and are all as tall as it, and what each does with that height
+## is its own business — the anatomy drawer spends it on the specimen and the gait
+## drawer on the figure, and both have their own thing to give up when the window
+## is short.
+func _fit_drawers() -> void:
+	var tall: float = HudDock.height(size.y)
+	for drawer in _drawers:
+		drawer.fit_to_height(tall)
+
+
+## How far the field's own picture stands off the middle of the window, in screen
+## pixels, while a drawer is open: half the column that drawer has taken, so the
+## animal ends up in the middle of the paper left to its left. Zero with nothing
+## open, and zero under the creation menu, which is a page rather than a drawer
+## and takes the window. The world reads this and eases the camera onto it — see
+## Main._camera_focus; nothing here moves a camera.
+func field_shift() -> float:
+	for drawer in _drawers:
+		if drawer.visible:
+			return HudDock.reserved(drawer.dock_width()) * 0.5
+	return 0.0
 
 
 func reset_hint() -> void:
@@ -320,10 +351,42 @@ func _build_identity_and_stats() -> void:
 	var proto := _label("PROTO  0.1", 10, _mono_tracked, Color(INK, 0.42))
 	identity.add_child(proto)
 
+	_stats_grid = GridContainer.new()
+	_stats_grid.columns = 2
+	_stats_grid.add_theme_constant_override("h_separation", 22)
+	_stats_grid.add_theme_constant_override("v_separation", 4)
+	_stats_grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	block.add_child(_stats_grid)
+	for key in ["STATE", "SPEED", "MASS", "HEIGHT", "FEET", "SEGMENTS", "TARGET"]:
+		var key_label := _label(key, 10, _mono_tracked, Color(INK, 0.40))
+		key_label.custom_minimum_size.x = 74.0
+		_stats_grid.add_child(key_label)
+		var value := _label("—", 10, _mono_tracked, INK)
+		_stats[key] = value
+		_stats_grid.add_child(value)
+
+
+## The three views, in the top right corner — directly over the dock that two of
+## them open a drawer into, because a tab and the thing it opens belong on the
+## same edge of the page. The row hangs off the right margin rather than being
+## laid across it, so it keeps its own width whatever the window is doing and the
+## drawers under it line up with its outer end.
+func _build_view_tabs() -> void:
 	var views := HBoxContainer.new()
 	views.name = "ViewTabs"
 	views.add_theme_constant_override("separation", 4)
-	block.add_child(views)
+	views.alignment = BoxContainer.ALIGNMENT_END
+	views.anchor_left = 1.0
+	views.anchor_right = 1.0
+	views.anchor_top = 0.0
+	views.anchor_bottom = 0.0
+	views.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	views.grow_vertical = Control.GROW_DIRECTION_END
+	views.offset_left = 0.0
+	views.offset_right = -HudDock.INSET
+	views.offset_top = 30.0
+	views.offset_bottom = 58.0
+	add_child(views)
 	_view_tabs = views
 	for view_name in VIEWS:
 		var button := Button.new()
@@ -338,20 +401,6 @@ func _build_identity_and_stats() -> void:
 		button.pressed.connect(set_view.bind(view_name))
 		views.add_child(button)
 		_view_buttons[view_name] = button
-
-	_stats_grid = GridContainer.new()
-	_stats_grid.columns = 2
-	_stats_grid.add_theme_constant_override("h_separation", 22)
-	_stats_grid.add_theme_constant_override("v_separation", 4)
-	_stats_grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	block.add_child(_stats_grid)
-	for key in ["STATE", "SPEED", "MASS", "HEIGHT", "FEET", "SEGMENTS", "TARGET"]:
-		var key_label := _label(key, 10, _mono_tracked, Color(INK, 0.40))
-		key_label.custom_minimum_size.x = 74.0
-		_stats_grid.add_child(key_label)
-		var value := _label("—", 10, _mono_tracked, INK)
-		_stats[key] = value
-		_stats_grid.add_child(value)
 
 
 ## The corner that says what state the animal is in: what is left of it, and what
@@ -509,6 +558,7 @@ func _build_anatomy() -> void:
 	anatomy = AnatomyPanel.new()
 	anatomy.set_ui_fonts(_sans, _sans_tracked, _mono, _mono_tracked)
 	add_child(anatomy)
+	_drawers.append(anatomy)
 
 	# The one caption the anatomy view needs, in the field's own footnote voice:
 	# it names the two rules the whole picture is drawn by, so the layer list and
@@ -527,8 +577,8 @@ func _build_anatomy() -> void:
 	add_child(_anatomy_note)
 
 
-## The Gait view: the walk as an instrument panel, in the same drawer rect the
-## anatomy stands in — the field stays visible beside it, so the walk being
+## The Gait view: the walk as an instrument panel, in the same dock the anatomy
+## drawer stands in — the field stays visible beside it, so the walk being
 ## measured can be watched happening. Species tabs live on it so a body can be
 ## swapped mid-stride, and they go through the same gate every other species
 ## change does — the creation menu names it, the world grows it.
@@ -537,6 +587,7 @@ func _build_gait() -> void:
 	gait_panel.set_ui_fonts(_sans, _sans_tracked, _mono, _mono_tracked)
 	gait_panel.species_selected.connect(select_species)
 	add_child(gait_panel)
+	_drawers.append(gait_panel)
 	gait_panel.set_subject(subject)
 
 

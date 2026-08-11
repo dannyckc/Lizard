@@ -724,7 +724,7 @@ func _orbit_word() -> String:
 	if view == null:
 		return ""
 	var near: bool = not is_equal_approx(view.zoom, 1.0)
-	if not view.orbited() and absf(view.roll) < 0.017 and not near:
+	if view.at_default_orbit():
 		return "DRAG TO TURN THE SPECIMEN · WHEEL TO ZOOM"
 	var word: String = "SPIN %d° · TILT %+d°" % [
 		int(round(rad_to_deg(view.spin))), int(round(rad_to_deg(view.tilt)))]
