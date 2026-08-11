@@ -222,14 +222,23 @@ func _check_weight_hangs(c: Creature2) -> void:
 
 
 ## That the droop reads per-node mass: the same neck under a heavier skull
-## droops further. Two standalone armatures, one knob apart.
+## droops further. Two standalone armatures, one knob apart. Since Phase 2
+## the weights come from the census — an unbaked armature carries nothing —
+## so each body is built the way Creature2 builds one: armature, corpus,
+## bake. The heavier skull is heavier because its census says so.
 func _check_mass_droops_the_neck() -> void:
 	var plain := Armature.new()
 	plain.build(BodySpec.new(), Vector2.ZERO, 0.0)
+	var plain_corpus := Corpus.new()
+	plain_corpus.build(plain.spec)
+	Poise.new().bake(plain_corpus, plain)
 	var heavy_spec := BodySpec.new()
 	heavy_spec.skull_radius *= 1.4
 	var heavy := Armature.new()
 	heavy.build(heavy_spec, Vector2.ZERO, 0.0)
+	var heavy_corpus := Corpus.new()
+	heavy_corpus.build(heavy_spec)
+	Poise.new().bake(heavy_corpus, heavy)
 	for _i in 10:
 		plain.step(TICK)
 		heavy.step(TICK)

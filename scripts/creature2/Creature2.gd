@@ -1,11 +1,14 @@
-## The v2 creature as it stands in the lab: one armature, stepped and drawn.
+## The v2 creature as it stands in the lab: one armature, one census, one
+## weight — stepped and drawn.
 ##
-## Deliberately thin. The armature owns the physics, the spec owns the
-## anatomy, and until SpecimenMesh2 lands (Phase 4) what this node draws is
-## the solved skeleton itself — sticks at their bone radii, feet where they
-## are planted, a shadow under whatever is off the ground. A debug view, but
-## an honest one: every line is a node the solver put somewhere, so if the
-## drawing looks wrong the state is wrong, which is the point of a lab.
+## Deliberately thin. The corpus owns the anatomy, the armature owns the
+## physics, poise carries the one into the other (baked node masses in, posed
+## centre of mass out), and until SpecimenMesh2 lands (Phase 4) what this
+## node draws is the solved skeleton itself — sticks at their bone radii,
+## feet where they are planted, a shadow under whatever is off the ground,
+## and the plumb line against the support the feet actually make. A debug
+## view, but an honest one: every mark is state the systems put somewhere, so
+## if the drawing looks wrong the state is wrong, which is the point of a lab.
 class_name Creature2
 extends Node2D
 
@@ -13,6 +16,8 @@ const INK := Color(0.16, 0.15, 0.13)
 const LIMB_INK := Color(0.35, 0.33, 0.30)
 const SHADOW := Color(0.0, 0.0, 0.0, 0.10)
 const FOOT := Color(0.72, 0.34, 0.18)
+const PLUMB := Color(0.18, 0.42, 0.65)
+const SUPPORT := Color(0.18, 0.42, 0.65, 0.25)
 ## How much a node's height lightens its ink — enough to read a carried neck
 ## against a dropped tail without pretending the top-down view has a horizon.
 const HEIGHT_LIFT: float = 0.006
@@ -20,16 +25,25 @@ const HEIGHT_LIFT: float = 0.006
 @export var body: BodySpec
 
 var armature: Armature = Armature.new()
+var corpus: Corpus = Corpus.new()
+var poise: Poise = Poise.new()
 
 
 func _ready() -> void:
 	if body == null:
 		body = load("res://scripts/creature2/CatBody.tres")
 	armature.build(body, Vector2.ZERO, 0.0)
+	corpus.build(body)
+	poise.bake(corpus, armature)
 
 
 func _physics_process(delta: float) -> void:
+	# The bake is revision-keyed: an ordinary tick bakes nothing, a wound
+	# re-bakes once and the weight genuinely moves.
+	poise.bake(corpus, armature)
 	armature.step(delta, 0.0)
+	poise.pose(armature)
+	poise.stand(armature)
 	queue_redraw()
 
 
@@ -87,6 +101,16 @@ func _draw() -> void:
 	var head: Vector3 = a.pos[a.head_index()]
 	draw_circle(Vector2(head.x, head.y), a.spec.skull_radius,
 		INK.lightened(clampf(head.z * HEIGHT_LIFT, 0.0, 0.35)))
+	# The weight: where the plumb line comes down, against the support the
+	# planted feet make. Both are live readouts, not decoration — if the mark
+	# drifts outside the feet the body genuinely is out over its own edge.
+	if poise.posed:
+		if poise.feet >= 2:
+			for i in poise._prints.size():
+				draw_line(poise._prints[i],
+					poise._prints[(i + 1) % poise._prints.size()], SUPPORT, 1.2)
+		draw_circle(poise.centre, 2.0, PLUMB)
+		draw_arc(poise.centre, 4.0, 0.0, TAU, 24, PLUMB, 1.0)
 
 
 func _is_limb_stick(s: int) -> bool:

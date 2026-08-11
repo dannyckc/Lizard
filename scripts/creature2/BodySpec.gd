@@ -34,10 +34,6 @@ class ChainSpec extends RefCounted:
 	## Per-joint plan cone limit, degrees. One entry per interior vertex of the
 	## chain's stick run (attachment joint included), so `lengths.size() - 1`.
 	var bend_deg: PackedFloat32Array = PackedFloat32Array()
-	## Provisional flesh multiplier on the bone radius, per chain — stands in
-	## for the census until the Phase-2 knot compiler owns tissue thickness.
-	## Only the armature's provisional node masses read it. See Armature.
-	var flesh_scale: float = 1.0
 	var attach_chain: StringName = &""
 	var attach_index: int = -1
 	## Girdle compliance: 1.0 is rigid, below it the attach stick is a stiff
@@ -75,7 +71,6 @@ class ChainSpec extends RefCounted:
 @export var neck_carry_deg: float = 26.0
 @export var head_offset: float = 7.0
 @export var skull_radius: float = 4.5
-@export var head_flesh_scale: float = 1.3
 
 @export var tail_nodes: int = 6
 @export var tail_length: float = 78.0
@@ -83,7 +78,6 @@ class ChainSpec extends RefCounted:
 @export var tail_tip_radius: float = 0.8
 @export var tail_bend_deg: float = 26.0
 @export var tail_carry_deg: float = -8.0
-@export var tail_flesh_scale: float = 1.3
 
 ## Scapula-pivot → elbow → wrist → toe; the 4th node is the metacarpus/paw,
 ## which is what makes a digitigrade cat leg read right.
@@ -94,15 +88,11 @@ class ChainSpec extends RefCounted:
 @export var hind_leg_length: float = 47.0
 @export var hind_leg_shares := PackedFloat32Array([0.36, 0.34, 0.30])
 @export var hind_leg_radius: float = 1.7
-@export var limb_flesh_scale: float = 1.3
 ## Lateral offset of a limb's pivot from the spine — half the stance width.
 @export var girdle_offset: float = 7.0
 ## The fore girdle is muscle-slung, the hind girdle is bone on bone.
 @export var fore_girdle_hold: float = 0.55
 @export var hind_girdle_hold: float = 1.0
-
-@export var neck_flesh_scale: float = 1.8
-@export var trunk_flesh_scale: float = 2.0
 
 # --------------------------------------------------------------- posture ----
 
@@ -128,15 +118,179 @@ class ChainSpec extends RefCounted:
 @export var spine_stiffness: float = 0.88
 @export var constraint_iterations: int = 6
 
-# ---------------------------------------------- tissue knots (Phase 2) ------
-# Sparse knots per chain × layer, compiled knots → station ellipses → sector
-# cells (§5.3 C). Empty until the knot compiler lands; shape declared so the
-# Creator's sliders have an address to write to.
-@export var tissue_knots: Dictionary = {}
+# ---------------------------------------------------------- tissue knots ----
+# Sparse knots per chain group × layer — the §5.3 C authoring level, compiled
+# knots → station ellipses → sector cells by Corpus. Each knot is
+# [t, rx, rz, ventral]: t is arc position along the chain [0..1], rx/rz the
+# layer's thickness in px at the flank and at the midline (an elliptical
+# shell, so a deep chest is rz > rx), and ventral hangs extra thickness
+# toward the belly (negative rides it up the back — the epaxial ridge and the
+# scruff are authored as negative ventral). Between knots the station values
+# are linear in t; past the ends they hold.
+#
+# Symmetric pairs author once: the four limbs are two groups (fore/hind), and
+# the neck group runs withers → jaw tip with the head as its last reach of t,
+# so the skull bulge and the masseter are neck knots near t = 1.
+#
+# The values below ARE the reference cat (§5.4): hindquarters dominant (the
+# thigh columns are the deepest muscle on the body), epaxial ridge dorsal
+# along the trunk, ribcage bone spanning the thoracic ring, belly and scruff
+# fat pads, skin thicker and looser at the scruff, tail and distal limbs
+# nearly muscle-free — tendon-operated, which is why legs are light and swing
+# fast. The Creature Creator's sliders write multipliers over these lists.
+@export var tissue_knots: Dictionary = {
+	&"trunk": {
+		BodySchema.Layer.BONE: [
+			[0.00, 0.90, 0.90, 0.0], [0.16, 0.35, 0.35, 0.0],
+			[0.50, 0.30, 0.30, 0.0], [0.60, 0.80, 0.85, 0.0],
+			[0.90, 0.80, 0.85, 0.0], [1.00, 0.95, 0.95, 0.0],
+		],
+		BodySchema.Layer.MUSCLE: [
+			[0.00, 3.00, 3.20, -0.9], [0.30, 2.20, 2.60, -1.0],
+			[0.62, 2.30, 2.50, -0.6], [1.00, 2.80, 3.00, -0.4],
+		],
+		BodySchema.Layer.FAT: [
+			[0.00, 0.50, 0.45, 0.3], [0.35, 0.80, 0.70, 1.2],
+			[0.60, 0.60, 0.55, 0.8], [1.00, 0.35, 0.35, 0.1],
+		],
+		BodySchema.Layer.SKIN: [
+			[0.00, 0.40, 0.40, 0.0], [1.00, 0.42, 0.42, 0.0],
+		],
+	},
+	&"neck": {
+		BodySchema.Layer.BONE: [
+			[0.00, 0.50, 0.50, 0.0], [0.72, 0.40, 0.40, 0.0],
+			[0.85, 1.60, 1.60, 0.0], [1.00, 1.80, 1.80, 0.0],
+		],
+		BodySchema.Layer.MUSCLE: [
+			[0.00, 2.00, 2.00, -0.5], [0.60, 1.40, 1.40, -0.3],
+			[0.80, 1.00, 1.00, 0.0], [0.92, 1.60, 1.50, 0.4],
+			[1.00, 0.60, 0.60, 0.2],
+		],
+		BodySchema.Layer.FAT: [
+			[0.00, 0.50, 0.45, -0.8], [0.55, 0.35, 0.35, -0.6],
+			[0.80, 0.15, 0.15, 0.0], [1.00, 0.10, 0.10, 0.0],
+		],
+		BodySchema.Layer.SKIN: [
+			[0.00, 0.60, 0.60, -0.3], [0.55, 0.50, 0.50, -0.2],
+			[1.00, 0.35, 0.35, 0.0],
+		],
+	},
+	&"tail": {
+		BodySchema.Layer.BONE: [
+			[0.00, 0.35, 0.35, 0.0], [1.00, 0.15, 0.15, 0.0],
+		],
+		BodySchema.Layer.MUSCLE: [
+			[0.00, 0.80, 0.80, 0.0], [0.35, 0.30, 0.30, 0.0],
+			[1.00, 0.04, 0.04, 0.0],
+		],
+		BodySchema.Layer.FAT: [
+			[0.00, 0.30, 0.30, 0.0], [1.00, 0.08, 0.08, 0.0],
+		],
+		BodySchema.Layer.SKIN: [
+			[0.00, 0.35, 0.35, 0.0], [1.00, 0.30, 0.30, 0.0],
+		],
+	},
+	&"fore_limb": {
+		BodySchema.Layer.BONE: [
+			[0.00, 0.35, 0.35, 0.0], [1.00, 0.28, 0.28, 0.0],
+		],
+		BodySchema.Layer.MUSCLE: [
+			[0.00, 2.30, 2.30, 0.3], [0.35, 1.10, 1.10, 0.2],
+			[0.60, 0.35, 0.35, 0.0], [1.00, 0.04, 0.04, 0.0],
+		],
+		BodySchema.Layer.FAT: [
+			[0.00, 0.35, 0.35, 0.0], [0.50, 0.12, 0.12, 0.0],
+			[1.00, 0.06, 0.06, 0.0],
+		],
+		BodySchema.Layer.SKIN: [
+			[0.00, 0.40, 0.40, 0.0], [1.00, 0.30, 0.30, 0.0],
+		],
+	},
+	&"hind_limb": {
+		BodySchema.Layer.BONE: [
+			[0.00, 0.40, 0.40, 0.0], [1.00, 0.28, 0.28, 0.0],
+		],
+		BodySchema.Layer.MUSCLE: [
+			[0.00, 3.40, 3.60, -0.2], [0.30, 1.90, 2.00, 0.0],
+			[0.55, 0.45, 0.45, 0.0], [1.00, 0.04, 0.04, 0.0],
+		],
+		BodySchema.Layer.FAT: [
+			[0.00, 0.45, 0.40, 0.2], [0.50, 0.12, 0.12, 0.0],
+			[1.00, 0.06, 0.06, 0.0],
+		],
+		BodySchema.Layer.SKIN: [
+			[0.00, 0.40, 0.40, 0.0], [1.00, 0.30, 0.30, 0.0],
+		],
+	},
+}
 
-# -------------------------------------------------- features (Phase 2) ------
-# Organ/vessel/nerve table (§6): geometry in body coordinates, not cells.
-@export var features: Array[Dictionary] = []
+# -------------------------------------------------------------- features ----
+# Organs, vessels and nerves (§6): geometry in body coordinates, never cells.
+# Coordinates use the census conventions — t along the chain (trunk runs
+# pelvis 0 → withers 1, neck runs withers 0 → jaw tip 1), θ around the axis
+# from dorsal (0 the back, π/2 the right flank, π the belly, 3π/2 the left),
+# and depth as a fraction of the local flesh depth from the surface inward
+# (0 at the skin, 1 at the bone core) so a physique retune moves the flesh
+# and the features stay where the flesh is.
+#
+# Organs carry a t range, an angular centre + spread, a depth band and an
+# effect. Vessels are polylines of [t, θ, depth] with a radius and a flow
+# rate (bleed on breach); nerves are polylines with the region they serve
+# (function loss on cut). The placements encode the anatomy the combat rules
+# would otherwise have had to special-case: the heart is ventral-thoracic
+# inside the rib ring, the carotids are shallow in the throat — which is why
+# throat bites kill, as geometry rather than as a rule — and the spinal cord
+# is dorsal at full depth, protected until the vertebra is breached.
+@export var features: Array[Dictionary] = [
+	{"feature": "organ", "name": "heart", "chain": &"trunk",
+		"t_range": Vector2(0.80, 0.88), "theta": PI, "spread": 0.5,
+		"depth": Vector2(0.75, 1.0), "hp": 1.0, "effect": "arrest"},
+	{"feature": "organ", "name": "lung_left", "chain": &"trunk",
+		"t_range": Vector2(0.72, 0.95), "theta": 4.712389, "spread": 0.8,
+		"depth": Vector2(0.7, 1.0), "hp": 1.0, "effect": "aerobic"},
+	{"feature": "organ", "name": "lung_right", "chain": &"trunk",
+		"t_range": Vector2(0.72, 0.95), "theta": 1.570796, "spread": 0.8,
+		"depth": Vector2(0.7, 1.0), "hp": 1.0, "effect": "aerobic"},
+	{"feature": "organ", "name": "liver", "chain": &"trunk",
+		"t_range": Vector2(0.62, 0.72), "theta": 2.5, "spread": 0.7,
+		"depth": Vector2(0.6, 1.0), "hp": 1.0, "effect": "filter"},
+	{"feature": "organ", "name": "stomach", "chain": &"trunk",
+		"t_range": Vector2(0.35, 0.60), "theta": PI, "spread": 0.9,
+		"depth": Vector2(0.6, 1.0), "hp": 1.0, "effect": "digest"},
+	{"feature": "organ", "name": "kidney_left", "chain": &"trunk",
+		"t_range": Vector2(0.45, 0.55), "theta": 5.88, "spread": 0.4,
+		"depth": Vector2(0.65, 1.0), "hp": 1.0, "effect": "filter"},
+	{"feature": "organ", "name": "kidney_right", "chain": &"trunk",
+		"t_range": Vector2(0.45, 0.55), "theta": 0.4, "spread": 0.4,
+		"depth": Vector2(0.65, 1.0), "hp": 1.0, "effect": "filter"},
+	{"feature": "organ", "name": "brain", "chain": &"neck",
+		"t_range": Vector2(0.92, 1.0), "theta": 0.0, "spread": PI,
+		"depth": Vector2(0.8, 1.0), "hp": 1.0, "effect": "collapse"},
+	{"feature": "vessel", "name": "aorta", "chain": &"trunk",
+		"path": [[0.05, 0.0, 0.9], [0.50, 0.0, 0.9], [0.95, 0.0, 0.9]],
+		"radius": 0.8, "flow": 3.0},
+	{"feature": "vessel", "name": "carotid_left", "chain": &"neck",
+		"path": [[0.05, 4.2, 0.3], [0.75, 4.2, 0.3]],
+		"radius": 0.5, "flow": 2.5},
+	{"feature": "vessel", "name": "carotid_right", "chain": &"neck",
+		"path": [[0.05, 2.1, 0.3], [0.75, 2.1, 0.3]],
+		"radius": 0.5, "flow": 2.5},
+	{"feature": "vessel", "name": "femoral_left", "chain": &"HL",
+		"path": [[0.02, 1.570796, 0.5], [0.30, 1.3, 0.4]],
+		"radius": 0.4, "flow": 1.8},
+	{"feature": "vessel", "name": "femoral_right", "chain": &"HR",
+		"path": [[0.02, 4.712389, 0.5], [0.30, 4.9, 0.4]],
+		"radius": 0.4, "flow": 1.8},
+	{"feature": "nerve", "name": "spinal_cord", "chain": &"trunk",
+		"path": [[0.0, 0.0, 1.0], [1.0, 0.0, 1.0]], "serves": "body"},
+	{"feature": "nerve", "name": "spinal_cord_neck", "chain": &"neck",
+		"path": [[0.0, 0.0, 1.0], [0.95, 0.0, 1.0]], "serves": "body"},
+	{"feature": "nerve", "name": "sciatic_left", "chain": &"HL",
+		"path": [[0.0, PI, 0.8], [0.5, PI, 0.7]], "serves": "HL"},
+	{"feature": "nerve", "name": "sciatic_right", "chain": &"HR",
+		"path": [[0.0, PI, 0.8], [0.5, PI, 0.7]], "serves": "HR"},
+]
 
 
 ## The compiled chain graph for the armature — six chains, ~35 nodes.
@@ -153,7 +307,6 @@ func chains() -> Array[ChainSpec]:
 	trunk.lengths = _spread(trunk_length, trunk_sticks)
 	trunk.radii = _resample(trunk_radii, trunk_sticks)
 	trunk.bend_deg = _fill(trunk_bend_deg, trunk_sticks - 1)
-	trunk.flesh_scale = trunk_flesh_scale
 	out.append(trunk)
 
 	# The neck chain owns its cervical stations plus the head node, so its
@@ -169,7 +322,6 @@ func chains() -> Array[ChainSpec]:
 	neck.radii = _fill(neck_radius, cervical)
 	neck.radii.append(skull_radius)
 	neck.bend_deg = _fill(neck_bend_deg, neck.node_count - 1)
-	neck.flesh_scale = neck_flesh_scale
 	neck.attach_chain = BodySchema.TRUNK
 	neck.attach_index = trunk.node_count - 1
 	neck.carry_deg = neck_carry_deg
@@ -182,7 +334,6 @@ func chains() -> Array[ChainSpec]:
 	tail.lengths = _spread(tail_length, tail.node_count)
 	tail.radii = _taper(tail_base_radius, tail_tip_radius, tail.node_count)
 	tail.bend_deg = _fill(tail_bend_deg, tail.node_count - 1)
-	tail.flesh_scale = tail_flesh_scale
 	tail.attach_chain = BodySchema.TRUNK
 	tail.attach_index = 0
 	tail.carry_deg = tail_carry_deg
@@ -205,7 +356,6 @@ func chains() -> Array[ChainSpec]:
 			limb.lengths.append(total * share)
 		limb.radii = _fill(fore_leg_radius if fore else hind_leg_radius, 4)
 		limb.bend_deg = _fill(0.0, 3)
-		limb.flesh_scale = limb_flesh_scale
 		limb.attach_chain = BodySchema.TRUNK
 		limb.attach_index = trunk.node_count - 2 if fore else 0
 		limb.attach_hold = fore_girdle_hold if fore else hind_girdle_hold

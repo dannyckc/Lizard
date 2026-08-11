@@ -116,11 +116,11 @@ var pinned: PackedByteArray = PackedByteArray()
 var fwd: PackedVector2Array = PackedVector2Array()
 var perp: PackedVector2Array = PackedVector2Array()
 
-## Provisional per-node mass and flesh radius, derived from the bone radii and
-## the per-chain flesh scale. These are stand-ins with exactly one purpose —
-## giving the Z channel a weight to hang off each station — and Corpus (Phase
-## 2) becomes their owner: the cell census bakes to per-node mass + offset and
-## these derivations are deleted. Nothing else may read them.
+## Per-node mass and flesh radius — the census's numbers, baked here by
+## Poise.bake so the Z channel has a weight and a beam width to hang off each
+## station. The Corpus is the owner; this is the copy it drives the armature
+## through, and an armature nobody has baked carries no weight (its chains
+## ride their carry lines with no droop until the census arrives).
 var mass: PackedFloat32Array = PackedFloat32Array()
 var flesh_r: PackedFloat32Array = PackedFloat32Array()
 
@@ -246,33 +246,10 @@ func build(p_spec: BodySpec, at: Vector2, heading: float) -> void:
 	_neck = chains[BodySchema.NECK]
 	_tail = chains[BodySchema.TAIL]
 
-	# Provisional flesh and mass per node — see the field comment: a weight
-	# for the Z channel to hang off each station, owned by Corpus from Phase 2.
-	var scale_of: Dictionary = {}
-	for c in specs:
-		scale_of[c.name] = c.flesh_scale
+	# The weights arrive from the census: Poise.bake fills these from Corpus
+	# after every build and every wound. Zero until then — see the field note.
 	mass.fill(0.0)
 	flesh_r.fill(0.0)
-	for name: StringName in chains:
-		var chain: Chain = chains[name]
-		var flesh: float = scale_of[name]
-		for j in chain.sticks.size():
-			var s: int = chain.sticks[j]
-			var r: float = stick_radius[s] * flesh
-			var half: float = PI * r * r * stick_bone[s] * 0.5
-			# Each stick hands half its flesh to each end — but an attach
-			# stick's parent end belongs to the trunk's own census, so the
-			# whole of it stays with the chain's first node.
-			var a: int = stick_a[s]
-			var b: int = stick_b[s]
-			if j == 0 and chain.parent_node >= 0:
-				mass[b] += half * 2.0
-				flesh_r[b] = maxf(flesh_r[b], r)
-			else:
-				mass[a] += half
-				mass[b] += half
-				flesh_r[a] = maxf(flesh_r[a], r)
-				flesh_r[b] = maxf(flesh_r[b], r)
 
 	_build_axial()
 	fore_stance = spec.stance_height(true)
