@@ -18,11 +18,12 @@
 ## top speed is an arrival rather than an assignment — there is no acceleration
 ## parameter anywhere in the v2 body.
 ##
-## Until SpecimenMesh2 lands (Phase 4) what this node draws is the solved skeleton
-## itself: sticks at their bone radii, feet where they are planted, a shadow under
-## whatever is off the ground, and the plumb line against the support the feet
-## actually make. A debug view, but an honest one — every mark is state the systems
-## put somewhere.
+## The flesh is drawn by `Likeness`, a child node reading `contour` — the skin,
+## posed at the end of the tick once every bone has been placed. What *this* node
+## draws is the solved skeleton itself, and only when `debug` is set: sticks at
+## their bone radii, feet where they are planted, a shadow under whatever is off
+## the ground, and the plumb line against the support the feet actually make. A
+## debug view, but an honest one — every mark is state the systems put somewhere.
 class_name Creature2
 extends Node2D
 
@@ -63,9 +64,12 @@ class Command extends RefCounted:
 
 
 @export var body: BodySpec
+## Draws the skeleton over the flesh — the state, rather than the animal.
+@export var debug: bool = false
 
 var armature: Armature = Armature.new()
 var corpus: Corpus = Corpus.new()
+var contour: Contour = Contour.new()
 var poise: Poise = Poise.new()
 var attitude: Attitude = Attitude.new()
 var locomotor: Locomotor = Locomotor.new()
@@ -104,6 +108,8 @@ func build(at: Vector2, p_heading: float) -> void:
 	poise.bake(corpus, armature)
 	attitude.derive(poise)
 	tread.setup(armature)
+	contour.build(corpus, armature)
+	contour.pose()
 	locomotor.update(attitude.active, corpus, poise, body, attitude)
 	head_pos = armature.plan(armature.head_index())
 	heading = p_heading
@@ -153,6 +159,10 @@ func _physics_process(delta: float) -> void:
 
 	poise.pose(armature)
 	poise.stand(armature)
+	# ...and last of all the skin, over bones that have finished moving. Nothing
+	# reads back from it, which is why it can be last: the flesh is a consequence
+	# of the tick, never a term in it.
+	contour.pose()
 	footing.update(delta, tread, poise, corpus, locomotor,
 		tread.cycle_length(), airborne, alive)
 	# A body that has been unable to get a leg back underneath itself for longer
@@ -276,6 +286,7 @@ func reset() -> void:
 	ang_vel = 0.0
 	if not armature.collapsed:
 		armature.take_head(head_pos)
+	contour.pose()
 
 
 func toggle_collapsed() -> void:
@@ -322,6 +333,8 @@ func _ground_under(at: Vector2, radius: float) -> float:
 # ------------------------------------------------------------------ the view ----
 
 func _draw() -> void:
+	if not debug:
+		return
 	var a: Armature = armature
 	# Shadows first: a soft line under any stick carried off the ground, so height
 	# reads in a view that has no vertical axis.

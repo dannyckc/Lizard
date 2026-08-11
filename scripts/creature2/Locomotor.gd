@@ -38,8 +38,8 @@ extends RefCounted
 ## a ratio against these, so the reference cat comes out at exactly 1.0 and every
 ## other body is quoted against the animal the constants below were sized on.
 ## Re-pin both from CorpusProbe whenever the default knots move.
-const REFERENCE_MASS: float = 30523.043797
-const REFERENCE_MUSCLE: float = 7902.545570
+const REFERENCE_MASS: float = 46128.100637
+const REFERENCE_MUSCLE: float = 15347.330053
 
 ## Body length of the default build, so rotational inertia is a ratio rather than
 ## an absolute — see `turn_rate`.

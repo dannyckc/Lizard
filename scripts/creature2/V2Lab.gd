@@ -18,6 +18,7 @@
 ##   R            reset the creature to its spawn
 ##   K            collapse / revive (ragdoll mode toggle)
 ##   F            drop the body from a height
+##   V            skeleton over the flesh — the state rather than the animal
 ##   drag         haul the nearest body node with the mouse
 class_name V2Lab
 extends Node2D
@@ -98,6 +99,9 @@ func _pump_key(event: InputEventKey) -> void:
 			creature.toggle_collapsed()
 		KEY_F:
 			creature.drop(DROP_HEIGHT)
+		KEY_V:
+			creature.debug = not creature.debug
+			creature.queue_redraw()
 
 
 func _zoom(factor: float) -> void:

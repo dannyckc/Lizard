@@ -37,20 +37,30 @@ const TICK: float = 1.0 / 60.0
 ## fraction of the leg and became the height the joint angles actually deliver
 ## (see Carriage.stance_clearance). That moved the census's rest frame upward —
 ## the cat now stands 33.8/36.7 px rather than 25.1/30.8 — so the centre of mass
-## rose with it. Mass and every compartment are untouched to the last decimal,
-## which is the check that nothing but the frame moved.
+## rose with it.
+##
+## Re-pinned again at Phase 4, and this time the animal really did change. The
+## silhouette gate is the first thing in the rebuild to have measured the
+## compiled body against the picture it is meant to be, and it found the cat
+## drawn at 0.27 of its own girdle gap across the trunk where the Gait HUD mock
+## says 0.38 and v1's Cat preset says 0.47 — a third too thin, in a body whose
+## stance heights were already exact. So the trunk and neck knots were thickened
+## until the drawn animal sat inside that band (0.40), and everything counted off
+## the cells moved with them: half again the mass, the epaxial compartment up
+## with the back it is authored on, the weight a touch further forward. The
+## limbs and the tail were measuring right and were left alone.
 const PINS := {
-	"mass": 30523.043797,
-	"com_x": 30.109844,
+	"mass": 46128.100637,
+	"com_x": 31.983133,
 	"com_y": 0.000000,
-	"com_z": 32.199135,
-	"along": 0.485643,
+	"com_z": 33.469788,
+	"along": 0.515857,
 	"fore_girdle": 1119.393478,
 	"hind_girdle": 2242.158273,
-	"epaxial": 4540.990644,
-	"neck": 814.081993,
-	"jaw": 395.969852,
-	"trunk_girth": 7.596613,
+	"epaxial": 11985.778302,
+	"neck": 1773.094881,
+	"jaw": 416.954952,
+	"trunk_girth": 11.112390,
 }
 ## Six-decimal pins on quantities of very different magnitude: the tolerance
 ## is relative on the big numbers, absolute on the fractions.

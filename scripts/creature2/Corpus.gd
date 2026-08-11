@@ -331,11 +331,21 @@ func station_of(name: StringName, t: float) -> int:
 ## thickness. Rings for rendering, capsules for contact and depth for wound
 ## resolution are all this one sum — the "one census" law in a single line.
 func surface_radius(name: StringName, station: int, sector: int) -> float:
-	var col: int = column(name, station, sector)
+	return layer_radius(name, station, sector, 4)
+
+
+## The same sum with only the innermost `layers` of the radial stack counted:
+## 1 is bare bone, 2 adds muscle, 3 adds fat, 4 is the surface. The anatomy
+## view's peel is four evaluations of this one function rather than four
+## geometries (§10), and a wound walk that has spent the skin is asking for a
+## radius of 3.
+func layer_radius(name: StringName, station: int, sector: int,
+		layers: int) -> float:
+	var col: int = column(name, station, sector) * 4
 	var c: CensusChain = _by_name[name]
 	var r: float = c.core[station]
-	for layer in 4:
-		r += thickness[col * 4 + layer] * hp[col * 4 + layer]
+	for layer in clampi(layers, 0, 4):
+		r += thickness[col + layer] * hp[col + layer]
 	return r
 
 
