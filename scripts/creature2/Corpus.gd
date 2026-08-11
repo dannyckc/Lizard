@@ -94,6 +94,11 @@ var _derived_rev: int = -1
 var _mass: float = 0.0
 var _com: Vector3 = Vector3.ZERO
 var _compartments: Dictionary = {}
+## Muscle a chain still has against the muscle it was built with, as
+## (effective, built) volume. What "how much of this leg is answering" is, and
+## the only honest source for it: the same cells the compartments are summed
+## from, before hp is spent on them.
+var _chain_muscle: Dictionary = {}
 
 ## Body length the `along` fraction is quoted against: the trunk between its
 ## girdles, because "are the legs under the weight" is the question the
@@ -374,6 +379,55 @@ func compartments() -> Dictionary:
 	return _compartments
 
 
+## How much of one chain's muscle is still answering, 0..1 — effective volume
+## over built volume. Exactly 1.0 on an intact animal, which is the guarantee
+## that a sound creature walks as though this reading did not exist; a haunch
+## bitten hollow drops it, and the gait shortens that leg's stride and slows its
+## swing without anything having decided to limp.
+func soundness(name: StringName) -> float:
+	_derive()
+	var muscle: Vector2 = _chain_muscle.get(name, Vector2.ZERO)
+	if muscle.y <= MIN_MASS:
+		return 1.0
+	return clampf(muscle.x / muscle.y, 0.0, 1.0)
+
+
+## The same reading for a whole girdle: its limbs and the trunk muscle standing
+## behind them. What the drive across a socket is a share of.
+func girdle_soundness(fore: bool) -> float:
+	_derive()
+	var sum := Vector2.ZERO
+	for chain in chains:
+		if chain.kind != BodySchema.LIMB:
+			continue
+		if (chain.group == &"fore_limb") != fore:
+			continue
+		sum += _chain_muscle.get(chain.name, Vector2.ZERO) as Vector2
+	if sum.y <= MIN_MASS:
+		return 1.0
+	return clampf(sum.x / sum.y, 0.0, 1.0)
+
+
+## How much of the body's weight hangs beyond a station of the trunk, as a share
+## of the whole — the counterweight a girdle has to push against. x is what is
+## ahead of the fore girdle, y what is behind the hind girdle, and a jump comes
+## out of the hind legs because of this rather than because of a rule.
+func balance(fore_x: float, hind_x: float) -> Vector2:
+	_derive()
+	var ahead: float = 0.0
+	var behind: float = 0.0
+	for chain in chains:
+		for st in chain.stations:
+			var m: float = chain.st_mass[st]
+			var at: float = chain.centre[st].x
+			if at > fore_x:
+				ahead += m
+			elif at < hind_x:
+				behind += m
+	var total: float = maxf(_mass, MIN_MASS)
+	return Vector2(ahead / total, behind / total)
+
+
 ## The soft-body feel as a material property (§7.5): fat over everything
 ## structural in the column. A fat flank dents and cushions; a bony shin is
 ## stiff and fragile.
@@ -477,9 +531,11 @@ func _derive() -> void:
 	var neck_m: float = 0.0
 	var jaw_m: float = 0.0
 
+	_chain_muscle.clear()
 	for chain in chains:
 		var half: float = PI / float(chain.sectors)
 		var shape: float = sin(half) / half
+		var muscle := Vector2.ZERO
 		chain.st_mass.fill(0.0)
 		chain.st_rise.fill(0.0)
 		chain.st_side.fill(0.0)
@@ -504,6 +560,16 @@ func _derive() -> void:
 				var col: int = (chain.base + st * chain.sectors + sec) * 4
 				var r0: float = core
 				var t01: float = (float(st) + 0.5) / float(chain.stations)
+				# What this wedge's muscle was built as, before any of it was
+				# spent — the denominator "how much of this limb still
+				# answers" is a fraction of. Counted on the same shell the
+				# effective volume below is, so an intact wedge reads exactly
+				# one, and counted here so nothing walks the cells again.
+				var raw: float = thickness[col + BodySchema.Layer.MUSCLE]
+				if raw > 0.00001:
+					var under: float = core + thickness[col + BodySchema.Layer.BONE]
+					muscle.y += half * ((under + raw) * (under + raw)
+						- under * under) * chain.seg
 				for layer in 4:
 					var eff: float = thickness[col + layer] * hp[col + layer]
 					if eff <= 0.00001:
@@ -520,6 +586,7 @@ func _derive() -> void:
 					st_rise += (at.z - centre.z) * m
 					st_side += (at.y - centre.y) * m
 					if layer == BodySchema.Layer.MUSCLE:
+						muscle.x += vol
 						match chain.kind:
 							BodySchema.TRUNK:
 								epaxial += vol
@@ -541,6 +608,7 @@ func _derive() -> void:
 			if st_mass > MIN_MASS:
 				chain.st_rise[st] = st_rise / st_mass
 				chain.st_side[st] = st_side / st_mass
+		_chain_muscle[chain.name] = muscle
 
 	_mass = total
 	_com = moment / maxf(total, MIN_MASS)

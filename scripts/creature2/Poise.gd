@@ -50,6 +50,16 @@ var node_side: PackedFloat32Array = PackedFloat32Array()
 var node_width: PackedFloat32Array = PackedFloat32Array()
 var _baked_rev: int = -1
 
+## Where the weight sits along the trunk in body space (px from the pelvis), and
+## where the two girdles are — the three numbers the balance constraints below
+## are one subtraction of. `built_com` is the *intact* build's, kept because what
+## an animal can stand up in is a statement about the body it grew rather than
+## about whatever has been bitten out of it since.
+var com_x: float = 0.0
+var built_com: float = -1.0
+## x the fore girdle station, y the hind.
+var girdle_x: Vector2 = Vector2.ZERO
+
 
 # ----------------------------------------------------- posed, in the world ----
 
@@ -156,11 +166,23 @@ func bake(corpus: Corpus, armature: Armature) -> bool:
 			node_rise[i] /= node_mass[i]
 			node_side[i] /= node_mass[i]
 
-	# Hand the armature its weights: the droop walk and (from Phase 3) the
-	# drive read these, and this assignment is the whole of "Corpus derives
-	# mass → drives Armature".
+	# Hand the armature its weights: the droop walk and the drive read these,
+	# and this assignment is the whole of "Corpus derives mass → drives
+	# Armature".
 	armature.mass = node_mass.duplicate()
 	armature.flesh_r = node_width.duplicate()
+
+	# ...and where that weight sits along the trunk, against the two girdles it
+	# has to be bracketed by. Body space, so it is a rest-frame reading of the
+	# census and not of any pose.
+	com_x = corpus.com().x
+	if built_com < 0.0:
+		built_com = com_x
+	var trunk: Armature.Chain = armature.chain(BodySchema.TRUNK)
+	var fore_arc: float = 0.0
+	for j in range(1, trunk.nodes.size() - 1):
+		fore_arc += armature.stick_bone[trunk.sticks[j - 1]]
+	girdle_x = Vector2(fore_arc, 0.0)
 	return true
 
 
@@ -204,7 +226,14 @@ func stand(armature: Armature, prop: Vector2 = Vector2.INF) -> void:
 	for limb in armature.limbs:
 		var toe: int = limb.nodes[limb.nodes.size() - 1]
 		var p: Vector3 = armature.pos[toe]
-		if p.z > PLANT_EPSILON:
+		# Whether this foot is down is the gait's answer where there is a gait — a
+		# foot rolled forward onto its toe stands a little above the ground it is
+		# standing on, and a carried limb hangs at no height in particular. With
+		# nothing driving the feet the height is the only thing to ask.
+		if limb.foot_driven:
+			if not limb.grounded:
+				continue
+		elif p.z > PLANT_EPSILON:
 			continue
 		_prints.append(Vector2(p.x, p.y))
 		pad = maxf(pad, node_width[toe] if toe < node_width.size() else 0.0)
@@ -229,6 +258,58 @@ func stand(armature: Armature, prop: Vector2 = Vector2.INF) -> void:
 		var out: Vector2 = (centre if posed else base) - base
 		if out.length_squared() > 0.000001:
 			overhang = out.normalized() * -clearance
+
+
+# ------------------------------------------------- standing under the weight ----
+# Three constraints, one argument, all ported from Plumb: an animal is held up
+# where its feet touch the ground and its weight comes down at one place, and if
+# the second is not between the first then nothing about the creature is
+# standing. Each is a *floor* rather than a derivation — a build that already
+# balances keeps every number it was given, to the digit, and one that does not
+# is moved the least distance that lets it stand.
+
+## The least angle a girdle standing on its own has to rear its trunk at to have
+## the weight over its feet, degrees.
+##
+## One girdle, one beam, everything on both sides hanging off the hip: the weight
+## sits `lever` along the beam from the hips, the feet reach `ahead` across the
+## ground, and if the second cannot cover the first the trunk comes up until the
+## cosine closes the gap. Zero on every quadruped, which has a second girdle and
+## no question to answer.
+func carriage_deg(ahead: float) -> float:
+	var lever: float = maxf(built_com, 0.0) - girdle_x.y
+	if lever <= 0.0 or ahead >= lever:
+		return 0.0
+	return rad_to_deg(acos(clampf(ahead / maxf(lever, 0.0001), 0.0, 1.0)))
+
+
+## Where a girdle standing on its own has to put its feet — under the weight,
+## every time — as a share of the fore-and-aft reach they are placed out of.
+## `carried` is the angle the trunk is actually held at, because a reared body is
+## a foreshortened one and it has to be the same cosine `carriage_deg` inverts.
+func stand_under(reach: float, carried: float) -> float:
+	if reach <= 0.0001:
+		return 0.0
+	return clampf((maxf(built_com, 0.0) - girdle_x.y) * cos(carried) / reach,
+		-1.0, 1.0)
+
+
+## The least a girdle's resting feet have to be placed out from their own sockets
+## for the weight to be inside them, in the same share of the fore-and-aft reach
+## the foot bias is quoted in.
+##
+## A floor and never a replacement: on any build whose centre already sits
+## between its girdles — every ordinary quadruped — both answers are zero and not
+## one foot moves. It bites on exactly the builds it should, and neither case is
+## a rule about a species; both are the same subtraction.
+func bias_floor(reach: float, fore: bool) -> float:
+	if reach <= 0.0001:
+		return 0.0
+	var past: float = (com_x - girdle_x.x) if fore else (girdle_x.y - com_x)
+	if past <= 0.0:
+		return 0.0
+	# Out past the girdle, and then past it by the margin a stance keeps in hand.
+	return past / reach + KEEP
 
 
 ## How much of its own support the line is inside, as a share of the

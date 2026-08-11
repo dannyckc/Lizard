@@ -182,12 +182,43 @@ func _check_joint_limits_hold(c: Creature2) -> void:
 		"released, a stick stayed %.4f px off its length" % worst_stick)
 	_check(worst_bend < 0.001,
 		"hauled by the tail, a joint folded %.4f rad past its limit" % worst_bend)
+	# A living body is *led*: its head is placed by whatever is driving it, so a
+	# pull on the tail bends the chain and moves nothing else. That is the driven
+	# solve doing its job, and it is why the towing claim below is asked of a body
+	# nothing is holding.
+	var led: float = before.distance_to(a.centre())
+	_check(led < 1.0,
+		"480 px of tail-hauling dragged a led body %.2f px off its own line" % led)
+	c.reset()
+	_settle(c, 60)
+
+	# ...and the same pull on a carcass, where there is no authoritative point and
+	# the whole body has to follow. A chain solved with a pin would swing about its
+	# own snout instead of being towed.
+	c.toggle_collapsed()
+	_settle(c, 60)
+	before = a.centre()
+	var limp_stick: float = 0.0
+	var limp_bend: float = 0.0
+	for tick in 220:
+		if tick < 40:
+			var at: Vector2 = Vector2(a.pos[tip].x, a.pos[tip].y)
+			a.haul_to(tip, at + Vector2(0.0, 12.0))
+		c._physics_process(TICK)
+		if tick >= 120:
+			limp_stick = maxf(limp_stick, a.worst_stick_error())
+		limp_bend = maxf(limp_bend, a.worst_bend_excess())
 	var towed: float = before.distance_to(a.centre())
 	_check(towed > 1.0,
-		"480 px of tail-hauling towed the body %.2f px — the pull never reached it"
+		"480 px of tail-hauling towed a limp body %.2f px — the pull never reached it"
 		% towed)
-	notes.append("hauled about: %.2f px of give under the pull, exact to %.4f px released, body towed %.0f px"
-		% [pulled_stick, worst_stick, towed])
+	_check(limp_stick < 0.01,
+		"released, a limp body's stick stayed %.4f px off its length" % limp_stick)
+	_check(limp_bend < 0.001,
+		"hauled by the tail, a limp joint folded %.4f rad past its limit" % limp_bend)
+	notes.append("hauled about: %.2f px of give under the pull, exact to %.4f px released, led body holds its line, limp body towed %.0f px"
+		% [pulled_stick, maxf(worst_stick, limp_stick), towed])
+	c.toggle_collapsed()
 	c.reset()
 	_settle(c, 90)
 

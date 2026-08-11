@@ -95,13 +95,73 @@ class ChainSpec extends RefCounted:
 @export var hind_girdle_hold: float = 1.0
 
 # --------------------------------------------------------------- posture ----
+# How the limbs are carried, and what the joints between their bones do. The
+# angle is the trait and every length is a projection of it (§7.5, and the v1
+# lesson: a limb is a joint angle, per girdle — an authored "how extended it
+# stands" fraction cannot express a column standing at 173°). Carriage owns the
+# table these leanings are read through; what is authored here is this animal's
+# own departure from its stance.
 
-## How much of full leg extension a standing cat uses. Below 1 because a cat
-## stands crouched on bent joints, never locked out; the stance heights every
-## consumer reads are what the legs deliver at this fraction.
-@export var stance_factor: float = 0.80
+## Which row of Carriage.TABLE this body is built in.
+@export var posture: int = 1
+## How many stances up the table the girdles can re-carry their limbs. Zero is
+## a build that stands one way; see Attitude.RULES, which spends it.
+@export var stance_range: int = 0
+## How wide the feet are set, as a multiple of what the stance asks for.
+@export var stance_width: float = 0.85
+## How much more flexed than its stance each girdle stands, degrees; negative is
+## straighter. The cat carries a strut in front and a folded spring behind.
+@export var fore_flex_deg: float = -16.0
+@export var hind_flex_deg: float = 20.0
+## How far each joint may close, against what its stance closes to. Over one is
+## a joint that folds past its own stance — where a crouch and a leap come from.
+@export var fore_fold_range: float = 0.92
+@export var hind_fold_range: float = 1.25
+## Half-angle of the fan each socket swings its whole limb through, degrees.
+@export var fore_swing_deg: float = 58.0
+@export var hind_swing_deg: float = 76.0
+## How much of the foot is a toe to push off from. A digitigrade cat is already
+## standing on its toes and there is real push there.
+@export var toe_push: float = 0.50
+## The angle a trunk with nothing under its shoulders is carried at, degrees.
+## Zero on a quadruped, which has a second girdle and no question to answer.
+@export var trunk_lift_deg: float = 0.0
+## Where each pair's foot rests fore-and-aft, as a share of what is left of its
+## own disc once the lateral stance is spent. Front a little forward, rear a
+## little back — which is what puts the feet at the corners of the weight.
+@export var front_foot_bias: float = 0.30
+@export var rear_foot_bias: float = -0.25
+## Rest fore-aft offset of the census's limb chord, px. Rest-pose data: it is
+## where the standing foot sits in the built body the census is compiled from,
+## and the live gait derives its own from the biases above.
 @export var fore_foot_lead: float = 2.0
 @export var hind_foot_lead: float = -2.0
+## How far ahead of its rest point a foot is aimed, as a share of the stride.
+@export var foot_lead: float = 0.45
+## How readily a limb is pulled onto a beat its partner has just taken.
+@export var beat_coupling: float = 0.55
+
+# ---------------------------------------------------------------- travel ----
+# What the animal asks for. Requests, not promises: the legs answer with a
+# speed of their own and the lower of the two is what the body travels at.
+
+@export var move_speed: float = 88.0
+@export var sprint_multiplier: float = 1.85
+@export var turn_speed_deg: float = 210.0
+@export var turn_responsiveness: float = 14.0
+@export var turn_speed_falloff: float = 0.50
+@export var reverse_speed_factor: float = 0.60
+## How far behind the head the body turns about, px.
+@export var turn_pivot: float = 38.0
+
+# ------------------------------------------------------------------ wave ----
+# The travelling lateral undulation. Kinematic — it displaces the body, it
+# never pushes it — and what a socket's own share of it comes to is measured
+# off the socket rather than predicted, because it is what narrows the stance.
+
+@export var body_wave: float = 4.5
+@export var wave_frequency: float = 0.9
+@export var wave_speed: float = 2.0
 
 # ----------------------------------------------------------------- fibre ----
 # Behavioural scalars kept from v1, consumed from Phase 3 on. Stored now so
@@ -110,7 +170,14 @@ class ChainSpec extends RefCounted:
 @export var fast_twitch: float = 0.68
 @export var hind_insertion: float = 0.27
 @export var fore_insertion: float = 0.30
-@export var spine_freedom: float = 0.85
+## How freely this back folds along its own length, against a body that could
+## curl right round. Authored rather than counted off the chain's bend limits,
+## because the chain is a controller with functional stations rather than a
+## vertebral census — the total turn a real cat's twelve-odd vertebrae make is
+## not the total eight nodes make at the same per-joint limit. One notch under
+## Cadence.ROTARY_SPINE: a cat's gallop is transverse, and the dorsomobile
+## specialist a step further on is what reverses its leads.
+@export var spine_freedom: float = 0.79
 
 # ---------------------------------------------------------------- solver ----
 
@@ -366,15 +433,37 @@ func chains() -> Array[ChainSpec]:
 
 
 ## What the legs deliver as a standing height at a girdle, px above the
-## surface. A claim, not a pose: it can never exceed the leg's own length, so
-## an animal authored to stand taller than its legs simply stands at full
-## stretch. The paw stick is walked flat on a digitigrade foot, so delivery is
-## the two proximal bones plus a share of the paw's lift.
+## surface — the rest-pose datum the census is compiled in.
+##
+## A claim, not a pose, and one arithmetic rather than two: the limb spans what
+## its joint angle makes it span, its foot rests where the stance and the bias
+## put it, and the height is the third side of that triangle. Everything live
+## reads the same closed form off the *active* carriage (see
+## Carriage.stance_clearance); this asks it of the stance the animal is built
+## in, which is the one the census may read — an animal re-carrying its limbs
+## does not re-grow its tissue.
 func stance_height(fore: bool) -> float:
-	var total: float = fore_leg_length if fore else hind_leg_length
+	var rest := Carriage.new(self, posture)
+	var joint: Carriage.Joint = rest.of(fore)
+	return rest.stance_clearance(limb_length(fore), joint.stand, stance_width,
+		front_foot_bias if fore else rear_foot_bias)
+
+
+## The anatomical length of one pair's limb — the three bones the chain is
+## solved with, the girdle-offset stick being trunk rather than leg.
+func limb_length(fore: bool) -> float:
+	return fore_leg_length if fore else hind_leg_length
+
+
+## How the limb's length divides either side of the joint the stance is quoted
+## at. The paw is walked flat and folds with the shank, so the chain is two
+## levers for this purpose: the proximal bone, and everything below it.
+func upper_share(fore: bool) -> float:
 	var shares: PackedFloat32Array = fore_leg_shares if fore else hind_leg_shares
-	var reach: float = total * (shares[0] + shares[1] + shares[2] * 0.4)
-	return reach * clampf(stance_factor, 0.0, 1.0)
+	var total: float = 0.0
+	for s in shares:
+		total += s
+	return shares[0] / maxf(total, 0.0001)
 
 
 func _spread(total: float, count: int) -> PackedFloat32Array:

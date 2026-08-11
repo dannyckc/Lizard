@@ -100,6 +100,22 @@ class Chain extends RefCounted:
 	## gone collinear (after a drop straightens it): fore elbows point back,
 	## hind knees point forward, and a straight chain has forgotten which.
 	var pole: PackedFloat32Array = PackedFloat32Array()
+	## The plan direction the limb's own solve plane runs along — socket toward
+	## foot, kept between ticks so a foot arriving directly beneath its socket
+	## does not lose the plane it was being solved in.
+	var plane: Vector2 = Vector2.RIGHT
+	## Where the gait has put this foot, in three dimensions, and how high it is
+	## holding its own corner of the body. Written by Tread and read by the
+	## placement; `foot_driven` is false until something owns the feet, and then
+	## the limb stands in the rest stance the build was laid out in.
+	var foot_target: Vector3 = Vector3.ZERO
+	var socket_rise: float = 0.0
+	var foot_driven: bool = false
+	## Whether this foot is bearing on something. Written by the gait, which is the
+	## only thing that knows: a planted foot is not "a foot at height zero" once the
+	## toe rolls the ankle up off the ground, and it is not on the ground at all on a
+	## limb the animal is merely carrying.
+	var grounded: bool = false
 	## How far the free end hangs below its carry line — the droop readout.
 	var tip_sag: float = 0.0
 
@@ -132,6 +148,9 @@ var stick_a: PackedInt32Array = PackedInt32Array()
 var stick_b: PackedInt32Array = PackedInt32Array()
 var stick_bone: PackedFloat32Array = PackedFloat32Array()
 var stick_plan: PackedFloat32Array = PackedFloat32Array()
+## The plan rests as built, so the back's own folding is applied to the build
+## rather than to last tick's answer and cannot accumulate.
+var stick_plan_rest: PackedFloat32Array = PackedFloat32Array()
 var stick_radius: PackedFloat32Array = PackedFloat32Array()
 ## Compliance of the stick, 1.0 rigid. Only girdle attach sticks are below
 ## one — the muscle-slung scapula — and in Phase 1 those are satisfied by
@@ -155,9 +174,35 @@ var chains: Dictionary = {}
 var limbs: Array[Chain] = []
 
 ## The body datum's height above the local surface — 0 standing on it. The
-## world's one integrator; a drop, a collapse and (later) a leap all live here.
+## world's one integrator; a drop, a collapse and a leap all live here.
 var fall: Gravity.Fall = Gravity.Fall.new()
 var collapsed: bool = false
+
+## Whether something is driving the head. A driven body is solved head-first with
+## every correction flowing away from the pin, which is what makes a chain follow
+## where it is led; a free one is solved symmetrically, because there is no
+## authoritative point on a carcass and keeping one would quietly make it the
+## anchor the rest of the body hangs off.
+var driven: bool = false
+
+## What the legs are holding each girdle at, in world height. Written by the gait
+## once it has measured its feet and standing at what the rest stance delivers
+## until then — a body with no gait solved has no feet to be standing on. The Z
+## channel reads these and nothing else decides the trunk's height.
+var fore_carry: float = 0.0
+var hind_carry: float = 0.0
+
+## Phase of the travelling lateral wave, and how far it has already displaced each
+## node. The wave is kinematic: it moves the body, it never pushes it, so only the
+## *difference* is applied and it is applied to the Verlet history as well — shift
+## `pos` alone and the integrator takes the wave's per-tick displacement for real
+## motion, carries it forward at the damping and re-injects it, and the chain
+## resonates until the tail whips at tens of times the intended amplitude.
+var wave_clock: float = 0.0
+var wave_offset: PackedVector2Array = PackedVector2Array()
+
+## How far the back is currently folded along its own length — see `bunch`.
+var bunched: float = 0.0
 
 var spawn_at: Vector2 = Vector2.ZERO
 var spawn_heading: float = 0.0
@@ -199,6 +244,7 @@ func build(p_spec: BodySpec, at: Vector2, heading: float) -> void:
 	stick_b.clear()
 	stick_bone.clear()
 	stick_plan.clear()
+	stick_plan_rest.clear()
 	stick_radius.clear()
 	stick_hold.clear()
 
@@ -251,9 +297,14 @@ func build(p_spec: BodySpec, at: Vector2, heading: float) -> void:
 	mass.fill(0.0)
 	flesh_r.fill(0.0)
 
+	stick_plan_rest = stick_plan.duplicate()
 	_build_axial()
 	fore_stance = spec.stance_height(true)
 	hind_stance = spec.stance_height(false)
+	fore_carry = fore_stance
+	hind_carry = hind_stance
+	wave_offset.resize(total_nodes)
+	wave_offset.fill(Vector2.ZERO)
 	body_length = 0.0
 	for k in axial_stick.size():
 		body_length += stick_bone[axial_stick[k]]
@@ -334,6 +385,15 @@ func _layout(at: Vector2, heading: float) -> void:
 		prev[node] = pos[node]
 
 	collapsed = false
+	driven = false
+	pinned.fill(0)
+	fore_carry = fore_stance
+	hind_carry = hind_stance
+	wave_clock = 0.0
+	wave_offset.fill(Vector2.ZERO)
+	bunched = 0.0
+	for s in _trunk.sticks:
+		stick_plan[s] = stick_plan_rest[s]
 	fall.rest_on(0.0)
 	_compute_frames()
 	_solve_heights(0.0)
@@ -342,6 +402,8 @@ func _layout(at: Vector2, heading: float) -> void:
 	# back, knees forward — then let the placement solve stand them.
 	for limb in limbs:
 		var fore: bool = limb.parent_node != _trunk.nodes[0]
+		limb.foot_driven = false
+		limb.plane = dir
 		limb.pole = PackedFloat32Array([-1.0, 1.0] if fore else [1.0, -1.0])
 		limb.sag = PackedVector2Array()
 		limb.sag.resize(4)
@@ -360,20 +422,74 @@ func reset() -> void:
 
 # ------------------------------------------------------------------- step ----
 
-## One tick. `surface` is what is under the animal, asked every time rather
-## than kept — the habitat has terrain in it (flat 0 until Phase 3 hooks it).
+## One whole tick, in the order the body is solved in: the chain settles, the
+## heights are assigned, the limbs are placed. `surface` is what is under the
+## animal, asked every time rather than kept, because the habitat has terrain.
+##
+## The three halves are also callable on their own, and the gait needs them to be:
+## it reads the sockets the chain has just settled into, works out where the feet
+## go and how high the feet are holding the body, and only then may the heights and
+## the limbs be solved. Anything with no gait — a probe, a carcass — calls this and
+## gets the whole tick in one line.
 func step(delta: float, surface: float = 0.0) -> void:
+	advance(delta, surface)
+	carry(surface)
+	settle(surface)
+
+
+## The plan solve: inertia, the wave, relaxation, rest, frames. Everything that
+## happens in the two horizontal dimensions and nothing that happens in the third.
+func advance(delta: float, _surface: float = 0.0, speed_norm: float = 0.0,
+		wave_gain: float = 0.0) -> void:
 	fall.advance(delta, 0.0)
 	var live: bool = not collapsed
 	_integrate_plan(live)
-	_relax_plan(live)
+	if live and wave_gain > 0.0:
+		_wave(delta, speed_norm, wave_gain)
+	if live and driven:
+		_relax_driven()
+	else:
+		_relax_plan(live)
 	_rest_plan()
 	_compute_frames()
+
+
+## The Z channel — see `_solve_heights`.
+func carry(surface: float = 0.0) -> void:
 	_solve_heights(surface)
-	if live:
-		_place_limbs(surface)
-	else:
+
+
+## The limbs: placed where the gait put their feet while the body is alive, and
+## integrated from their sockets when nothing is holding them out.
+func settle(surface: float = 0.0) -> void:
+	if collapsed:
 		_tumble_limbs(surface)
+	else:
+		_place_limbs(surface)
+
+
+## The travelling lateral wave. Kinematic and speed-locked: the phase advances with
+## how fast the animal is going, the envelope is zero at both free ends, and the
+## amplitude dies out at rest. What it is *for* is not the look — it is that a
+## socket carried sideways by the body's own undulation has that much less of its
+## disc left to stride with, which the gait measures off the socket rather than
+## predicting (see Tread.Foot.track).
+func _wave(delta: float, speed_norm: float, gain: float) -> void:
+	wave_clock += delta * spec.wave_speed * (0.35 + 0.65 * clampf(speed_norm, 0.0, 1.0))
+	var n: int = axial.size()
+	for k in n:
+		var i: int = axial[k]
+		if pinned[i] != 0:
+			continue
+		var t: float = float(k) / float(maxi(n - 1, 1))
+		var envelope: float = sin(t * PI)
+		var phase: float = sin(wave_clock * TAU - t * spec.wave_frequency * TAU)
+		var target: Vector2 = perp[i] * (phase * spec.body_wave * gain
+			* clampf(speed_norm, 0.0, 1.0) * envelope)
+		var shift: Vector2 = target - wave_offset[i]
+		pos[i] = pos[i] + Vector3(shift.x, shift.y, 0.0)
+		prev[i] = prev[i] + Vector3(shift.x, shift.y, 0.0)
+		wave_offset[i] = target
 
 
 ## Verlet inertia on the axial plan. Storing prev before adding the velocity
@@ -411,6 +527,36 @@ func _relax_plan(live: bool) -> void:
 				_solve_stick(k - 1, live)
 				if k <= n - 3:
 					_solve_bend(k, k + 1, k + 2)
+
+
+## Relaxation over a chain something is leading.
+##
+## Not `_relax_plan` with a pin in it, and the difference is the whole reason it is
+## a separate solve: here the head is authoritative, so every pass walks strictly
+## from it and only ever moves the *child* of a joint — corrections flow away from
+## the head and the head stays exactly where the drive put it. Distance is fixed
+## first, then the bend limit rotates the child about its parent, which preserves
+## the distance just fixed, so one pass settles both for a given joint.
+##
+## The soft passes remove only part of the error, so the chain reaches its shape
+## gradually and reads as flexible rather than jointed. The last pass is always full
+## strength, and that is not optional: partial correction on a long chain is only
+## marginally stable — each joint re-injects roughly as much error into its child as
+## it removes — so a soft-only solve lets a long spine visibly stretch. One
+## full-strength sweep projects every point exactly onto its parent's circle, which
+## makes stick lengths exact however low the stiffness is set.
+func _relax_driven() -> void:
+	var n: int = axial.size()
+	var passes: int = maxi(spec.constraint_iterations, 1)
+	for it in passes:
+		var hold: float = 1.0 if it == passes - 1 else clampf(spec.spine_stiffness, 0.0, 1.0)
+		for k in range(n - 1, 0, -1):
+			var s: int = axial_stick[k - 1]
+			_set_p2(axial[k - 1], _draw_to_circle(_p2(axial[k - 1]), _p2(axial[k]),
+				stick_plan[s], hold))
+			if k <= n - 2:
+				_set_p2(axial[k - 1], _fold(_p2(axial[k + 1]), _p2(axial[k]),
+					_p2(axial[k - 1]), axial_bend[k - 1]))
 
 
 ## Distance constraint between axial neighbours k and k+1, both ends moving
@@ -523,8 +669,13 @@ func _solve_heights(surface: float) -> void:
 		_tail.tip_sag = 0.0
 		return
 
-	var pelvis_z: float = surface + clearance + hind_stance
-	var withers_z: float = surface + clearance + fore_stance
+	# What the legs deliver, which is a measurement of the feet once there is a
+	# gait to take it and the rest stance's own claim until then. Not `surface`
+	# plus a stance: the carried heights are already quoted against whatever each
+	# foot is standing on, so a body half on a ledge is held where its own legs
+	# have it rather than being levelled onto the ground under its middle.
+	var pelvis_z: float = clearance + hind_carry
+	var withers_z: float = clearance + fore_carry
 	var n_trunk: int = _trunk.nodes.size()
 	for j in n_trunk:
 		var z: float = lerpf(pelvis_z, withers_z, float(j) / float(n_trunk - 1))
@@ -584,32 +735,50 @@ func _place_limbs(surface: float) -> void:
 		var p: int = limb.parent_node
 		var socket_plan: Vector2 = _p2(p) + perp[p] * (limb.side * stick_bone[limb.sticks[0]])
 		var socket_z: float = pos[p].z
+		var target_plan: Vector2 = socket_plan + fwd[p] * limb.foot_lead
+		var target_z: float = surface
+		var axis: Vector2 = fwd[p]
+		if limb.foot_driven:
+			# The gait owns the foot and the corner this leg is holding up. The solve
+			# plane is the vertical one containing the socket and the foot — which is
+			# what makes a sprawled elbow fold across the floor and a columnar knee
+			# fold through the air beneath the body without anything choosing between
+			# them, because the plane tilts up as the limb does.
+			socket_z = limb.socket_rise
+			target_plan = Vector2(limb.foot_target.x, limb.foot_target.y)
+			target_z = limb.foot_target.z
+			var run: Vector2 = target_plan - socket_plan
+			axis = run.normalized() if run.length_squared() > 0.000001 else limb.plane
+		limb.plane = axis
 		limb.sag[0] = Vector2(0.0, socket_z)
-		var target := Vector2(limb.foot_lead, surface)
-		_repole(limb)
+		var target := Vector2((target_plan - socket_plan).dot(axis), target_z)
+		_repole(limb, signf(fwd[p].dot(axis)))
 		limb.sag = _fabrik(limb.sag, limb.bones, limb.sag[0], target,
 			FABRIK_ITERATIONS, FABRIK_TOLERANCE)
 		for j in limb.nodes.size():
 			var i: int = limb.nodes[j]
-			var plan: Vector2 = socket_plan + fwd[p] * limb.sag[j].x
+			var plan: Vector2 = socket_plan + axis * limb.sag[j].x
 			pos[i] = Vector3(plan.x, plan.y, limb.sag[j].y)
 			prev[i] = pos[i]
 
 
-## Re-seeds a limb's bend direction if it has gone collinear — a leg
-## straightened by a drop has forgotten which way its elbow points, and
-## FABRIK keeps whatever side it starts on.
-func _repole(limb: Chain) -> void:
+## Re-seeds a limb's bend direction if it has gone collinear — a leg straightened
+## by a drop has forgotten which way its elbow points, and FABRIK keeps whatever
+## side it starts on. `lead` is which way the body's own forward axis points in the
+## solve plane, so an elbow folds backward along the animal however the foot has
+## been placed.
+func _repole(limb: Chain, lead: float) -> void:
 	var root: Vector2 = limb.sag[0]
 	var tip: Vector2 = limb.sag[3]
 	var axis: Vector2 = tip - root
 	if axis.length_squared() < 0.000001:
 		return
 	var n: Vector2 = Vector2(-axis.y, axis.x).normalized()
+	var sense: float = lead if absf(lead) > 0.001 else 1.0
 	for j in [1, 2]:
 		var off: float = (limb.sag[j] - root).dot(n)
 		if absf(off) < 0.25:
-			limb.sag[j] += n * (limb.pole[j - 1] * 1.5)
+			limb.sag[j] += n * (limb.pole[j - 1] * sense * 1.5)
 
 
 ## One tick of every limb nothing is holding out — the ported Ragdoll step.
@@ -657,10 +826,12 @@ func collapse() -> void:
 	if collapsed:
 		return
 	collapsed = true
+	release_head()
 	var datum: float = maxf(
 		(pos[_trunk.nodes[0]].z + pos[_trunk.nodes[_trunk.nodes.size() - 1]].z) * 0.5, 0.0)
 	fall.start(datum)
 	for limb in limbs:
+		limb.foot_driven = false
 		for i in limb.nodes:
 			prev[i] = pos[i]
 
@@ -668,12 +839,93 @@ func collapse() -> void:
 func revive() -> void:
 	collapsed = false
 	fall.rest_on(0.0)
+	fore_carry = fore_stance
+	hind_carry = hind_stance
 
 
 ## Puts the body datum in the air; alive it lands back on its feet, dead it
 ## lands as meat. The whole arc belongs to Gravity.Fall — one integrator.
 func drop(height: float) -> void:
 	fall.start(fall.height + maxf(height, 0.0))
+
+
+## Throws the body upward at a speed. The take-off half of the same integrator: a
+## leap is a drop that starts going the other way, and nothing about the arc after
+## the feet leave the ground differs from a fall.
+func launch(rate: float) -> void:
+	fall.start(fall.height, maxf(rate, 0.0))
+
+
+## Hands the head to whatever is driving the body: it is placed from here on, and
+## the chain follows it. Nothing else may move a pinned node.
+func take_head(plan: Vector2) -> void:
+	driven = true
+	var head: int = head_index()
+	pinned[head] = 1
+	pos[head] = Vector3(plan.x, plan.y, pos[head].z)
+	prev[head] = pos[head]
+
+
+## ...and gives it back, which is what a collapse does.
+func release_head() -> void:
+	driven = false
+	pinned[head_index()] = 0
+
+
+## Swings everything behind the head about a point, by a share of an angle.
+##
+## What the legs do to a body turning on the spot. A head-led chain that is only
+## ever *towed* round drags itself sideways instead of turning — the followers have
+## to be carried through some of the swing, and how much is the caller's business:
+## none of it walking forward, where the head leading is the whole mechanism, and
+## most of it at a standstill, where the legs are what walk the body around.
+func rotate_followers(pivot: Vector2, angle: float) -> void:
+	if absf(angle) < 0.000001:
+		return
+	var head: int = head_index()
+	for k in axial.size():
+		var i: int = axial[k]
+		if i == head:
+			continue
+		var here: Vector2 = pivot + (_p2(i) - pivot).rotated(angle)
+		var was: Vector2 = pivot + (Vector2(prev[i].x, prev[i].y) - pivot).rotated(angle)
+		pos[i] = Vector3(here.x, here.y, pos[i].z)
+		prev[i] = Vector3(was.x, was.y, prev[i].z)
+
+
+## A point on the axial line `behind` px back from the head, measured along the
+## chain rather than through it — a body bent into a turn has its hips somewhere
+## off the straight line and the shortcut would report a shorter animal the harder
+## it was turning.
+func station_behind_head(behind: float) -> Vector2:
+	var n: int = axial.size()
+	var run: float = 0.0
+	for k in range(n - 1, 0, -1):
+		var a: Vector2 = _p2(axial[k])
+		var b: Vector2 = _p2(axial[k - 1])
+		var span: float = a.distance_to(b)
+		if run + span >= behind:
+			return a.lerp(b, clampf((behind - run) / maxf(span, 0.0001), 0.0, 1.0))
+		run += span
+	return _p2(axial[0])
+
+
+## Folds and extends the back along its own length.
+##
+## The spine's whole share of a stride, and it needs no second term anywhere: a
+## body shorter this tick than last has carried its own shoulders backward
+## relative to its hips, the limb sockets ride on the chain, and the stride, the
+## step timing and the landing prediction all follow from the gait measuring where
+## the socket actually went. Applied to the trunk's plan rests only — the neck and
+## the tail are carried, not gathered — and always against the built length, so
+## nothing accumulates.
+func bunch(share: float) -> void:
+	var wanted: float = clampf(share, -0.5, 0.5)
+	if is_equal_approx(wanted, bunched):
+		return
+	bunched = wanted
+	for s in _trunk.sticks:
+		stick_plan[s] = stick_plan_rest[s] * (1.0 - bunched)
 
 
 ## Moves one node without giving it velocity — the positional tether every
@@ -717,6 +969,13 @@ func pelvis_index() -> int:
 func centre() -> Vector2:
 	var mid: Vector2 = (_p2(pelvis_index()) + _p2(withers_index())) * 0.5
 	return mid
+
+
+## Where a node is on the ground plane. The one reading everything outside this
+## file takes of the chain: heights come off `pos[i].z`, and nothing may keep its
+## own copy of either.
+func plan(i: int) -> Vector2:
+	return _p2(i)
 
 
 ## Worst axial stick error against the rest length the current mode holds —
@@ -802,6 +1061,13 @@ static func _project_to_circle(p: Vector2, center: Vector2, radius: float) -> Ve
 	if l < 0.00001:
 		return center + Vector2.RIGHT * radius
 	return center + d * (radius / l)
+
+
+## The same projection taken only part of the way — the soft distance pass of the
+## driven solve, from Constraints.solve_distance.
+static func _draw_to_circle(p: Vector2, center: Vector2, radius: float,
+		hold: float) -> Vector2:
+	return p.lerp(_project_to_circle(p, center, radius), clampf(hold, 0.0, 1.0))
 
 
 ## Angle projection that rotates only the child — what a chain with a placed

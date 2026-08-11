@@ -6,15 +6,18 @@
 ## to stand its work up next to that oracle without touching it. Probes
 ## instantiate this scene headless, so nothing here may require a display.
 ##
-## The input pump is deliberately tiny and lives entirely in this file — the
-## creature is driven by nothing in Phase 1, so what the lab offers is the
-## handling a probe cannot: drag a node to feel the constraints answer, drop
-## the body, knock it over, look at it.
+## The input pump is deliberately tiny and lives entirely in this file — what the
+## lab offers is the handling a probe cannot: walk the animal about, drag a node to
+## feel the constraints answer, drop the body, knock it over, look at it.
 ##
+##   W / S        throttle forward and back
+##   A / D        turn
+##   shift        sprint
+##   space        jump (held to charge, released to spring)
 ##   wheel        zoom
 ##   R            reset the creature to its spawn
 ##   K            collapse / revive (ragdoll mode toggle)
-##   space        drop the body from a height
+##   F            drop the body from a height
 ##   drag         haul the nearest body node with the mouse
 class_name V2Lab
 extends Node2D
@@ -40,8 +43,19 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
-	if creature != null:
-		camera.position = creature.centre()
+	if creature == null:
+		return
+	camera.position = creature.centre()
+	# Polled rather than evented, because a throttle is a state rather than a
+	# keystroke: the animal is being asked for something for as long as the key is
+	# down, and the gait reads the ask every tick.
+	var command: Creature2.Command = creature.command
+	command.throttle = (1.0 if Input.is_physical_key_pressed(KEY_W) else 0.0) \
+		- (1.0 if Input.is_physical_key_pressed(KEY_S) else 0.0)
+	command.turn = (1.0 if Input.is_physical_key_pressed(KEY_D) else 0.0) \
+		- (1.0 if Input.is_physical_key_pressed(KEY_A) else 0.0)
+	command.sprint = Input.is_physical_key_pressed(KEY_SHIFT)
+	command.jump = Input.is_physical_key_pressed(KEY_SPACE)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -82,7 +96,7 @@ func _pump_key(event: InputEventKey) -> void:
 			creature.reset()
 		KEY_K:
 			creature.toggle_collapsed()
-		KEY_SPACE:
+		KEY_F:
 			creature.drop(DROP_HEIGHT)
 
 

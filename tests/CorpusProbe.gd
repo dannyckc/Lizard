@@ -32,12 +32,19 @@ const TICK: float = 1.0 / 60.0
 ## (the v1 lesson — gait tests flip on 0.3% physique drift, so the fixed
 ## point is asserted, not assumed). A deliberate physique retune re-pins
 ## these in the same commit; anything else moving them is a broken compiler.
+##
+## Re-pinned at Phase 3, where the rest stance stopped being an authored
+## fraction of the leg and became the height the joint angles actually deliver
+## (see Carriage.stance_clearance). That moved the census's rest frame upward —
+## the cat now stands 33.8/36.7 px rather than 25.1/30.8 — so the centre of mass
+## rose with it. Mass and every compartment are untouched to the last decimal,
+## which is the check that nothing but the frame moved.
 const PINS := {
 	"mass": 30523.043797,
-	"com_x": 30.110855,
+	"com_x": 30.109844,
 	"com_y": 0.000000,
-	"com_z": 25.734169,
-	"along": 0.485659,
+	"com_z": 32.199135,
+	"along": 0.485643,
 	"fore_girdle": 1119.393478,
 	"hind_girdle": 2242.158273,
 	"epaxial": 4540.990644,
