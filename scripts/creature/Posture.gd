@@ -301,6 +301,54 @@ func configure(p_kind: int) -> void:
 	neck_reach = float(row["neck_reach"])
 
 
+## Carries this posture part of the way from one stance to another.
+##
+## A stance change is a movement rather than a swap — a crocodile rising into its
+## high walk rotates its limbs under its body over several strides, and every
+## number this file owns is a reading of where the limbs are *during* that as much
+## as at either end. So the trait is interpolated, and everything that is a
+## projection of the trait comes out consistent for free: at `t` of the way up,
+## the clearance is the sine of an angle the limbs are genuinely at.
+##
+## At either end this is exactly `configure`, to the digit, which is what keeps
+## every stance test pinned to the table rather than to a blend that happens to
+## land near it. In between, the discrete rows are read the only way a discrete
+## fact can be mid-movement: `kind` and `feet_down` go with whichever end is
+## nearer.
+##
+## One number is deliberately *not* blended, and it is the one that is flesh
+## rather than carriage: `depth_ratio` describes how the trunk's cross-section is
+## built, and an animal re-carrying its limbs does not grow a deeper chest on the
+## way up. Whoever owns the blend owns pinning it back to the build — see
+## Stance, which is the only caller.
+func mix(from_kind: int, to_kind: int, t: float) -> void:
+	if t <= 0.0 or from_kind == to_kind:
+		configure(from_kind)
+		return
+	if t >= 1.0:
+		configure(to_kind)
+		return
+	var a: Dictionary = TABLE[clampi(from_kind, 0, COUNT - 1)]
+	var b: Dictionary = TABLE[clampi(to_kind, 0, COUNT - 1)]
+	kind = clampi(from_kind if t < 0.5 else to_kind, 0, COUNT - 1)
+	tilt = deg_to_rad(lerpf(float(a["tilt_deg"]), float(b["tilt_deg"]), t))
+	joint = deg_to_rad(lerpf(float(a["joint_deg"]), float(b["joint_deg"]), t))
+	joint_lock = deg_to_rad(lerpf(float(a["joint_lock_deg"]),
+		float(b["joint_lock_deg"]), t))
+	joint_fold = deg_to_rad(lerpf(float(a["joint_fold_deg"]),
+		float(b["joint_fold_deg"]), t))
+	socket_inset = lerpf(float(a["socket_inset"]), float(b["socket_inset"]), t)
+	depth_ratio = lerpf(float(a["depth_ratio"]), float(b["depth_ratio"]), t)
+	wave_gain = lerpf(float(a["wave_gain"]), float(b["wave_gain"]), t)
+	feet_down = int(a["feet_down"]) if t < 0.5 else int(b["feet_down"])
+	coupling_gain = lerpf(float(a["coupling_gain"]), float(b["coupling_gain"]), t)
+	step_height_gain = lerpf(float(a["step_height_gain"]),
+		float(b["step_height_gain"]), t)
+	agility = lerpf(float(a["agility"]), float(b["agility"]), t)
+	drive = lerpf(float(a["drive"]), float(b["drive"]), t)
+	neck_reach = lerpf(float(a["neck_reach"]), float(b["neck_reach"]), t)
+
+
 ## What a limb of this length measures seen from above — the radius of the disc
 ## its foot may be set down anywhere inside.
 func plan_reach(limb_length: float) -> float:

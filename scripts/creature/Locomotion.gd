@@ -364,8 +364,13 @@ var carriage_deg: float = 0.0
 ## that makes it stand. Left null (a bare locomotion in a test) the species' own
 ## numbers answer, which is what this file did before there was a centre of
 ## gravity to check them against.
+## `stance` is which of this body's supported stances it is actually in — see
+## Stance, which owns the posture/locomotor classification. Left null (a bare
+## locomotion in a test) the measurement of the arms answers alone, which is what
+## this file did before there was a second axis to consult.
 func update(posture: Posture, physique: Physique, p: CreatureParams, scale: float,
-		joints: Articulation = null, plumb: Plumb = null) -> void:
+		joints: Articulation = null, plumb: Plumb = null,
+		stance: Stance = null) -> void:
 	if posture == null or physique == null or p == null:
 		return
 	power = clampf(physique.strength / maxf(physique.mass, 0.0001), 0.05, 8.0)
@@ -389,7 +394,14 @@ func update(posture: Posture, physique: Physique, p: CreatureParams, scale: floa
 	# legs. Which is why a T. rex and a Kangaroo need no posture of their own to be
 	# bipedal and a Gorilla, whose arms are *longer* than its legs, is emphatically
 	# not — its knuckles are on the ground because they reach it.
-	forelimbs_bear = bears_on_forelimbs(p)
+	#
+	# The stance may take the forelimbs *off* the ground on a body whose arms could
+	# bear — a basilisk at a sprint lifts a working pair of forelimbs, which is what
+	# a facultative biped is — and it may never put them on a floor they cannot
+	# reach. The measurement is the floor of the answer either way; see
+	# Stance.forelimbs_bear, which is the conjunction and nothing else.
+	forelimbs_bear = stance.forelimbs_bear(p) if stance != null \
+		else bears_on_forelimbs(p)
 	bearing_limbs = 4 if forelimbs_bear else 2
 
 	# Where the feet go, and how a trunk with nothing under its shoulders is
@@ -562,8 +574,16 @@ func _stand_under_the_weight(posture: Posture, p: CreatureParams, scale: float,
 ## over is the fore-and-aft, and it is what the bias is a fraction of.
 func _fore_aft_reach(posture: Posture, p: CreatureParams, scale: float,
 		pair: int) -> float:
+	return fore_aft_reach(posture, p, scale, pair, articulation.of(pair).stand)
+
+
+## The same radius, asked of nothing but the numbers — static so a stance being
+## *considered* can be measured before any body has been solved into it. See
+## Stance, which asks it of a posture the animal is not currently in.
+static func fore_aft_reach(posture: Posture, p: CreatureParams, scale: float,
+		pair: int, stand_share: float) -> float:
 	var bone: float = (p.arm_length if pair == Limb.FRONT else p.leg_length) * scale
-	var stance: float = posture.plan_reach(bone * articulation.of(pair).stand)
+	var stance: float = posture.plan_reach(bone * stand_share)
 	var lat: float = stance * cos(posture.tilt) * p.stance_width
 	return sqrt(maxf(stance * stance - lat * lat, 0.0))
 

@@ -79,6 +79,16 @@ extends Resource
 ## build with long arms is a fast quadruped and a semi-upright one with vestigial
 ## arms is bipedal, and neither needed a category of its own.
 @export_range(0, 3, 1) var posture: int = Posture.SPRAWLED
+## How far this build can re-carry its limbs out of their resting stance, in
+## postures up the table. An anatomical fact about the socket rather than a
+## behaviour: a true sprawler's glenoid rows its limb in one plane and cannot
+## rotate it under the body, while a crocodile's can — which is the whole of its
+## high walk, the same four legs carried semi-upright for travel. 0 is a girdle
+## that works at the one angle it is built at, which is every animal that has
+## not said otherwise; 1 is the crocodile. See Stance, which spends it, and note
+## what it deliberately is not: the bipedal axis costs none of this, because
+## lifting a pair of limbs off the ground rotates nothing.
+@export_range(0, 2, 1) var stance_range: int = 0
 
 # --------------------------------------------------------------- height ----
 @export_group("Height")
@@ -412,6 +422,7 @@ const SCHEMA: Array = [
 
 	{"group": "Posture"},
 	{"prop": "posture", "label": "Stance (0-3)", "min": 0.0, "max": 3.0, "step": 1.0},
+	{"prop": "stance_range", "label": "Stance range", "min": 0.0, "max": 2.0, "step": 1.0},
 
 	{"group": "Height"},
 	{"prop": "neck_lift", "label": "Neck lift", "min": 0.0, "max": 0.6, "step": 0.01},

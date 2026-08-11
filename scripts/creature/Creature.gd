@@ -62,7 +62,17 @@ var body: BodyShape
 var gait: Gait
 ## How this animal holds its legs under it. An anatomical trait, rebuilt with the
 ## rest of the structure when the parameter changes — see Posture.
+##
+## This is the *active* stance's posture — the stance object mutates it in place
+## through a transition, which is how a crocodile's high walk reaches every
+## system that was already reading this object. The stance it is *built* in,
+## which is what the flesh census reads, is `stance.rest`.
 var posture: Posture = Posture.new()
+## Which of this body's supported posture/locomotor combinations it is in, and
+## which it could be in: the classification the posture above is one axis of.
+## Supported combinations are derived from the build at rebuild; the active one
+## is re-asked from the gait every tick. See Stance.
+var stance: Stance = Stance.new()
 ## What each girdle does with the limbs hanging off it: how its bones divide, what
 ## angle its joint stands at, how far it locks out and how far it folds. Rebuilt
 ## beside the posture and for the same reason — it is skeleton rather than
@@ -505,7 +515,12 @@ func rebuild() -> void:
 	# the sprawl of its limbs are different draws describing one body rather than
 	# the same few numbers used twice.
 	var rng: RandomNumberGenerator = null if alive else _rest_rng()
-	posture = Posture.new(params.posture)
+	# The classification first, because the posture every structure below is
+	# configured from is its active axis. A rebuild starts the body in the
+	# stance it is built in; which other stances the build supports is derived
+	# further down, once the census has been counted — see stance.derive.
+	stance.rebuild(params)
+	posture = stance.active
 	articulation = Articulation.new()
 	articulation.configure(posture, params)
 	# And what crosses those joints elastically. Structural in the same sense the
@@ -561,7 +576,13 @@ func rebuild() -> void:
 	# first, and deliberately: a rebuild that did not change the animal did not
 	# change where its weight is either, and the census knows whether it did.
 	plumb.measure(anatomy.tissue.lattice, anatomy.tissue)
-	locomotion.update(posture, physique, params, size_scale, articulation, plumb)
+	# Which other stances this build supports — the crocodile's high walk, the
+	# basilisk's sprint — measured off the same census the constraint below
+	# reads. After the plumb, because an offer the weight cannot be stood up
+	# under is not supported, and the weight has only just been counted.
+	stance.derive(params, plumb, articulation, size_scale)
+	locomotion.update(posture, physique, params, size_scale, articulation, plumb,
+		stance)
 	gait.loco = locomotion
 	# ...and what all of that comes to about leaving the ground. After the
 	# locomotion because it is built on it, and before anything that reads it:
@@ -595,8 +616,14 @@ func rebuild() -> void:
 ## load. Written back here rather than read live so a bare limb (a test's, a
 ## piece on the ground) keeps the honest default of being sized to its length.
 func _update_physique() -> void:
+	# The *rest* stance, not the active one, and the distinction carries the
+	# whole census. The lattice's carve signature includes the stance's depth
+	# ratio, so a posture that moved with the gait would re-carve a quarter of a
+	# million cells mid-stride — and it would be wrong before it was expensive:
+	# a crocodile rising into its high walk changes how its limbs are carried,
+	# not what its trunk is built like. See Stance for the split.
 	physique.update(body, spine, anatomy.tissue, params, anatomy.state,
-		posture, size_scale)
+		stance.rest, size_scale)
 	if gait == null:
 		return
 	for limb in gait.limbs:
@@ -779,7 +806,20 @@ func _physics_process(delta: float) -> void:
 	# Where the weight is comes in on the same terms and for the same reason: the
 	# stance the legs are about to be solved to is constrained by it, and the
 	# constraint is a statement about the build rather than about this frame.
-	locomotion.update(posture, physique, params, size_scale, articulation, plumb)
+	#
+	# ...and before any of that, *which stance the body is in*. The gait may have
+	# carried it into another of its supported ones — a travelling crocodile
+	# rises into its high walk, a sprinting basilisk rears onto its hinds — and
+	# everything below reads the posture that answer mutates. The joints follow
+	# it: how extended a limb stands is the stance's angle, so a stance mid-
+	# transition is a skeleton genuinely re-carrying itself, not a pose faded
+	# over one. The flesh does not — the census reads `stance.rest`, because an
+	# animal standing up taller has not re-grown its tissue.
+	stance.tick(delta, speed_norm, command.sprint, elevation.is_airborne())
+	if stance.changed:
+		articulation.configure(posture, params)
+	locomotion.update(posture, physique, params, size_scale, articulation, plumb,
+		stance)
 	gait.loco = locomotion
 	# ...and what all of that comes to about leaving the ground. After the
 	# locomotion because it is built on it, and before anything that reads it:
