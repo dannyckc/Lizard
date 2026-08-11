@@ -1,4 +1,4 @@
-[gd_scene load_steps=17 format=3]
+[gd_scene load_steps=18 format=3]
 
 [ext_resource type="Script" path="res://scripts/Main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/FoodField.gd" id="2_food"]
@@ -9,6 +9,7 @@
 [ext_resource type="Script" path="res://scripts/creature/CreatureView.gd" id="4_view"]
 [ext_resource type="Script" path="res://scripts/creature/CreatureParams.gd" id="5_params"]
 [ext_resource type="Script" path="res://scripts/world/BiteCue.gd" id="7_bite_cue"]
+[ext_resource type="Script" path="res://scripts/world/TargetMark.gd" id="16_target_mark"]
 [ext_resource type="Script" path="res://scripts/senses/CreatureSenses.gd" id="8_senses"]
 [ext_resource type="Script" path="res://scripts/senses/SightRenderer.gd" id="9_sight_renderer"]
 [ext_resource type="Script" path="res://scripts/world/ScentField.gd" id="10_scent"]
@@ -81,5 +82,8 @@ senses_path = NodePath("../Creature/Senses")
 
 [node name="BiteCue" type="Node2D" parent="."]
 script = ExtResource("7_bite_cue")
+
+[node name="TargetMark" type="Node2D" parent="."]
+script = ExtResource("16_target_mark")
 
 [node name="Camera2D" type="Camera2D" parent="."]

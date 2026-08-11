@@ -592,6 +592,50 @@ static func tissue_color(hp: PackedFloat32Array, base: int, fat_capacity: float,
 		1.0 - hp[base + TissueGrid.ORGAN] / TissueGrid.ORGAN_HP)
 
 
+## The colour the picture is actually showing where a cursor has landed.
+##
+## Nothing draws with it — it is asked by things that draw *over* the world and
+## need to stay legible against whatever they land on. A marker is a marker
+## whether it is sitting on paper, on a rock, on black hide or in an open wound,
+## and those run from nearly white to nearly black; picked in one ink it
+## disappears into two of them.
+##
+## Every case answers in the same palette this file draws that thing in, which is
+## the whole point of it living here: a creature's flesh comes back as the tissue
+## it is showing, meat on the ground comes back as meat, and a rock comes back as
+## the paper with the rock's own wash over it. Anything unrecognised is bare
+## ground, which is what a cursor over nothing is pointing at.
+static func surface_color(pick: Reticle.Pick) -> Color:
+	if pick == null:
+		return PAPER
+	if pick.obstacle != null:
+		return PAPER.blend(Terrain.FACE)
+	if pick.part != null:
+		# The nearest cell of it that is still there, in the same inks the field
+		# draws the piece with — a severed leg is the tissue it always was.
+		var meat: CarrionField.Part = pick.part
+		for cell in meat.cells:
+			if meat.gone[cell] == 0:
+				return tissue_color(meat.hp, cell * TissueGrid.LAYERS, meat.fat_full[cell])
+		return PAPER
+	var creature := pick.creature as Creature
+	if creature == null or pick.hit == null or creature.anatomy == null:
+		return PAPER
+	var found: TissueGrid.Surface = creature.anatomy.tissue.surface_at(pick.hit)
+	if found == null:
+		return COL_BODY_HEAD
+	return tissue_color(found.patch.hp, found.base,
+		creature.anatomy.tissue.fat_capacity(found.patch, found.cell))
+
+
+## Which of this game's two inks reads against that. Perceived brightness, so a
+## marker over a bloodied flank goes pale and one over bare paper goes dark
+## without either being a decision about species, damage or lighting.
+static func ink_over(surface: Color) -> Color:
+	var luma: float = surface.r * 0.299 + surface.g * 0.587 + surface.b * 0.114
+	return PAPER if luma < 0.5 else INK
+
+
 ## Material detail deliberately ignores cell boundaries. Intact skin is read as
 ## one continuous membrane through sparse longitudinal tension lines, while a
 ## revealed muscle cell carries several close fibres along the anatomy's grain.

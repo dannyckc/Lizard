@@ -68,6 +68,29 @@ var load: float = 0.0
 ## the biter each tick from how far past its yield point the pull has been and
 ## for how long; read back here as the stretch the tether has taken on.
 var stress: float = 0.0
+## How far off its own ground these jaws are holding what is in them, in world
+## px. The pickup, and it is a measurement rather than an intention: the biter's
+## neck lifts what it can — see Creature._hold_carry, which weighs the load
+## against the forequarter and against the biter's own footing — and this is
+## simply where that left the mouth relative to where the held flesh sits when
+## nothing is holding it.
+##
+## Written by the biter, like everything else here, and read by both. The victim
+## hangs at it; the biter subtracts it back off before asking how low the load is
+## dragging *it*, or an animal would be towed upward by the very thing it had
+## just picked up.
+var lift: float = 0.0
+## Where the held flesh rode, and how far off the ground the victim's own belly
+## was, at the moment the jaws closed on it.
+##
+## Both taken once and never re-read, and that is not an optimisation — it is
+## what stops the lift from chasing itself. Everything about a body's height
+## changes when it leaves the floor, so a lift worked out afresh each tick from
+## bands and clearances that are themselves consequences of the last one's answer
+## climbs without limit. These two are facts about an animal standing up, and the
+## animal was standing up exactly once: when it was caught.
+var seat: float = 0.0
+var stands: float = 0.0
 
 
 func is_alive() -> bool:

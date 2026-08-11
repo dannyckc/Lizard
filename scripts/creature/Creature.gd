@@ -352,8 +352,45 @@ const LUNGE_WINDUP: float = 0.07
 const LUNGE_STRIKE: float = 0.08
 const LUNGE_RECOVER: float = 0.18
 const LUNGE_TOTAL: float = LUNGE_WINDUP + LUNGE_STRIKE + LUNGE_RECOVER
+## Longest the body is given to get itself into position before the jaws are
+## thrown at all, in seconds.
+##
+## Which is a phase the strike did not use to have, and the whole reason it needs
+## one is that the reaching is no longer done on the hover. An animal pointed at
+## something at its own head height is in position already and this costs it
+## nothing; an elephant told to bite something lying between its feet has the
+## better part of its own height to come down first, and a snap thrown before it
+## got there is jaws closing in the air over the thing they were aimed at. So the
+## clock waits on the body rather than the body hurrying after the clock, and the
+## cap is here because a strike that could be deferred indefinitely by a target
+## the animal never quite arrives at is not a strike.
+const LUNGE_ADDRESS: float = 0.8
+## How near the promised height the mouth has to be brought before the jaws go,
+## as a share of the head's own radius. A mouth is a thickness, so arriving is a
+## band and not a point — and the same tolerance the contact test allows is the
+## one the animation has to satisfy.
+const ADDRESS_TOLERANCE: float = 0.5
 ## How far the head rocks back during the wind-up, as a fraction of the throw.
 const LUNGE_SETBACK: float = -0.22
+## How much of its own support a body may throw its weight out past while it
+## strikes, as a share of the support's radius.
+##
+## A lunge is a controlled loss of balance: the animal drives its centre of
+## gravity forward off its feet, the jaws arrive, and the legs catch it. So the
+## limit is not "the line stays inside the feet" — that would be a body leaning
+## rather than striking — but neither is it nothing, and the difference is what
+## makes a wide-stanced animal able to throw itself at something and a
+## narrow-stanced one only able to lean at it. Measured against the support
+## rather than against the clearance, deliberately: the clearance swings several
+## times a second under a walking animal and the reach offered by the reticle
+## must not swing with it. See `lunge_throw`, and see Plumb, which owns both.
+const LUNGE_SUPPORT: float = 0.85
+## What is left of that throw with nothing underneath to push against. A body in
+## the air still strikes — it throws its head forward and its hindquarters back,
+## which is the one movement that needs no ground — but it is a counter-poise
+## rather than a drive, so it is a share of the reach rather than the whole of
+## it. The same floor answers for a creature that has lost its footing.
+const LUNGE_COUNTERPOISE: float = 0.35
 ## How much further ahead of the head than the skull is wide the mouth may
 ## reach — see `jaw_axes`.
 const MAX_GAPE_RATIO: float = 2.6
@@ -382,6 +419,18 @@ const GRIP_LOAD_REFERENCE: float = 65.0
 const GRIP_LOAD_RESPONSE: float = 6.0
 ## What one unit of towed mass costs the hauler, against its own strength.
 const HAUL_COST: float = 1.0
+## How long an animal that caught something takes to draw its own body back over
+## its feet, in seconds.
+##
+## The strike's recovery is a fifth of this, and the difference is the load. A
+## lunge that missed unwinds as fast as it was thrown because there is nothing on
+## the end of it; one that connected is hauling a body, and the tether is broken
+## by exactly how quickly the two are separating — see GRIP_LOAD_REFERENCE. So an
+## animal that snatched itself back at the recovery's pace would pull its own
+## jaws off the flesh they had just closed on, every time, and the hold would be
+## worth nothing. At this pace the prey comes with it, which is what a hold is
+## for, and what it can bring is what the jaws will bear.
+const HAUL_HOME: float = 0.9
 ## However overmatched, a creature can still shuffle. Zero here would be a
 ## creature frozen by a grip, which is the static hold this replaced.
 const HAUL_FLOOR: float = 0.05
@@ -505,8 +554,25 @@ var _chew_requested: bool = false
 ## Seconds into the current strike, or -1 while not striking.
 var bite_time: float = -1.0
 ## How far ahead of its resting position the lunge is currently holding the
-## head, in world pixels. Applied to the spine, never to `head_pos`.
+## mouth, in world pixels. The whole of the strike's travel, and the sum of the
+## two things below — which is what the reach was priced against and what the
+## hit frame is tested at.
 var lunge_offset: float = 0.0
+## The animal's own half of it: the body driven forward off its feet, applied to
+## the spine's anchor so the chain, the girdles, the flesh and the centre of
+## gravity all come with it. Never fed back into `head_pos`, so a bite still
+## costs the creature no ground — see `_advance_lunge`.
+var lunge_drive: Vector2 = Vector2.ZERO
+## How much of the drive the chain is currently carrying. The lunge is applied to
+## the spine as an increment — see `Spine.shift` — so this is the running total
+## that increment is measured against, and it is the only thing in the file that
+## remembers where the body was put last tick.
+var _drive_carried: Vector2 = Vector2.ZERO
+## The neck's half: how far the column is coiled back off its rest length, zero
+## or negative. A neck shortens and never stretches — see Spine.pose_head — so
+## this is the wind-up and nothing else, and it is why the throw has to be the
+## body's work.
+var lunge_coil: float = 0.0
 ## How far this particular strike is being thrown. The whole of `bite_reach`
 ## on a snap at air — which is every strike that has no reachable target — and
 ## sized to the target when there is one: the distance that puts the teeth *on*
@@ -514,6 +580,11 @@ var lunge_offset: float = 0.0
 ## accepted, so a target that moves mid-throw is met by the strike that was
 ## thrown at it rather than by one re-aimed in flight; see `_advance_lunge`.
 var _strike_throw: float = 0.0
+## Seconds this strike has spent getting the body into position, before the
+## wind-up has begun. Runs while `bite_time` is held at zero — see
+## `_advance_lunge` — and is what makes a bite at something underfoot read as an
+## animal lowering itself onto it rather than as a snap that happened to miss.
+var _address_time: float = 0.0
 var _bite_requested: bool = false
 var _impact_done: bool = false
 
@@ -788,8 +859,10 @@ func reset(at: Vector2 = Vector2.ZERO, facing: float = 0.0) -> void:
 	bite_held = false
 	bite_latched = false
 	bite_time = -1.0
-	lunge_offset = 0.0
+	_split_lunge(0.0)
+	_drive_carried = Vector2.ZERO
 	_strike_throw = 0.0
+	_address_time = 0.0
 	_bite_requested = false
 	_impact_done = false
 	_grip_lockout = false
@@ -879,22 +952,11 @@ func _physics_process(delta: float) -> void:
 	if _bite_requested:
 		_bite_requested = false
 		bite_time = 0.0
+		_address_time = 0.0
 		bite_connected = false
 		bite_latched = false
 		_impact_done = false
 		bite_cooldown_remaining = params.bite_cooldown
-		# How far this strike is thrown. At air, the whole reach; at something
-		# the body can actually get its mouth onto, exactly far enough to centre
-		# the mouthful on the contact point — the teeth then close a whole gape
-		# either side of it, which is the tolerance a strike at a swaying,
-		# walking body needs — because a lunge that overshoots its contact point
-		# snaps shut on whatever stands behind it, which on a leg is the belly
-		# overhead. Floored at a twelfth so even a point-blank bite reads as a
-		# strike.
-		_strike_throw = params.bite_reach * size_scale
-		if aim != null and aim_reach != null and aim_reach.possible:
-			_strike_throw = clampf(jaw_point().distance_to(aim_contact),
-				_strike_throw / 12.0, _strike_throw)
 	_advance_lunge(delta)
 
 	_advance_elevation(delta)
@@ -932,21 +994,37 @@ func _physics_process(delta: float) -> void:
 	# this stance does with its spine, and switched off entirely when there is no
 	# ground being pushed against at all.
 	var wave_gain: float = 0.0 if elevation.is_airborne() else posture.wave_gain
-	spine.step(delta, head_pos, params, speed_norm, seg_len, _axial_tone(), wave_gain)
-	_update_head_look(delta)
-	# Mouse look and the lunge are posed after the body solve, in the one layer
-	# that can move point 0 without touching point 1 or anything downstream of it.
+	# The lunge, and this is where it becomes the *animal's* movement rather than
+	# a pose: the whole chain is carried by however much the drive changed this
+	# tick and the head is then pinned at the far end of it, so the neck, the
+	# trunk, both girdles and the tail all arrive together, the limb sockets go
+	# with the girdles, and the flesh, the bands and the centre of gravity are
+	# read off the result. The feet do not come — they are already planted on the
+	# ground — so the legs lean, extend and step to keep up, which is what a lunge
+	# looks like from underneath.
 	#
-	# The throw belongs here rather than in the pin above, and the difference is
-	# the whole of what a strike does to the body. Fed to the solver as the head's
-	# target, the reach is spent dragging the torso: the constraint pass follows
-	# the displaced head, so a bite aimed across the body hauls the spine round
-	# after the cursor — and because this line then re-seats the head one segment
-	# off the neck, none of the reach survived as reach. The creature turned
-	# around instead of lunging. Posed here it is what it says it is: the neck
-	# extends and the head arrives out in front of where the body already stood,
-	# so the jaws genuinely reach the flesh and the body is left alone to keep
-	# walking, standing or turning through the strike.
+	# Carried rather than merely re-pinned, and the difference is most of the
+	# throw. See `Spine.shift`: a chain solved from its head answers a displaced
+	# pin by swinging, and a strike aimed off the animal's own axis — a lizard at
+	# a foot beside it — spends most of its lunge turning instead of travelling.
+	#
+	# `head_pos` itself is untouched throughout: the drive is recomputed from the
+	# strike's own clock every tick and returns to nothing at the end of it, so a
+	# bite still costs the creature no ground.
+	spine.shift(lunge_drive - _drive_carried)
+	_drive_carried = lunge_drive
+	spine.step(delta, head_pos + lunge_drive, params, speed_norm, seg_len,
+		_axial_tone(), wave_gain)
+	_update_head_look(delta)
+	# Mouse look is posed after the body solve, in the one layer that can move
+	# point 0 without touching point 1 or anything downstream of it.
+	#
+	# What is applied here is only ever the neck being *shortened*, and both
+	# things that shorten it are folds rather than compressions of anything
+	# solid: the strike's own coil, and the arc's projection below. The strike's
+	# throw is not here at all any more — a neck does not get longer, so the
+	# throw is the body's and it went into the anchor above, where the constraint
+	# pass could carry the whole animal with it.
 	#
 	# Less whatever the neck's arc has taken back: a head carried off level has
 	# rotated part of its neck out of the ground plane, and the plan view has to
@@ -962,16 +1040,19 @@ func _physics_process(delta: float) -> void:
 	# after tick. The carry still says how *high* the held flesh is; the hold
 	# says where it is on the ground.
 	#
-	# The retraction saturates at the head link's own slack — a plan chain of
-	# fixed segment lengths cannot shorten its middle, so this is as much of the
-	# arc's projection as the picture can carry, and the reach test prices the
-	# arm off the same saturation (see Reach). Saturating the pullback rather
-	# than the sum keeps the lunge a lunge: a strike from a fully-stooped head
-	# still visibly throws forward instead of paying off projection debt.
+	# The retraction saturates at the neck's own fold — a column of vertebrae
+	# shortens by coiling and only so far, so this is as much of the arc's
+	# projection as the picture can carry, and the reach test prices the arm off
+	# the same saturation (see Reach).
+	#
+	# Both folds are then taken together, and the pair of them saturates too:
+	# a head already stooped to the floor has spent the coil the wind-up wanted,
+	# and what it does about that is rock the body back instead — see
+	# `_split_lunge`, which is where the overflow went.
 	_neck_pullback = 0.0 if is_bite_latched() \
 		else minf(stature.neck_pullback(stature.carry),
 			seg_len * (1.0 - Spine.MIN_NECK))
-	spine.pose_head(head_look_dir, seg_len, lunge_offset - _neck_pullback)
+	spine.pose_head(head_look_dir, seg_len, lunge_coil - _neck_pullback)
 	# Before the body is built, because what a mouthful going down does is distend
 	# the body it is going down: it is a term in the width profile and not a lump
 	# drawn over the top of one.
@@ -1052,7 +1133,7 @@ func _physics_process(delta: float) -> void:
 		_strike()
 	if bite_time >= LUNGE_TOTAL:
 		bite_time = -1.0
-		lunge_offset = 0.0
+		_split_lunge(0.0)
 
 	# Last, because everything they do is a consequence of the pose that has just
 	# been solved: what the jaws are now pulling against, whether they can still
@@ -1100,8 +1181,10 @@ func collapse() -> void:
 	bite_held = false
 	bite_latched = false
 	bite_time = -1.0
-	lunge_offset = 0.0
+	_split_lunge(0.0)
+	_drive_carried = Vector2.ZERO
 	_strike_throw = 0.0
+	_address_time = 0.0
 	# A dead neck carries nothing. Stature stops honouring the carry the moment
 	# the body stops standing; this clears the request so a revived or reset body
 	# does not wake up mid-reach.
@@ -1262,26 +1345,101 @@ func _dead_process(delta: float) -> void:
 	_update_stamina(delta)
 
 
-## Advances the strike clock and resolves it to a forward displacement.
+## Advances the strike clock and resolves it into the two movements that make it.
 ##
 ## Three phases, shaped so the silhouette itself carries the timing: a soft
 ## rock backwards to load, a hard ease-out throw (all the distance covered in
 ## the first half of it, which is what makes it read as a snap rather than a
 ## lean), and a slow settle back. Nothing is fed back into the motion state, so
 ## a creature that never bites is bit-for-bit unaffected by any of this.
+##
+## What is new is *which part of the animal covers that distance*, and it is the
+## whole of why a bite is now a movement rather than a mouth on a stick. The
+## mouth's travel is split at the one place anatomy puts a limit:
+##
+##   * backwards, the neck coils. A column of vertebrae folds, so the rock-back
+##     costs the body nothing and is drawn by shortening the head link — as far
+##     as `Spine.MIN_NECK` goes, and no further.
+##   * forwards, the *body* goes. A neck cannot get longer, so every pixel the
+##     mouth gains ahead of its rest position is a pixel the animal moved: the
+##     spine's anchor is driven forward, the constraint pass carries the trunk
+##     and both girdles with it, the flesh and the centre of gravity follow the
+##     spine, and the legs — whose feet are already planted on the ground —
+##     lean, extend and step to keep up. Nothing here animates any of that. It
+##     is one translation of one anchor, and the rest of the body is a
+##     consequence, which is the only reason the neck, the spine, the torso and
+##     the legs stay in agreement with each other.
+##
+## And whatever will not fit in the coil rocks the body back too, so a species
+## whose reach is long against its own neck loads the strike by shifting its
+## weight onto its hindquarters instead of folding its throat into its chest.
 func _advance_lunge(delta: float) -> void:
 	if bite_time < 0.0:
-		lunge_offset = 0.0
+		_split_lunge(0.0)
 		return
 	# A held bite clamps only after the synchronous world resolver confirmed that
-	# the jaws connected. Keeping the clock on the hit frame holds the visible
-	# head at the extension it actually bit at without restarting the cooldown;
-	# what the jaws then do to the flesh in them is the grip's business, not the
-	# animation's.
+	# the jaws connected. Keeping the clock on the hit frame holds the strike from
+	# recovering into a fresh cooldown; what the jaws then do to the flesh in them
+	# is the grip's business, not the animation's.
+	#
+	# The body does not stay out there, though, and that is the difference between
+	# a hold and a pose. A lunge is a movement: the animal threw its weight past
+	# its own feet to arrive, and once its jaws are shut on something it draws
+	# itself back over them. What is in its mouth comes with it — the tether is
+	# exactly what makes that happen — and that is the whole of the pickup: the
+	# head returns toward where it rides and the prey is hauled in after it.
+	#
+	# It has to be the body that comes home rather than the animal's own position
+	# that keeps the ground: a biter left standing where it lunged to is a biter
+	# standing *inside* its victim, with its chest where its teeth are, and what
+	# that does is shoulder the thing off its feet at the moment it bit it.
+	#
+	# Slowly, and the pace is the one thing here that is not the animation's. See
+	# HAUL_HOME: a hold is broken by how fast the two bodies separate, so an animal
+	# that snatched itself back at the recovery's speed would pull its own jaws off
+	# whatever it had just caught. It hauls instead, and what it can bring with it
+	# is what the tether will bear.
 	if is_bite_latched():
 		bite_time = LUNGE_WINDUP + LUNGE_STRIKE
-		lunge_offset = _strike_throw
+		# At a steady rate rather than an eased one, because this is a movement
+		# with an end: an animal drawing itself back over its feet arrives, and an
+		# ease would leave the body creeping backwards under a creature that has
+		# been walking off with its dinner for a second and a half. The rate is
+		# what makes it safe — see HAUL_HOME — so the rate is the thing to hold
+		# constant.
+		_split_lunge(move_toward(lunge_offset, 0.0,
+			maxf(_strike_throw, 0.001) / HAUL_HOME * delta))
 		return
+	# Getting into position, before any of the above has begun. The body has just
+	# been committed — the crouch and the carry are running for the first time in
+	# `_update_aim` — and the clock waits for them: a creature bites something at
+	# its feet by bringing its mouth down there and *then* closing its jaws, and
+	# an animation that ran to its hit frame while the head was still on its way
+	# would be a snap taken in the air above the target. Held rather than
+	# stretched, so the strike itself is exactly as quick as it always was on
+	# everything already at mouth height, which is most bites.
+	if bite_time <= 0.0 and not _addressed() and _address_time < LUNGE_ADDRESS:
+		_address_time += delta
+		_split_lunge(0.0)
+		return
+	# ...and the moment it is under way, how far it is being thrown. At air, the
+	# whole of what this body can throw itself — see `lunge_throw`, which is the
+	# species' reach held to what it is standing on; at something the body can
+	# actually get its mouth onto, exactly far enough to centre the mouthful on
+	# the contact point, because a lunge that overshoots snaps shut on whatever
+	# stands behind it, which on a leg is the belly overhead. Floored at a twelfth
+	# so even a point-blank bite reads as a strike.
+	#
+	# Measured here rather than on the click, and the difference is the address
+	# above: the throw is sized from where the body actually got to, not from
+	# where it was standing when the button went down. Once, still — a target that
+	# moves mid-throw is met by the strike that was thrown at it rather than by
+	# one re-aimed in flight.
+	if bite_time <= 0.0:
+		_strike_throw = lunge_throw()
+		if aim != null and aim_reach != null and aim_reach.possible:
+			_strike_throw = clampf(jaw_point().distance_to(aim_contact),
+				_strike_throw / 12.0, _strike_throw)
 	# The clock never advances past the hit frame in a single step. A tick large
 	# enough to span the whole animation would otherwise leave the head already
 	# recovered on the frame the bite resolves, and it would strike from resting
@@ -1291,11 +1449,6 @@ func _advance_lunge(delta: float) -> void:
 	var limit: float = LUNGE_TOTAL if _impact_done else LUNGE_WINDUP + LUNGE_STRIKE
 	bite_time = minf(bite_time + delta, limit)
 
-	# The throw this strike was accepted with: the whole of `bite_reach` at air,
-	# and the distance that puts the teeth on the target when there is one —
-	# sized once, where the request was taken. The mouth is on the head, so what
-	# the throw covers is exactly what the creature gains by lunging rather than
-	# by standing there, and nothing is added to it after the fact.
 	var throw_distance: float = _strike_throw
 	var e: float
 	if bite_time < LUNGE_WINDUP:
@@ -1306,7 +1459,82 @@ func _advance_lunge(delta: float) -> void:
 	else:
 		var x2: float = (bite_time - LUNGE_WINDUP - LUNGE_STRIKE) / LUNGE_RECOVER
 		e = 1.0 - smoothstep(0.0, 1.0, x2)
-	lunge_offset = e * throw_distance
+	_split_lunge(e * throw_distance)
+
+
+## Whether the body has finished getting into position to strike.
+##
+## One question, asked of the one thing that matters: is the mouth at the height
+## the reach promised it would meet the target at. Everything the body does about
+## a reach ends up there — the legs fold, the neck sweeps, the stature is
+## re-derived off both — so asking where the mouth is asks about all of it at
+## once, and there is nothing to keep in step with anything else.
+##
+## True immediately for a target the animal is already level with, which is most
+## of them, and true immediately for one it was refused: a snap at something it
+## cannot reach is thrown straight away and lands where it lands.
+func _addressed() -> bool:
+	if aim_reach == null or not aim_reach.possible:
+		return true
+	var tolerance: float = maxf(body.head_radius if body != null else 1.0, 1.0) \
+		* ADDRESS_TOLERANCE
+	return absf(jaw_height() - aim_reach.height) <= tolerance
+
+
+## Divides one figure for the mouth's travel between the neck and the body.
+##
+## The neck takes what it can of a rock-back and nothing at all of a throw,
+## because those are the two things a column of vertebrae can and cannot do. The
+## body takes the remainder, along the head's own look — a strike goes where the
+## animal is pointing, not where it happens to be walking — so a bite aimed
+## across the body is the animal throwing itself that way rather than the head
+## leaving on its own.
+func _split_lunge(travel: float) -> void:
+	lunge_offset = travel
+	var fold: float = segment_rest() * (1.0 - Spine.MIN_NECK)
+	lunge_coil = clampf(minf(travel, 0.0), -fold, 0.0)
+	lunge_drive = head_look_dir * (travel - lunge_coil)
+
+
+## The furthest this body can throw its mouth by moving itself, which is the
+## whole of a strike's reach now that the neck does not stretch.
+##
+## What the species asks for, held to what the animal is standing on. A lunge
+## carries the centre of gravity out past the feet and the legs catch it, so what
+## bounds it is the support: a wide, four-square stance can throw its whole
+## weight at something, a narrow one has to settle for leaning, and a body with
+## nothing under it at all is left with the counter-poise — head forward,
+## hindquarters back — that needs no ground. See `LUNGE_SUPPORT`.
+##
+## Read off the support's radius rather than off the margin left inside it, so
+## the number is a fact about how this animal stands rather than about which feet
+## happen to be off the ground this instant. The reticle offers this reach and
+## `Reach` prices the arm off it; both have to be the same number every tick or
+## the player would be offered a bite the body then declines to throw.
+func lunge_throw() -> float:
+	var asked: float = params.bite_reach * size_scale
+	var floor_throw: float = asked * LUNGE_COUNTERPOISE
+	if plumb == null or plumb.feet == 0 or elevation.is_airborne():
+		return floor_throw
+	return clampf(plumb.span * LUNGE_SUPPORT, floor_throw, asked)
+
+
+## Whether these jaws are on their way to that exact bone of that exact animal.
+##
+## Asked by the victim rather than by the biter — see `_limb_contact_push` — so
+## it is deliberately a plain question about this creature's own state, with the
+## caller supplying who it thinks it is. Nothing is written and nothing is
+## assumed about the asker.
+func is_striking_limb(victim: Node, limb_key: String) -> bool:
+	return is_striking_at(victim) and aim.hit != null \
+		and aim.hit.kind == AnatomyState.LIMB and aim.hit.limb_key == limb_key
+
+
+## Whether these jaws are committed to that animal at all — a strike in flight,
+## thrown at something on it. The coarser half of the question above, and the one
+## the body-to-body pass asks.
+func is_striking_at(victim: Node) -> bool:
+	return is_lunging() and aim != null and aim.creature == victim
 
 
 ## True while a strike is playing, at any phase.
@@ -1532,8 +1760,16 @@ func _integrate_motion(delta: float) -> void:
 	# wings out and almost nothing without them, which is why a leap is a
 	# committed arc and a glide is still flying. One number for both axes,
 	# because it is one fact: nothing is bearing on the ground.
+	#
+	# Unless it is hanging in something's jaws, and then there is: a creature
+	# picked up is not in free flight — it has exactly one thing to push against,
+	# and that thing is the animal holding it. Which is the whole reason a lifted
+	# victim is the one that thrashes hardest, and it is the same sentence the
+	# haul above already makes: however overmatched a creature is, thrashing has
+	# to remain available, because thrashing is what loads a set of jaws. Without
+	# it, picking prey up would be a way of switching its struggle off.
 	var purchase: float = 1.0
-	if elevation.is_airborne():
+	if elevation.is_airborne() and not _is_hanging():
 		purchase = clampf(AIR_CONTROL + p.wing_lift * WING_CONTROL, AIR_CONTROL, 1.0)
 
 	# The rate itself is torque over rotational inertia, worked out in Locomotion
@@ -1561,7 +1797,13 @@ func _integrate_motion(delta: float) -> void:
 	var turn_rate: float = locomotion.turn_rate \
 		* (1.0 - p.turn_speed_falloff * speed_norm)
 	var walked: float = _walked_turn_rate(backing)
-	if walked > 0.0:
+	# ...and not at all on a body hanging in a set of jaws, because that ceiling is
+	# a statement about feet: how fast one can be picked up and put down, over how
+	# far out the socket has to carry it. An animal off the floor is not walking
+	# itself round, it is writhing about the hold — and left under the walked
+	# ceiling it would be held to the turn its own dangling feet could manage,
+	# which is none, so a lifted victim would go limp instead of fighting.
+	if walked > 0.0 and not _is_hanging():
 		turn_rate = minf(turn_rate, maxf(walked * (1.0 - speed_norm),
 			absf(speed) / maxf(body_length() * MIN_TURN_ARC
 				/ maxf(posture.agility, 0.1), 1.0)))
@@ -1756,6 +1998,13 @@ func is_stalking() -> bool:
 ## `INF * 0.0` is a quiet NaN that spreads through the heading into the whole
 ## body. See Locomotion.leg_speed and Gait.leg_speed.
 func _leg_ceiling() -> float:
+	# Nothing on a body hanging in a set of jaws, for the same reason the walked
+	# turn is nothing there: this ceiling is what the feet can deliver, and a
+	# creature that has been picked up has no feet on anything. What it does
+	# instead is fight the hold, and the hold is what limits that — not a stride
+	# it is in no position to take. See `_is_hanging`.
+	if _is_hanging():
+		return 0.0
 	return gait.leg_speed if gait != null and gait.leg_speed > 0.0 else 0.0
 
 
@@ -1929,7 +2178,17 @@ func _resolve_contacts() -> void:
 		# Both parties reach the same conclusion from the same grip, so neither
 		# collides with the other while the other does not. Everything else in the
 		# world still collides with both, and the limbs still route around both.
-		if _is_joined_to(other):
+		# ...and the strike that is about to become one. A lunge is the whole
+		# animal moving now, so a predator arrives with its chest where its teeth
+		# are — and this pass, seeing a body inside another, spends the frame of
+		# the bite pushing it back out. Measured: a lizard striking at an
+		# elephant's foot closed to 16 px of it and was then shouldered 7 px away
+		# on the exact tick the jaws resolved. That is the mistake `mouth_gape`
+		# already refuses for the teeth, made by the shoulders instead: closing on
+		# the gap you have just made. One-sided, deliberately — the animal being
+		# struck at still gets out of the way, because being lunged at is
+		# something that happens *to* it.
+		if _is_joined_to(other) or is_striking_at(other):
 			continue
 		# The body's bound is from its last solved pose, while the authoritative
 		# head has already integrated this tick. Inflate by that small sweep so a
@@ -2562,6 +2821,18 @@ func _limb_contact_push(limb_key: String, limb_segment: int,
 		if _held_by != null and _held_by.is_alive() and _held_by.biter == other \
 				and _held_by.holds_limb() and _held_by.limb_key == limb_key:
 			continue
+		# ...and the same exemption one beat earlier, for the strike that is about
+		# to become that hold. A lunge is the whole animal moving now, so a
+		# predator closing on a leg arrives with its body where its teeth are —
+		# and this pass, seeing a body inside the leg, walks the leg out of the
+		# way. Measured: a lizard striking at an elephant's foot brought its jaws
+		# from 45 px to 18 of it and then the foot moved 19 px in two ticks, so
+		# the bite closed on the gap the biter had just made. Which is the same
+		# mistake `mouth_gape` already refuses for the jaws, made by the shoulders
+		# instead. Only the limb actually being struck at, and only against the
+		# animal striking at it.
+		if other.is_striking_limb(self, limb_key):
+			continue
 		if midpoint.distance_to(other.bounds_center) \
 				> capsule_bound + other.bounds_radius:
 			continue
@@ -2917,15 +3188,21 @@ func jaw_point() -> Vector2:
 ## tick they arrive, and everything eased toward the old answer would let go.
 ##
 ## Measured off the chain rather than reassembled from the offsets that posed
-## it, so it is exact whatever combination of throw, pullback and the solver's
-## own compression floor actually placed the head — one subtraction, and it is
+## it, so it is exact whatever combination of coil, pullback and the solver's
+## own fold limit actually placed the head — one subtraction, and it is
 ## identically `jaw_point` on an animal at rest, which is nearly every animal
 ## nearly always.
+##
+## Two subtractions now, because a strike moves the animal. The neck is put back
+## to its length, and then the *body* is put back where it stood before it threw
+## itself: a lunge carries the whole creature forward, so a reach solved off the
+## live chain mid-strike would price the arm from out where the strike had
+## already got to and quietly grant itself the throw twice.
 func jaw_rest_point() -> Vector2:
 	if spine == null or spine.size() < 2:
 		return jaw_point()
 	var neck_now: float = spine.points[0].distance_to(spine.points[1])
-	return jaw_point() + spine.forwards[0] * (segment_rest() - neck_now)
+	return jaw_point() + spine.forwards[0] * (segment_rest() - neck_now) - lunge_drive
 
 
 ## Where the mouth is in the one axis the plan does not have: the height the
@@ -2966,10 +3243,19 @@ func mouth_band() -> Vector2:
 func _hold_height() -> float:
 	if grip == null or not grip.is_alive() or grip.victim == null:
 		return jaw_rest_height()
-	var victim: Creature = grip.victim
-	var band: Vector2 = victim.anatomy.tissue.limb_band(grip.limb_key, grip.limb_segment) \
-		if grip.holds_limb() else victim.anatomy.tissue.body_band(clampf(grip.bind.x, 0.0, 1.0))
+	var band: Vector2 = _hold_band()
 	return clampf(jaw_rest_height(), band.x, band.y)
+
+
+## The heights the flesh in these jaws occupies, absolute. Named because three
+## things ask it — where the head settles, how high the lift has taken it, and
+## where the held body then hangs — and they have to be one answer.
+func _hold_band() -> Vector2:
+	if grip == null or not grip.is_alive() or grip.victim == null:
+		return Stature.UNBOUNDED
+	var victim: Creature = grip.victim
+	return victim.anatomy.tissue.limb_band(grip.limb_key, grip.limb_segment) \
+		if grip.holds_limb() else victim.anatomy.tissue.body_band(clampf(grip.bind.x, 0.0, 1.0))
 
 
 ## Head-first collision test used by the food field.
@@ -3052,35 +3338,50 @@ func can_reach_aim() -> bool:
 
 ## One tick of reaching for it.
 ##
-## Three things happen and only the last two are visible. The reach is re-solved,
-## because both the animal and its target are moving and an answer from last tick
-## is an answer about somewhere neither of them is. The crouch is eased toward
-## whatever that answer asks for — which is the legs' half of the body
-## adjustment, and is deliberately one number: the legs fold by this much, and
-## the stance, the height, the bands and the drawn picture are all consequences
-## of a shorter leg rather than four separate things being animated to agree.
-## And the head is eased toward the height the jaws would meet the target at —
-## the neck's half of the same adjustment, and the same single-number discipline:
-## the carry moves the lattice's crown, so the neck ramp, the drawn head, the
-## mouth's own hit band and the meat drawn in the jaws all follow one height
-## rather than being animated to agree.
+## The reach is re-solved every tick, because both the animal and its target are
+## moving and an answer from last tick is an answer about somewhere neither of
+## them is. That much is unconditional and it is *all* that happens while the
+## player is merely pointing: a hover asks a question about the world and the
+## answer is drawn, not performed. An animal that lowered itself toward every
+## pixel the cursor passed over would be reading the mouse rather than hunting,
+## and a body that had already crept into position before the button was pressed
+## takes the drama out of pressing it. So the reach is a preview until it is
+## committed, and the click is what commits it.
 ##
-## Nothing here is an animation and nothing here is keyed to biting. An animal
-## pointed at something on the floor lowers itself toward it and stays lowered
-## while it is pointed there, exactly as one browsing does; the bite, if it comes,
-## is thrown from wherever that left it.
+## From there the two adjustments run, and they are the same two the body has
+## always spent — one number each, so the picture cannot disagree with the
+## simulation about either:
+##
+##   * the crouch. The legs fold by this much, and the stance, the height, the
+##     bands and the drawn picture are consequences of a shorter leg rather than
+##     four separate things animated to agree.
+##   * the carry. The neck sweeps the head to the height the jaws will meet the
+##     target at; that one number moves the lattice's crown, so the neck ramp,
+##     the drawn head, the mouth's own hit band and the meat in the jaws all
+##     follow it.
+##
+## Both are held for as long as the strike lasts and released with it, so the
+## head returns toward its perch on the recovery without anything having to
+## animate the return. Close control is not a bite and is not gated on one — a
+## stalking animal is down because the player is asking it to creep, and it
+## stays down.
 func _update_aim(delta: float) -> void:
-	var wanted: float = 0.0
 	if aim != null:
 		aim_contact = _aim_contact()
 		aim_reach = Reach.solve(self, aim_contact, aim.band, terrain())
-		# Only for a target it can actually get to. Folding up under something out
-		# of reach is a body straining at nothing, and a creature that crouched
-		# toward the sky would be the same mistake upside down.
-		if aim_reach.possible:
-			wanted = aim_reach.crouch
 	else:
 		aim_reach = null
+	# Only what the body has actually committed to. A strike in flight or in
+	# recovery is the animal reaching for its target; jaws already shut on flesh
+	# are past reaching and are holding. Everything else — including a cursor
+	# resting on a throat — is a preview.
+	var committed: Reach = aim_reach if _is_striking() and aim_reach != null \
+		and aim_reach.possible else null
+
+	# Only for a target it can actually get to. Folding up under something out of
+	# reach is a body straining at nothing, and a creature that crouched toward
+	# the sky would be the same mistake upside down.
+	var wanted: float = committed.crouch if committed != null else 0.0
 	# Close control asks for the whole of the fold, and the deeper of the two
 	# demands wins rather than the later one: an animal creeping toward something
 	# on the floor is already down at the height it would have crouched to reach
@@ -3093,25 +3394,75 @@ func _update_aim(delta: float) -> void:
 	# are already carrying it as low as they go has nothing left to give.
 	if elevation.is_airborne() or not alive:
 		wanted = 0.0
-	crouch = lerpf(crouch, wanted, 1.0 - exp(-CROUCH_RESPONSE * delta))
+	# A committed strike folds at the strike's own pace. The throw lasts a handful
+	# of ticks and the legs have to have delivered the height inside it, or the
+	# jaws arrive above flesh the reach promised they would reach; a creep eases at
+	# the leisurely rate, because that is what a creep is.
+	crouch = lerpf(crouch, wanted, 1.0 - exp(-_reach_response() * delta))
 
-	# Where the neck is carrying the mouth. Jaws shut on flesh stay on the flesh —
-	# the hold decides the height for as long as it lasts — and otherwise the head
-	# reaches for what it is pointed at on exactly the crouch's terms: only toward
-	# something it can actually get to, so a lizard pointed at a treetop watches it
-	# rather than straining under it, which is also what keeps a missed strike a
-	# level snap at the cursor rather than a mime of the bite that was refused.
+	# Where the neck is carrying the mouth. Jaws shut on flesh are holding it — see
+	# `_hold_carry`, which is where a mouthful gets lifted — and otherwise the head
+	# reaches for whatever the strike was committed to. A refused target is never
+	# reached for at all, so a lizard pointed at a treetop watches it rather than
+	# straining under it, and a missed strike is a level snap at the cursor rather
+	# than a mime of the bite that was refused.
 	var carry_to: float = 0.0
 	if is_bite_latched() and grip != null and grip.is_alive():
-		carry_to = _hold_height() - jaw_rest_height()
-	elif aim_reach != null and aim_reach.possible:
-		carry_to = aim_reach.height - jaw_rest_height()
-	# The strike closes the last of the vertical inside the throw: a browse eases
-	# at the crouch's own pace, but jaws already being thrown cannot arrive above
-	# the flesh they were aimed at because the neck was still ambling down.
-	var response: float = CARRY_STRIKE_RESPONSE \
-		if bite_time >= 0.0 and not _impact_done else CROUCH_RESPONSE
-	head_carry = lerpf(head_carry, carry_to, 1.0 - exp(-response * delta))
+		carry_to = _hold_carry()
+	elif committed != null:
+		carry_to = committed.height - jaw_rest_height()
+	head_carry = lerpf(head_carry, carry_to, 1.0 - exp(-_reach_response() * delta))
+
+
+## Whether the body is currently committed to a strike, as against being pointed
+## at something. The one gate between hovering and acting: everything the animal
+## does with its legs and its neck about a target is behind it.
+func _is_striking() -> bool:
+	return bite_time >= 0.0 or is_bite_latched()
+
+
+## How fast the body closes the last of a reach. Quick while a strike is being
+## thrown, because the throw lasts a run of ticks and the jaws have to arrive at
+## the flesh inside it; the browsing rate once the mouth is on something or on
+## its way home, because nothing is being chased any more.
+func _reach_response() -> float:
+	return CARRY_STRIKE_RESPONSE if bite_time >= 0.0 and not _impact_done \
+		else CROUCH_RESPONSE
+
+
+## Where the neck carries a mouthful it has hold of — the lift, and it is worked
+## out rather than played.
+##
+## A set of jaws that has closed on something wants to bring it back to where the
+## head rides, which is the same thing as saying that a hold ends with the head
+## returning to its perch. Whether it gets there is a question about weights: the
+## neck lifts against what is in the jaws, so a cat picks a mouse clean off the
+## ground and the same cat on an elephant's ankle stays down there with it,
+## having successfully bitten something it cannot lift.
+##
+## Three terms and all three are already measured elsewhere. What the neck has to
+## lift with is this animal's own strength, of which the forequarter's share does
+## the lifting — see `Physique.girdle_share`, which is where the muscle actually
+## is. What it is lifting is whatever `_haul_factor` already weighs: the victim,
+## the meat, the lot, in the same currency a haul is priced in, so a body that
+## cannot drag a thing cannot pick it up either. And what it is lifting *from* is
+## a body that has to stay standing while it does — a creature already out over
+## the edge of its own feet is not about to heave something up over them, which is
+## `Plumb.steadiness` and nothing else.
+##
+## The answer is a fraction, and the head is carried that far from the height it
+## has hold of back toward its own perch. Nothing switches: a light enough
+## mouthful comes all the way up, a heavy one moves a little, and an impossible
+## one does not move at all.
+func _hold_carry() -> float:
+	var down: float = _hold_height() - jaw_rest_height()
+	if down >= 0.0:
+		return down
+	var forequarter: float = physique.girdle_share.x if physique != null else 0.5
+	var lift: float = _haul_factor() * clampf(forequarter * 2.0, 0.0, 1.0)
+	if plumb != null and plumb.feet > 0:
+		lift *= clampf(plumb.steadiness(), 0.0, 1.0)
+	return down * (1.0 - clampf(lift, 0.0, 1.0))
 
 
 ## Queues one bite for the next solved physics pose. Clicks during an active
@@ -3199,6 +3550,15 @@ func is_being_gripped() -> bool:
 	return _held_by != null and _held_by.is_alive()
 
 
+## Whether this creature is off the ground *and* in something's jaws — picked up
+## rather than airborne. The two are not the same state and the difference is
+## what the animal has to push against: a leaping body has nothing, and a body
+## hanging in a mouth has the mouth. See `_integrate_motion`, which is the only
+## place it matters and the only place it is asked.
+func _is_hanging() -> bool:
+	return elevation.is_airborne() and is_being_gripped()
+
+
 # ------------------------------------------------------------------ grip ----
 
 ## Takes up this creature's own share of the slack in whatever jaws are involved
@@ -3225,11 +3585,37 @@ func _resolve_grip() -> void:
 			# the jaws are carrying is one number from one source rather than two
 			# halves of a correction added up out of order.
 			grip.tension = grip.slack().length()
+			_measure_lift()
 			_take_up_slack(grip, grip.victim, 1.0)
-			_take_up_height(grip.victim)
+			_take_up_height(grip, grip.victim)
 	if _held_by != null and _held_by.is_alive():
 		_take_up_slack(_held_by, _held_by.biter, -1.0)
-		_take_up_height(_held_by.biter)
+		_take_up_height(_held_by, _held_by.biter)
+
+
+## How far these jaws have actually picked up what is in them.
+##
+## The mouth against the flesh's own seat — where the held structure rode when
+## the jaws closed on it, and how far off the ground that body's belly was at the
+## same moment. Both are read once, when the hold begins, and never again: see
+## `Grip.seat` and `Grip.stands` for why a figure re-derived every tick from the
+## bands and clearances of a body that is *currently being lifted* climbs without
+## limit.
+##
+## Nothing here decides anything either. The neck has already settled how much
+## lift there is — see `_hold_carry`, where the load is weighed against the
+## forequarter and against this animal's own footing — and this reads off where
+## that left the head, in the units the vertical tether is spoken in.
+func _measure_lift() -> void:
+	# ...less the height its own legs still reach it at. A body is not off the
+	# ground the instant something starts pulling up on it: it is standing there
+	# being pulled up on, and its feet stay under it until the jaws have taken it
+	# past where its legs can follow. That is its belly clearance and nothing else,
+	# and the distinction is the whole difference between a hold that lifts and one
+	# that merely strains — a victim whose feet are still down can brace, run and
+	# thrash against the jaws, and one dangling clear of the floor cannot do any of
+	# it with its legs.
+	grip.lift = maxf(jaw_height() - grip.seat - grip.stands, 0.0)
 
 
 ## The vertical half of the same tether.
@@ -3244,10 +3630,20 @@ func _resolve_grip() -> void:
 ## so the light party does nearly all of the moving and neither writes into the
 ## other. Two bodies at the same height are joined by a slack tether and nothing
 ## happens at all.
-func _take_up_height(other: Creature) -> void:
+##
+## The height they are joined *at* is the jaws', not either body's own — see
+## `Grip.lift`, which is how far off its ground the mouth is holding the flesh.
+## So the thing in the jaws hangs from them, and the animal holding it is asked
+## about the load with its own lift taken back off: a cat that has picked a mouse
+## up is not then towed into the air by the mouse, and a flier that could not pick
+## an elephant up is still dragged down by it. One number does both, because they
+## are the same fact read from either end.
+func _take_up_height(held: Grip, other: Creature) -> void:
 	if other == null:
 		return
-	elevation.tether(other.elevation.height, _contact_share(other))
+	var joined: float = (other.elevation.height - held.lift) \
+		if held.biter == self else held.lift
+	elevation.tether(joined, _contact_share(other))
 
 
 ## Whether a set of jaws — either creature's — currently joins this pair.
@@ -3911,6 +4307,11 @@ func _form_grip(target: Creature, hit: AnatomyState.Hit) -> void:
 	# left exactly where they are.
 	held.rest_length = jaw_hold() + GRIP_SLACK
 	grip = held
+	# What the victim was doing about height when it was caught, which is all the
+	# lift ever needs to know about it — see Grip.seat and Grip.stands.
+	var caught: Vector2 = _hold_band()
+	held.seat = caught.y - target.elevation.height
+	held.stands = target.stature.clearance
 	bite_latched = true
 	# The strike that took hold was itself one closing of these jaws, so the next
 	# one waits out the same interval a chew does.

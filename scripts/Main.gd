@@ -32,6 +32,10 @@ const COL_GRID := Color(INK, 0.13)
 @onready var target_creature: Creature = $TargetCreature
 @onready var target_view: CreatureView = $TargetCreature/View
 @onready var bite_cue: BiteCue = $BiteCue
+## The mark on whatever the cursor has hold of. Its own node above the world
+## rather than a few more strokes in `_draw` below, because it has to be drawn
+## over the animal it has selected — see TargetMark.
+@onready var target_mark: TargetMark = $TargetMark
 @onready var camera: Camera2D = $Camera2D
 @onready var sight_renderer: SightRenderer = $SightRenderer
 @onready var smell_renderer: SmellRenderer = $SmellRenderer
@@ -206,6 +210,7 @@ func _process(delta: float) -> void:
 	camera.global_position = camera.global_position.lerp(_camera_focus(), 1.0 - exp(-3.2 * delta))
 
 	_update_hud()
+	target_mark.show_aim(creature, camera.zoom.x)
 	queue_redraw()
 
 
@@ -519,86 +524,3 @@ func _draw() -> void:
 			draw_circle(Vector2(x, y), 1.0 / camera.zoom.x, COL_GRID)
 			y += GRID_SPACING
 		x += GRID_SPACING
-
-	_draw_reticle()
-
-
-## What the cursor has selected, drawn so the third axis is legible.
-##
-## Two marks and a line between them, because that is exactly what the pick is: a
-## ring where the target is in the picture, a tick where it stands on the ground
-## plane, and the drop between the two, which is its height. Nothing else in a
-## top-down view can show that a click landed on a shoulder rather than on the
-## floor a shoulder's height behind it, and the whole feature is unreadable
-## without it.
-##
-## Hollow when the jaws cannot be got onto it, filled when they can — so "out of
-## reach" is something the player sees before pressing the button rather than
-## something they infer from a bite that did nothing.
-##
-## Two more marks, now that the pick knows what it is on. The structure itself is
-## traced — the actual bone, the actual span of flank — because a ring alone
-## cannot say *which* of the four legs overlapping one another in a top-down
-## picture the click has hold of. And when the marker has had to stop short of
-## what was selected, a faint line runs on to it: the ring is where this animal's
-## mouth gets to, and the far end of that line is what it was pointed at.
-func _draw_reticle() -> void:
-	var pick: Reticle.Pick = creature.aim
-	if pick == null:
-		return
-	var reachable: bool = creature.can_reach_aim()
-	var tint := Color(INK, 0.75 if reachable else 0.30)
-	var scale: float = 1.0 / camera.zoom.x
-	var selected: Reticle.Pick = pick.selected()
-	if selected != pick:
-		draw_dashed_line(pick.drawn, selected.drawn, Color(INK, 0.20),
-			scale, 5.0 * scale, true)
-	_draw_target_shape(selected, scale)
-	if pick.drawn.distance_squared_to(pick.at) > 1.0:
-		draw_line(pick.at, pick.drawn, Color(INK, 0.18), scale, true)
-		draw_line(pick.at + Vector2(-4.0, 0.0) * scale, pick.at + Vector2(4.0, 0.0) * scale,
-			Color(INK, 0.18), scale, true)
-	if reachable:
-		draw_circle(pick.drawn, 3.0 * scale, tint)
-	draw_arc(pick.drawn, 7.0 * scale, 0.0, TAU, 20, tint, scale, true)
-
-
-## The outline of whatever is targeted, traced over the thing itself.
-##
-## Off the same primitives the hit test scored and the view drew, so what is
-## highlighted is exactly what a bite would name: the bone between two joints,
-## the circle of the head, the width of the body at the station picked. Anything
-## that had to reconstruct its own idea of where a leg is would eventually
-## disagree with the one that decides the damage, and the highlight would start
-## lying at precisely the moments it matters.
-func _draw_target_shape(pick: Reticle.Pick, scale: float) -> void:
-	var mark := Color(INK, 0.34)
-	if pick.obstacle != null:
-		draw_arc(pick.obstacle.drawn(pick.height), pick.obstacle.girth(),
-			0.0, TAU, 28, mark, scale, true)
-		return
-	var target := pick.creature as Creature
-	if target == null or pick.hit == null or target.body == null:
-		return
-	match pick.hit.kind:
-		AnatomyState.HEAD:
-			draw_arc(target.body.head.pos, target.body.head_radius + 2.0 * scale,
-				0.0, TAU, 24, mark, scale, true)
-		AnatomyState.LIMB:
-			var limb: Limb = target._limb_by_key(pick.hit.limb_key)
-			if limb == null:
-				return
-			if pick.hit.limb_segment >= 2:
-				draw_arc(limb.joints[2], limb.foot_radius(target.size_scale) + 2.0 * scale,
-					0.0, TAU, 18, mark, scale, true)
-			else:
-				# The drawn chain rather than the plan one: this is the leg as the
-				# player sees it, hanging below the body, and it is the thing that has
-				# to be picked out from the three others crossing it.
-				draw_line(limb.joints[pick.hit.limb_segment],
-					limb.joints[pick.hit.limb_segment + 1], mark, 2.0 * scale, true)
-		_:
-			# The body's own width at the station picked, which is the span of flesh
-			# one bite there would be taken out of.
-			draw_line(target.body_point(Vector2(pick.hit.spine_t, -1.0)),
-				target.body_point(Vector2(pick.hit.spine_t, 1.0)), mark, 2.0 * scale, true)

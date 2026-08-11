@@ -35,6 +35,11 @@ var main: Node
 var checked: bool = false
 var summary: Array[String] = []
 var _last_mark: BiteMark = null
+## Readings taken across the ticks of one strike — see `_strike_through`.
+var _struck_carry: float = 0.0
+var _struck_mouth_gap: float = INF
+var _struck_neck: float = 0.0
+var _struck_drive: float = 0.0
 
 
 func _initialize() -> void:
@@ -56,6 +61,9 @@ func _process(_delta: float) -> bool:
 	player.bite_started.connect(_capture_mark)
 
 	_check_level_peers_meet_at_flank_height(player, target)
+	_check_the_neck_never_stretches(player, target)
+	_check_the_body_delivers_the_throw(player, target)
+	_check_a_hold_lifts_what_it_can(player, target)
 	_check_tall_carries_its_head_down_to_short(player, target)
 	_check_short_never_chases_a_back_it_cannot_reach(player, target)
 	_check_the_arm_is_one_purse_across_both_axes(player, target)
@@ -95,13 +103,146 @@ func _check_level_peers_meet_at_flank_height(player: Creature, target: Creature)
 	summary.append("peers meet at %.0f px" % _last_mark.height)
 
 
+# ------------------------------------------------------------------- neck ----
+
+## The bone claim, on every build and at every phase of a strike: the distance
+## from the skull to the shoulder is never more than the neck the animal has.
+##
+## It used to be exactly what a lunge was — the head link stretched by the whole
+## of `bite_reach`, which on a Cat is a fifth of its own body — and the reach was
+## honest about distance while the picture was telling a lie about anatomy. The
+## limit lives in Spine.pose_head, so this is a claim about every species at
+## once, and it is sampled through the ticks of the strike rather than after it,
+## because after it there is nothing to see.
+func _check_the_neck_never_stretches(player: Creature, target: Creature) -> void:
+	var worst: float = 0.0
+	for preset in ["Lizard", "Cat", "Elephant"]:
+		_stage(player, target, preset, "Lizard", 0.55)
+		player.aim_at(_flank_pick(target, player))
+		_settle(player, target, 20)
+		_strike_through(player, target)
+		worst = maxf(worst, _struck_neck)
+		_check(_struck_neck <= 1.0001,
+			"a %s stretched its neck to %.3f of its own segment mid-strike"
+				% [preset, _struck_neck])
+		# ...and it is not stretched by a body being *held*, either, which is the
+		# other place the head is placed by something outside the chain.
+		player.set_bite_held(true)
+		_strike_through(player, target)
+		_check(_struck_neck <= 1.0001,
+			"a %s holding on stretched its neck to %.3f of its segment"
+				% [preset, _struck_neck])
+		player.set_bite_held(false)
+		_settle(player, target, 20)
+	summary.append("neck peaks at %.3f of its length" % worst)
+
+
+# ------------------------------------------------------------------- body ----
+
+## Where the reach comes from now that the neck cannot supply it: the animal
+## moving. The middle of the back — a station nothing but the creature itself can
+## displace — genuinely travels forward through the strike, and it travels
+## forward again by nothing at all once the strike is over, because a lunge is a
+## movement and not a relocation.
+##
+## And what bounds it is what the body is standing on. `lunge_throw` is the
+## species' reach held to its own support, so a creature in mid-air is offered
+## the counter-poise and no more — which is the same number the reticle draws and
+## the reach test prices the arm off, checked here as one claim rather than three.
+func _check_the_body_delivers_the_throw(player: Creature, target: Creature) -> void:
+	_stage(player, target, "Cat", "Lizard", 0.55)
+	var start: Vector2 = player.head_pos
+	player.aim_at(_flank_pick(target, player))
+	_settle(player, target, 20)
+	_strike_through(player, target)
+	_check(_struck_drive > 1.0,
+		"a cat's strike never moved its body forward at all (%.1f px at the back)"
+			% _struck_drive)
+	_check(player.head_pos.distance_to(start) < 4.0,
+		"a lunge walked the creature %.1f px across the world"
+			% player.head_pos.distance_to(start))
+	_check(is_zero_approx(player.lunge_drive.length()),
+		"the body was left thrown forward after the strike had finished")
+
+	var standing: float = player.lunge_throw()
+	var asked: float = player.params.bite_reach * player.size_scale
+	_check(standing > asked * Creature.LUNGE_COUNTERPOISE + 0.001
+			and standing <= asked + 0.001,
+		"a cat on its feet was offered %.1f of its own %.1f px reach" % [standing, asked])
+	player.elevation.leap(80.0, 1.0)
+	player._physics_process(TICK)
+	_check(player.lunge_throw() < standing,
+		"a cat in the air could throw itself as far as one standing on the ground")
+	player.elevation.reset()
+	player._physics_process(TICK)
+	summary.append("body carries %.0f px of the throw" % _struck_drive)
+
+
+# ------------------------------------------------------------------- lift ----
+
+## The pickup, and it is a weight problem rather than an animation. Jaws that
+## have closed on something bring it back toward where the head rides, and how
+## far they get is what the forequarter can lift against what is in them — so a
+## Cat picks a Lizard up off the floor and the same Cat with an Elephant's leg in
+## its mouth stays down there holding it.
+##
+## Read off the two things that have to agree: the biter's own carry, and the
+## height the held body has actually been raised to. One is the neck and the
+## other is the animal hanging from it, and a lift that moved one without the
+## other would be a head rising off the thing in its mouth.
+func _check_a_hold_lifts_what_it_can(player: Creature, target: Creature) -> void:
+	var lifted: float = _hold_and_settle(player, target, "Cat", "Lizard")
+	_check(lifted > 0.5,
+		"a cat with a lizard in its jaws never lifted it off the floor (%.1f px)" % lifted)
+	var strained: float = _hold_and_settle(player, target, "Cat", "Elephant")
+	_check(strained < lifted * 0.5,
+		"a cat lifted an elephant %.1f px, against %.1f px for a lizard"
+			% [strained, lifted])
+	summary.append("cat lifts a lizard %.0f px, an elephant %.0f" % [lifted, strained])
+
+
+## Bites and holds on, and answers with how far off its own ground the thing in
+## the jaws ended up. Zero when nothing was caught at all, which is a failure of
+## the staging rather than of the lift and reads as one.
+func _hold_and_settle(player: Creature, target: Creature, biter: String,
+		victim: String) -> float:
+	_stage(player, target, biter, victim, 0.5)
+	# A cat cannot bite an elephant's back, so it goes for a leg — and then it has
+	# to actually be standing beside that leg rather than beside the animal.
+	_close_on(player, target, _reachable_pick(target, player))
+	_settle(player, target, 30)
+	player.aim_at(_reachable_pick(target, player))
+	_settle(player, target, 20)
+	player.set_bite_held(true)
+	_strike_through(player, target)
+	_settle(player, target, 90)
+	var raised: float = 0.0
+	if player.grip != null and player.grip.is_alive():
+		raised = target.elevation.height
+	else:
+		_check(false, "a %s never got hold of the %s at all" % [biter, victim])
+	player.set_bite_held(false)
+	_settle(player, target, 60)
+	return raised
+
+
 # -------------------------------------------------------------- tall on short ----
 
-## An Elephant biting a Lizard at its feet. The reach says where the jaws meet;
-## the carry has to actually take the head there — the same number that poses
-## the lattice crown and the drawn skull — and the strike has to arrive within
-## its own mouth's thickness of that height. This is the acceptance claim that
-## the animation and the contact test are one system.
+## An Elephant biting a Lizard at its feet. Three claims in one scenario, and
+## they are the shape of the whole interaction.
+##
+## Pointing at it does nothing whatever: ninety ticks with the cursor on the
+## lizard and the elephant is standing exactly as it was. A hover is a question
+## about the world, and the answer is drawn rather than performed.
+##
+## The click is what moves the body. The reach says where the jaws meet; the
+## strike has to actually take the head there — the same `carry` number that
+## poses the lattice crown and the drawn skull — and arrive within its own
+## mouth's thickness of that height, which for an animal this tall means
+## addressing the target before the jaws go at all.
+##
+## And then it comes back up. The head returns toward its perch on the recovery
+## without the cursor having to be taken off the target.
 func _check_tall_carries_its_head_down_to_short(player: Creature, target: Creature) -> void:
 	_stage(player, target, "Elephant", "Lizard", 0.5)
 	var pick: Reticle.Pick = _flank_pick(target, player)
@@ -109,32 +250,41 @@ func _check_tall_carries_its_head_down_to_short(player: Creature, target: Creatu
 	_check(reach.possible,
 		"an elephant could not reach the lizard at its feet (%s)" % reach.describe())
 	var perch: float = player.stature.head_rest
+	var stood: float = player.stature.clearance
 	player.aim_at(pick)
 	_settle(player, target, 90)
-	# The head has genuinely come off its perch: the carried height is the
-	# stature's answer, so the drawn neck, the crown and the mouth's band have
-	# all come down with it — one number, read where it is owned.
-	_check(player.stature.carry < -1.0,
-		"an elephant reaching for its feet never carried its head down (carry %.1f)"
-			% player.stature.carry)
-	_check(player.stature.head_height < perch - 1.0,
-		"the carried head height %.1f never left its %.1f px perch"
-			% [player.stature.head_height, perch])
-	reach = Reach.solve(player, pick.at, pick.band, main.terrain)
-	_check(absf(player.jaw_height() - reach.height)
-			< player.body.head_radius + player.gape_radius() * Stature.GAPE_REACH + 1.0,
-		"the mouth settled %.1f px from the height the reach promised (%.1f vs %.1f)"
-			% [absf(player.jaw_height() - reach.height), player.jaw_height(), reach.height])
+	_check(absf(player.stature.carry) < 1.0,
+		"an elephant dipped %.1f px toward a target it had only been pointed at"
+			% -player.stature.carry)
+	_check(absf(player.stature.head_height - perch) < 1.0,
+		"the head left its %.1f px perch for %.1f on a hover"
+			% [perch, player.stature.head_height])
+	_check(player.crouch < 0.02 and absf(player.stature.clearance - stood) < 1.0,
+		"an elephant crouched %.0f%% toward a target nobody had clicked on"
+			% (player.crouch * 100.0))
+
 	var whole: float = target.anatomy.tissue.integrity()
 	_strike_through(player, target)
+	# The head has genuinely come off its perch during the strike: the carried
+	# height is the stature's answer, so the drawn neck, the crown and the
+	# mouth's band have all come down with it — one number, read where it is
+	# owned.
+	_check(_struck_carry < -1.0,
+		"an elephant striking at its feet never carried its head down (deepest %.1f)"
+			% _struck_carry)
+	_check(_struck_mouth_gap
+			< player.body.head_radius + player.gape_radius() * Stature.GAPE_REACH + 1.0,
+		"the mouth closed %.1f px from the height the reach promised"
+			% _struck_mouth_gap)
 	_check(player.bite_connected, "the elephant's strike at the lizard below it missed")
 	_check(target.anatomy.tissue.integrity() < whole,
 		"a connected downward bite left the lizard whole")
-	summary.append("elephant dips %.0f px onto a lizard" % -player.stature.carry)
-	player.aim_at(null)
-	_settle(player, target, 90)
+	summary.append("elephant dips %.0f px onto a lizard" % -_struck_carry)
+	# Still pointed at it, and still not holding it: the head comes home by
+	# itself once the strike is over.
+	_settle(player, target, 120)
 	_check(player.stature.carry > -2.0,
-		"the head never came back to its perch after the target was dropped (carry %.1f)"
+		"the head never came back to its perch after the strike (carry %.1f)"
 			% player.stature.carry)
 
 
@@ -365,6 +515,63 @@ func _flank_pick(target: Creature, biter: Creature) -> Reticle.Pick:
 	return pick
 
 
+## The structure of `target` that `biter` should be going for: the flank if it
+## can be reached, and otherwise the nearest leg.
+##
+## A leg is the one thing a low predator can reach on a tall one, which is why a
+## scenario pitting a Cat against an Elephant has to ask rather than assume — the
+## flank of an elephant is a body-height over a cat's head. The limb pick is built
+## exactly as `Reticle` builds one — the plan position on the pick, the hit naming
+## the bone — so the aim resolves onto the drawn chain the same way the cursor's
+## would.
+##
+## Nearest rather than reachable, deliberately: the caller walks the animal up to
+## whatever comes back, and a pick that refused to name anything out of reach
+## would leave it nowhere to walk to.
+func _reachable_pick(target: Creature, biter: Creature) -> Reticle.Pick:
+	var flank: Reticle.Pick = _flank_pick(target, biter)
+	if Reach.solve(biter, flank.at, flank.band, main.terrain).possible:
+		return flank
+	var best: Reticle.Pick = null
+	var best_gap: float = INF
+	for limb in target.gait.limbs:
+		if limb.severed:
+			continue
+		for segment in 3:
+			var span: int = mini(segment + 1, 2)
+			var at: Vector2 = limb.plan[segment].lerp(limb.plan[span], 0.5)
+			var band: Vector2 = target.anatomy.tissue.limb_band(limb.key, segment)
+			var reach: Reach = Reach.solve(biter, at, band, main.terrain)
+			if reach.refusal == "above" or reach.refusal == "below" \
+					or reach.distance >= best_gap:
+				continue
+			best_gap = reach.distance
+			var hit := AnatomyState.Hit.new()
+			hit.region_id = "limb:%s:%d" % [limb.key, segment]
+			hit.kind = AnatomyState.LIMB
+			hit.world_point = limb.joints[segment].lerp(limb.joints[span], 0.5)
+			hit.limb_key = limb.key
+			hit.limb_segment = segment
+			hit.limb_u = 1.0 if segment == 2 else 0.5
+			best = Reticle.Pick.new()
+			best.kind = "creature"
+			best.creature = target
+			best.hit = hit
+			best.at = at
+			best.band = band
+			best.height = Reach.meeting(biter, band)
+	return best if best != null else flank
+
+
+## Walks `biter` up to something it has decided to bite, from the side it is
+## already on, and leaves it standing at half its own arm from it.
+func _close_on(biter: Creature, victim: Creature, pick: Reticle.Pick) -> void:
+	var approach: Vector2 = biter.head_pos - victim.bounds_center
+	approach = approach.normalized() if approach.length_squared() > 1.0 else Vector2.LEFT
+	var stand: float = Reach.span_onto(biter, pick.band) * 0.45
+	biter.reset(pick.at + approach * stand, (-approach).angle())
+
+
 func _settle(a: Creature, b: Creature, ticks: int) -> void:
 	for _tick in ticks:
 		a._physics_process(TICK)
@@ -376,12 +583,41 @@ func _settle_one(a: Creature, ticks: int) -> void:
 		a._physics_process(TICK)
 
 
+## Throws one strike and watches the whole of it.
+##
+## Everything the animation is supposed to do happens inside these ticks and
+## nowhere else now, so the readings have to be taken here rather than off the
+## body afterwards — by the time the jaws have opened again the head is already
+## on its way back to its perch and the evidence has gone.
 func _strike_through(player: Creature, target: Creature) -> void:
+	_struck_carry = 0.0
+	_struck_mouth_gap = INF
+	_struck_neck = 0.0
+	_struck_drive = 0.0
+	var stood: Vector2 = player.spine.points[player.spine.size() / 2]
+	var ahead: Vector2 = Vector2.RIGHT.rotated(player.heading)
 	player.request_bite(player.jaw_point())
 	for _tick in 300:
 		player._physics_process(TICK)
 		target._physics_process(TICK)
-		if player.can_bite():
+		_struck_carry = minf(_struck_carry, player.stature.carry)
+		# The invariant, sampled on every tick of the strike rather than at the
+		# end of it: whatever the animation is doing, the distance from the skull
+		# to the shoulder is never more than the neck this animal has.
+		_struck_neck = maxf(_struck_neck, player.spine.points[0].distance_to(
+			player.spine.points[1]) / player.segment_rest())
+		# ...and how far the *body* went to deliver it, measured at the middle of
+		# the back, where nothing but the animal moving can move it.
+		_struck_drive = maxf(_struck_drive,
+			(player.spine.points[player.spine.size() / 2] - stood).dot(ahead))
+		if player.aim_reach != null and player.aim_reach.possible:
+			_struck_mouth_gap = minf(_struck_mouth_gap,
+				absf(player.jaw_height() - player.aim_reach.height))
+		# Jaws that took hold never reach the end of the animation — the clock
+		# stays on the hit frame for as long as the hold lasts, which is the whole
+		# point of a hold — so the strike is over when it has either finished or
+		# caught something.
+		if player.can_bite() or player.is_bite_latched():
 			return
 	_check(false, "a strike never finished: the animal is still mid-lunge")
 

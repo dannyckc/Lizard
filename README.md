@@ -31,8 +31,8 @@ godot --path . --editor   # open the editor
 |---|---|
 | `W` `S` / up/down arrows | move forward / back up along the creature's orientation — reverse is a slower, deliberate retreat and never sprints. Walking forward, the animal goes where its head is looking: the body swings round into the direction the cursor already put the head, and the neck straightens out onto it as the two meet |
 | `A` `D` / left/right arrows | turn the body left/right; switching sides sheds the old swing at the brake rate, so the flip answers immediately. The hand has the last word — a turn key held overrules whatever the head is asking for |
-| move mouse | shift and look the head toward the cursor. Standing still, that is all it does; walking, it is also the steering. The cursor is also a *target* — it selects a place, a height and the exact body part or object under it, and the creature starts reaching for that before any button is pressed: lowering itself toward something on the floor, holding its height for something at chest level. The marker sits where the jaws would actually land, and is brought in to arm's length when you aim past it |
-| left click | bite (anatomical hit + cooldown). Never refused: aimed at something the body cannot get its mouth onto, the lunge is thrown and misses. The reticle is hollow and the `TARGET` readout says why before you press it |
+| move mouse | shift and look the head toward the cursor. Standing still, that is all it does; walking, it is also the steering. The cursor is also a *target* — it selects a place, a height and the exact body part or object under it — but pointing is only ever a question: the animal reads out what is under the pointer and does not move a muscle toward it until you click. The marker sits on the surface the jaws would actually land on, in whatever ink reads against it, with a faint arc showing the ground this mouth covers; it is brought in to arm's length when you aim past it |
+| left click | bite (anatomical hit + cooldown). The animal gets itself into position first — folding its legs, sweeping its head to the target's height — and then throws itself. Never refused: aimed at something the body cannot get its mouth onto, the lunge is thrown and misses. The reticle draws a cross instead of a ring and the `TARGET` readout says why before you press it |
 | hold left click | keep hold of what you bit — a creature, or a severed part; drag it, carry it off, or be dragged by it |
 | click again while holding | chew: shut the same jaws on the same flesh once more. On a piece of meat this works it in, and swallows it once what is left will fit |
 | hold `Space`, then release | wind up a jump and take it. Holding is the animal *preparing* — it shifts its weight onto whichever girdle does the pushing, folds those joints, and stretches whatever elastic tissue it carries; releasing is the push-off, and the jump is worth however much got wound. A tap is a hop, a full hold is a leap, and holding past the top is a creature standing in a crouch: the store fills in a time its own legs set and nothing accumulates after that. A creature with no jump in its anatomy visibly gathers and stays on the floor. In the air the same key is a climb, for anything with wings |
@@ -54,11 +54,14 @@ A second body lies ahead of the player as the first combat slice. Nothing drives
 it: until there is an AI, everything placed in the habitat is a **carcass**, and
 it is simulated as one rather than parked as a living creature with its hands in
 its pockets — see **Bodies in the habitat** below. It can still be walked into,
-bitten, held, towed and eaten. A click throws the head forward in a lunge and the bite resolves at full
-extension, eating into a lattice of body cells layered skin over muscle over
-bone. If the button remains held when the bite connects, the jaws *keep hold*:
-the two creatures are joined at that point and whoever has the weight and the
-strength decides where the pair goes from there. Tissue a bite destroys falls into
+bitten, held, towed and eaten. A click throws the whole animal forward in a lunge —
+the neck is bone and does not stretch, so every pixel the mouth gains ahead of where
+it rests is the body driving itself off its own feet, as far as its stance will let
+it — and the bite resolves at full extension, eating into a lattice of body cells
+layered skin over muscle over bone. If the button remains held when the bite
+connects, the jaws *keep hold*: the animal draws itself back over its feet with the
+catch in its mouth, lifting it as far as its forequarter and its footing allow, and
+from there whoever has the weight and the strength decides where the pair goes. Tissue a bite destroys falls into
 the world as meat and can be eaten; a part that comes *off* — a leg, a tail, a head
 — stays a part, and has to be bitten, carried off and chewed down before it will go
 down. Bodies are solid, so the two creatures can be walked into rather than
@@ -96,6 +99,8 @@ input ──▶ head position ──▶ contacts + grip ──▶ spine ──�
 | [AnatomyState.gd](scripts/creature/AnatomyState.gd) | anatomical hit-testing — which creature, and which structure of it |
 | [Dentition.gd](scripts/creature/Dentition.gd) | the teeth: how many, how long, how keen, and what type each one turns out to be |
 | [BiteMark.gd](scripts/creature/BiteMark.gd) | the footprint one closing of the jaws leaves — the only description of a bite anything downstream gets |
+| [Reach.gd](scripts/creature/Reach.gd) | whether these jaws can be got onto that, and what the body has to do about it |
+| [TargetMark.gd](scripts/world/TargetMark.gd) | the mark on whatever the cursor has hold of, drawn over the world so it sits on the thing it selected |
 | [TissueGrid.gd](scripts/creature/TissueGrid.gd) | the body-space cell lattice: skin over muscle over bone, and what a bite does to it |
 | [ScrapField.gd](scripts/world/ScrapField.gd) | tissue knocked loose, as meat lying in the world |
 | [CarrionField.gd](scripts/world/CarrionField.gd) | parts of animals lying in the world — still anatomy, until something bites them |

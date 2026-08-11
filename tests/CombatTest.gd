@@ -243,7 +243,17 @@ func _check_grip(player: Creature, target: Creature) -> void:
 
 	# A heavy set of jaws on light prey: it goes where the biter goes. Towing is
 	# quiet — the two travel together — so it is a drag and not a dismemberment.
-	var towed: float = _hold(player, target, "Elephant", "Cat", "drag", 3.0)
+	#
+	# Measured from a settled hold rather than from the instant of the bite, and
+	# the second between the two is a real movement rather than a delay allowed
+	# for. A strike throws the animal's whole body forward now; catching something
+	# is followed by it drawing itself back over its own feet with the prey in its
+	# mouth, so the first second of any hold tows the victim a body-length *toward*
+	# the biter before a step is taken. That is the pickup, it has its own check
+	# elsewhere, and averaging it into the tow would be measuring two movements and
+	# calling the difference a walk.
+	_hold(player, target, "Elephant", "Cat", "still", 1.0)
+	var towed: float = _hold_on(player, target, "drag", 3.0)
 	_check(player.grip != null,
 		"an Elephant lost its hold on a Cat it was simply walking away with")
 	_check(towed > 100.0,

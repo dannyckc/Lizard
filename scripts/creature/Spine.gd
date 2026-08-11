@@ -28,9 +28,15 @@ const SLUMP_BEND_FRACTION: float = 0.55
 ## slow arc alone reads as a body bent deliberately; this is what makes it read
 ## as flesh that is not uniform.
 const SLUMP_WANDER: float = 0.35
-## Shortest the neck may be drawn during the wind-up of a strike, as a fraction
-## of its rest length. A species with a long reach and a short spine could
-## otherwise rock its head back through its own shoulders.
+## How far the neck folds, as a fraction of its rest length — the shortest the
+## skull-to-shoulder distance ever gets. A column of vertebrae coils; it does not
+## telescope, so this is a limit on the fold and not a limit on the bone, and
+## past it a species with a long reach and a short spine would be rocking its
+## head back through its own shoulders.
+##
+## The other end of that range is the rest length itself, and it is a hard
+## ceiling rather than a soft one: nothing in the game may draw a neck longer
+## than the neck is. See `pose_head`.
 const MIN_NECK: float = 0.4
 ## Below this much motion in one tick a point is asleep and gives up its implied
 ## velocity — see step()'s rest pass. 0.005 px at 60 Hz is 0.3 px/s, far under
@@ -199,6 +205,29 @@ func bend_at(i: int, max_bend: float) -> float:
 	if section_hold.size() != points.size() or i < 0 or i >= section_hold.size():
 		return max_bend
 	return max_bend * lerpf(LIMBER_BEND, 1.0, section_hold[i])
+
+
+## Carries the whole chain bodily by `offset`, changing nothing about its shape.
+##
+## The one movement a chain solved from its head cannot express, and the one a
+## lunge needs. Pinning the head somewhere new and letting the constraints follow
+## turns a body that should have *travelled* into one that has swung: the head
+## goes where it was sent, the second station is pulled onto its circle, and the
+## further off the body's own axis the movement was, the more of it is spent
+## rotating the animal rather than moving it. Measured on a lizard striking
+## sideways at a foot, better than half the throw disappeared into the swing.
+##
+## `prev` moves with `points`, which is what makes it a carry rather than a
+## shove: Verlet reads velocity as the difference between the two, so shifting
+## only the positions would hand the integrator the whole displacement as though
+## the animal had been thrown, and it would keep going next tick. Nothing here
+## touches segment lengths, bends or the wave — a rigid translation cannot.
+func shift(offset: Vector2) -> void:
+	if offset == Vector2.ZERO:
+		return
+	for i in points.size():
+		points[i] += offset
+		prev[i] += offset
 
 
 ## Advances the spine one tick. `head_pos` is where the head is being dragged to.
@@ -489,18 +518,34 @@ func rotate_followers(pivot: Vector2, angle: float) -> void:
 ## tow the torso, alter the authoritative movement heading, or leak momentum
 ## into the next tick.
 ##
-## `reach` is how far past its rest length the neck is currently thrown — a
-## strike, and nothing else writes to it. It lives here for the same reason look
-## does: a lunge is the head leaving the body behind, so it has to be applied
-## where the body can no longer be dragged by it. The neck may extend freely and
-## is only stopped from being compressed into the chest by the wind-up, which is
-## the one direction the reach runs negative in.
-func pose_head(forward: Vector2, seg_len: float, reach: float = 0.0) -> void:
+## `draw_in` is how far the head is currently held *short* of the neck's own
+## length, and it only ever runs one way. A neck is vertebrae: it coils, it
+## folds into an S, and what that does to the distance between the skull and the
+## shoulder is shorten it — so this is clamped at zero above and at the coil's
+## own limit below, and there is no value of it that makes the link longer than
+## the bone in it. That is the invariant, and it is checked: `MIN_NECK` is how
+## far the column folds and `seg_len` is how far it reaches, and the head lives
+## between them whatever anything upstream asks for.
+##
+## Two things spend it and both are the same shortening. The wind-up of a strike
+## coils the neck back over the shoulders; and a head swept off level has
+## rotated part of its column out of the ground plane, so the plan view sees
+## less of it — see Stature.neck_pullback. What used to be here as well was the
+## strike's forward throw, and it does not belong to the neck at all: a mouth
+## does not get further from the shoulder than the neck is long. The body takes
+## it now — see Creature._advance_lunge, which drives the whole animal forward
+## and leaves this link exactly as long as it was.
+##
+## It lives here for the same reason the look does: the head is placed after the
+## chain is solved, in the one layer that can move point 0 without the
+## constraint pass dragging the torso along behind it.
+func pose_head(forward: Vector2, seg_len: float, draw_in: float = 0.0) -> void:
 	if points.size() < 2:
 		return
 	var direction: Vector2 = forward.normalized() \
 		if forward.length_squared() > 0.000001 else forwards[0]
-	points[0] = points[1] + direction * maxf(seg_len + reach, seg_len * MIN_NECK)
+	points[0] = points[1] + direction * clampf(seg_len + draw_in,
+		seg_len * MIN_NECK, seg_len)
 	prev[0] = points[0]
 	_compute_frames()
 

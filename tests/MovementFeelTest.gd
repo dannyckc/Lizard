@@ -29,7 +29,7 @@ func _process(_delta: float) -> bool:
 	_check_strike_leaves_the_body_alone()
 
 	if failures.is_empty():
-		print("movement feel OK — reverse keeps facing, turns start at the front, strikes throw only the head")
+		print("movement feel OK — reverse keeps facing, turns start at the front, and a strike throws the whole animal without turning it")
 		quit(0)
 	else:
 		for failure in failures:
@@ -241,10 +241,22 @@ func _check_moving_turn_has_no_extra_sweep() -> void:
 	_destroy_creature(creature)
 
 
-## A strike throws the head, not the creature. The reach is the neck extending
-## past the body, so a bite aimed hard across the cursor must leave the torso
-## exactly where it was standing — it may not haul the spine round after the
-## mouse, which is what feeding the throw to the body solver did.
+## A strike throws the animal, not its neck — and it throws it in a straight
+## line rather than winding it round the cursor.
+##
+## Two things have to be true at once and they used to be one. The mouth genuinely
+## gets out in front of where the body was standing, because that is what a lunge
+## is worth; and it gets there without the neck growing, because a neck is bone.
+## So the reach is the *body* travelling now, which is why the tail comes with it:
+## the animal moved, all of it, and a tail left standing where it was would be the
+## picture lying about that.
+##
+## What must still not happen is the strike being fed to the body solver as a new
+## place to put the head. That hauls the spine round after the mouse — the torso
+## turns, the throw is spent rotating rather than travelling, and a bite aimed
+## across the body is a creature spinning on the spot. The torso's own axis is
+## therefore checked before and after, and it is the one number here that has to
+## stay put.
 func _check_strike_leaves_the_body_alone() -> void:
 	var creature := _spawn_creature()
 	var aim := MovementInput.Command.new()
@@ -255,23 +267,27 @@ func _check_strike_leaves_the_body_alone() -> void:
 		creature._physics_process(TICK)
 
 	var torso: float = creature.spine.forwards[1].angle()
-	var tail: Vector2 = creature.spine.points[creature.spine.size() - 1]
-	var neck: float = creature.params.segment_length
+	var stood: Vector2 = creature.head_pos
+	var mouth: Vector2 = creature.jaw_point()
+	var neck: float = creature.segment_rest()
 	creature.request_bite(aim.aim_world)
-	var reach: float = 0.0
+	var longest: float = 0.0
+	var thrown: float = 0.0
 	for _tick in 40:
 		creature.command = aim
 		creature._physics_process(TICK)
-		reach = maxf(reach, creature.spine.points[0].distance_to(creature.spine.points[1]))
+		longest = maxf(longest, creature.spine.points[0].distance_to(creature.spine.points[1]))
+		thrown = maxf(thrown, mouth.distance_to(creature.jaw_point()))
 
 	var swung: float = rad_to_deg(absf(wrapf(creature.spine.forwards[1].angle() - torso, -PI, PI)))
 	_check(swung < 5.0, "a strike swung the torso %.1f degrees round after the cursor" % swung)
-	_check(tail.distance_to(creature.spine.points[creature.spine.size() - 1]) < 5.0,
-		"a strike dragged the tail %.1f px"
-			% tail.distance_to(creature.spine.points[creature.spine.size() - 1]))
-	_check(reach > neck + creature.params.bite_reach * 0.8,
-		"the head was never thrown past the body (%.1f px of neck against %.1f at rest)"
-			% [reach, neck])
+	_check(longest <= neck + 0.01,
+		"a strike stretched the neck to %.1f px against %.1f at rest" % [longest, neck])
+	_check(thrown > creature.params.bite_reach * 0.5,
+		"the mouth was never thrown past where the body stood (%.1f px)" % thrown)
+	_check(creature.head_pos.distance_to(stood) < 5.0,
+		"a strike walked the creature %.1f px across the world"
+			% creature.head_pos.distance_to(stood))
 	_destroy_creature(creature)
 
 

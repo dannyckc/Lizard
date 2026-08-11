@@ -242,7 +242,13 @@ func _check_bite_position_hangs_the_piece(player: Creature, target: Creature) ->
 	# nothing else for it to do.
 	player.mouthful.hold = _far_cell(part)
 	player.mouthful.part.full_mass = 4.0
-	_walk(player, 120)
+	# Long enough for the carry to settle, and it takes longer than it used to for
+	# a reason that is a movement rather than a delay: a strike throws the whole
+	# animal now, so the second after a bite is spent drawing the body back over
+	# its own feet — see Creature.HAUL_HOME — and only after that is the creature
+	# walking off with the thing in its mouth. A piece is swung into line by being
+	# towed, so the towing has to have started.
+	_walk(player, 240)
 	var behind: Vector2 = player.spine.forwards[0]
 	var tail: Vector2 = part.to_world(-player.mouthful.hold)
 	var along: float = (tail - player.jaw_point()).normalized().dot(behind)
@@ -305,7 +311,17 @@ func _check_a_mouthful_props_the_jaws_open(player: Creature, target: Creature) -
 ## makes a long piece eaten end-first rather than gnawed forever at one spot.
 func _check_chewing_works_a_piece_in(player: Creature, target: Creature) -> void:
 	_clear()
+	# The same donor the division check uses, and for the same reason said there:
+	# what is under test is chewing, and chewing only happens to a piece that will
+	# not go down whole. Off the habitat's own legs the piece lands within a
+	# fraction of a pixel of the gape's swallow limit, so which side of it falls
+	# is decided by a cell here or there rather than by anything this check is
+	# about — and a run where it fits swallows the piece on the first closing and
+	# reports that chewing did nothing.
+	var leg: float = target.params.leg_length
+	target.params.leg_length = leg * 1.8
 	var part: CarrionField.Part = _sever_limb(target, "RR")
+	target.params.leg_length = leg
 	if part == null:
 		return
 	_park(target)
@@ -315,6 +331,9 @@ func _check_chewing_works_a_piece_in(player: Creature, target: Creature) -> void
 		_check(false, "could not take hold of the piece")
 		return
 	player.mouthful.hold = _far_cell(part)
+	_check(not player.mouthful.fits(player.gape_radius()),
+		"the piece staged for the chewing check goes down whole (%.1f px of reach against a %.1f px throat)"
+			% [player.mouthful.reach(), player.gape_radius() * Mouthful.SWALLOW_SPAN])
 
 	var reach: float = player.mouthful.reach()
 	var flesh: float = part.flesh

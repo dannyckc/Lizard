@@ -24,7 +24,11 @@
 ##     This is the one that shows: the whole animal comes down, its stance draws
 ##     in, and its bands come with it, because the crouch is fed back into the
 ##     gait as a shorter leg rather than drawn over the top of a standing one.
-##   * `lean` — the lunge's own throw, as the share of it this reach needs.
+##   * `lean` — the lunge's own throw, as the share of it this reach needs. It
+##     is the animal moving, literally: a neck cannot get longer, so everything
+##     the mouth gains ahead of where it rests is the body driving itself
+##     forward off its feet. See `Creature.lunge_throw`, which is how far this
+##     particular body can do that without going over.
 ##
 ## Nothing here names a species and nothing here names a target. An elephant
 ## feeding at its feet, a lizard taking a pellet off the floor and a cat trying
@@ -78,7 +82,6 @@ static func solve(creature: Node, at: Vector2, target_band: Vector2,
 		r.refusal = "no body"
 		return r
 	var stature: Stature = creature.stature
-	var p: CreatureParams = creature.params
 	# From the *rest* pose, deliberately, in both axes. The mouth may already be
 	# swept toward something — this very target, most ticks — and a reach solved
 	# from a pose that is itself a response to the last answer would chase its
@@ -111,8 +114,9 @@ static func solve(creature: Node, at: Vector2, target_band: Vector2,
 
 	# --- horizontally: the gape, plus as much of the lunge as it takes ---------
 	# The throw is the whole of what a creature gains by striking rather than by
-	# standing there — see `Creature._advance_lunge` — so the lean is that throw
-	# priced in the units it is spent in, and it saturates at all of it.
+	# standing there — and since the neck stopped stretching, all of it is the
+	# body moving: see `Creature._advance_lunge`. So the lean is that throw priced
+	# in the units it is spent in, and it saturates at all of it.
 	#
 	# The two axes are one purse now, and the neck's arc is the exchange rate:
 	# sweeping the mouth to the meeting height rotates part of the neck out of
@@ -130,7 +134,7 @@ static func solve(creature: Node, at: Vector2, target_band: Vector2,
 	var pullback: float = minf(_neck_slack(creature), stature.neck_pullback(
 		r.height - creature.jaw_rest_height()))
 	var gape: float = creature.gape_radius()
-	var throw: float = p.bite_reach * creature.size_scale
+	var throw: float = creature.lunge_throw()
 	r.lean = clampf((r.distance - gape + pullback) / maxf(throw, 0.001), 0.0, 1.0)
 	var arm: float = span(creature) - pullback
 	if r.distance > arm:
@@ -168,8 +172,15 @@ static func solve(creature: Node, at: Vector2, target_band: Vector2,
 ## the whole of the lunge behind it — on something at the mouth's own level.
 ## The level-ground figure, before the neck's arc has been asked to carry the
 ## mouth anywhere; see `span_onto` for the same number pointed at a height.
+##
+## The lunge is `Creature.lunge_throw` rather than the species' parameter,
+## because the throw is the *body* moving now — the neck has stopped stretching
+## — and a body throws itself only as far as what it is standing on will let it
+## get away with. So an animal on four square feet is offered its whole reach, one
+## on two is offered less, and one in mid-air is offered the counter-poise. One
+## number for what is offered, what is drawn and what is delivered.
 static func span(creature: Node) -> float:
-	return creature.gape_radius() + creature.params.bite_reach * creature.size_scale
+	return creature.gape_radius() + creature.lunge_throw()
 
 
 ## The same arm, brought onto something occupying `band`: the level span less

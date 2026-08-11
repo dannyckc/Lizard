@@ -1537,6 +1537,55 @@ static func coalesce_shed(loose: Array, shed: Array) -> void:
 
 # ----------------------------------------------------------------- voids ----
 
+## One cell of this animal, named by the two things a reader needs to know what
+## is showing there: which patch it belongs to and where its stack of layers
+## begins in that patch's `hp`. Neither is any use without the other.
+class Surface extends RefCounted:
+	var patch: Patch
+	var cell: int = -1
+	var base: int = -1
+
+
+## The cell a hit landed in.
+##
+## Exposed because "how much of this is left" and "what is on top of it" are
+## different questions, and only the first had an answer here. The second is what
+## anything drawing *over* the animal has to ask — a marker on a flank has to know
+## whether it is sitting on hide or on an open wound to be legible against either
+## — and the addressing that answers it is this file's, not the caller's. It is
+## the same address `body_solid`, `head_solid` and `limb_solid` take, read one
+## level finer.
+##
+## Null where the hit names nothing this grid is holding, which a caller should
+## treat exactly as it treats an unposed body: fall back to whatever it did before
+## it could ask.
+func surface_at(hit: AnatomyState.Hit) -> Surface:
+	if hit == null:
+		return null
+	var found := Surface.new()
+	var lateral: float = 0.0
+	var col: int = 0
+	match hit.kind:
+		AnatomyState.HEAD:
+			found.patch = patches[BODY_KEY]
+			col = HEAD_COLS / 2
+		AnatomyState.LIMB:
+			found.patch = patch(hit.limb_key)
+			var half: int = LIMB_BONE_COLS / 2
+			col = half / 2 if hit.limb_segment == 0 \
+				else (half + half / 2 if hit.limb_segment == 1 else LIMB_BONE_COLS)
+		_:
+			found.patch = patches[BODY_KEY]
+			col = HEAD_COLS + clampi(int(hit.spine_t * float(TORSO_COLS)),
+				0, TORSO_COLS - 1)
+			lateral = hit.lateral
+	if found.patch == null or not found.patch.live or found.patch.hp.is_empty():
+		return null
+	found.base = _cell_base(found.patch, col, lateral)
+	found.cell = found.base / LAYERS
+	return found
+
+
 ## How much of the body is still there at `t` along the clipped spine, on the
 ## given side, as a fraction of the width the silhouette would have had.
 ##

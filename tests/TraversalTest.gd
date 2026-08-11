@@ -575,16 +575,36 @@ func _check_reaching_down(player: Creature) -> void:
 	player.aim_at(down)
 	for _tick in 60:
 		player._physics_process(TICK)
+	# Pointing at it is not reaching for it. A cursor resting on the floor is a
+	# question about the world; sixty ticks of it and the animal is standing
+	# exactly as it was, because what folds a body is the decision to bite and
+	# nothing else.
+	_check(player.crouch < 0.02 and player.gait.support > upright - 2.0,
+		"an elephant folded %.0f%% of its legs at a target nobody had clicked on"
+			% (player.crouch * 100.0))
+	# ...and the click is what folds it. Read across the strike rather than after
+	# it: the fold is spent getting the mouth down there and released with the
+	# rest of the movement, so by the time the jaws have opened again the animal
+	# is already on its way back up.
+	var folded: float = 0.0
+	var lowest: float = INF
+	player.request_bite(down.at)
+	for _tick in 240:
+		player._physics_process(TICK)
+		folded = maxf(folded, player.crouch)
+		lowest = minf(lowest, player.gait.support)
+		if player.can_bite():
+			break
 	# That it folds at all, rather than how much: how much is a consequence of how
 	# far its mouth has to travel, and a correctly proportioned animal needs less
 	# of its legs to reach its own feet than one on stilts did. The claim with teeth
 	# in it is the next one — that the fold arrives at the body.
-	_check(player.crouch > 0.1,
-		"an elephant told to feed at its feet folded %.0f%% of its legs" % (player.crouch * 100.0))
-	_check(player.gait.support < upright - 2.0,
-		"the crouch never reached the body: it rode %.1f px before and %.1f px after"
-			% [upright, player.gait.support])
-	summary.append("elephant crouches %.0f -> %.0f px" % [upright, player.gait.support])
+	_check(folded > 0.1,
+		"an elephant told to feed at its feet folded %.0f%% of its legs" % (folded * 100.0))
+	_check(lowest < upright - 2.0,
+		"the crouch never reached the body: it rode %.1f px before and %.1f px at its lowest"
+			% [upright, lowest])
+	summary.append("elephant crouches %.0f -> %.0f px" % [upright, lowest])
 	player.aim_at(null)
 	for _tick in 90:
 		player._physics_process(TICK)
@@ -630,7 +650,15 @@ func _check_refusing_what_it_cannot_reach(player: Creature, target: Creature) ->
 	# Close enough that the horizontal solve always succeeds — the refusal this
 	# check exists to read is the vertical one, so the stand-off is inside any
 	# build's lunge rather than calibrated to one species' head.
-	player.reset(beside.plan[2] + across * 22.0, (-across).angle())
+	#
+	# Measured off the drawn foot rather than the plan one, because that is where
+	# the flesh a bite has to arrive at actually is: a limb's cells and its hit
+	# capsules live on the chain it is drawn along, hanging below the body, and on
+	# an animal this deep through the chest that is most of a lizard away from the
+	# spot the same foot stands on. Staged off the plan position the animal was
+	# put a body-length from what it was about to be asked to bite, and only ever
+	# reached it because the head used to leave on its own.
+	player.reset(beside.joints[2] + across * 22.0, (-across).angle())
 	for _tick in 20:
 		player._physics_process(TICK)
 		target._physics_process(TICK)
@@ -665,10 +693,17 @@ func _check_refusing_what_it_cannot_reach(player: Creature, target: Creature) ->
 	var low: Reticle.Pick = Reticle.pick(self, foot.joints[2], 8.0, player)
 	_check(low.hit != null and low.creature == target,
 		"a cursor on the elephant's drawn foot selected %s" % low.describe())
-	var down: Reach = Reach.solve(player, low.at, low.band)
-	_check(down.possible,
-		"the same lizard could not reach the planted foot beside it (%s)" % down.describe())
+	# Asked through the animal's own aim rather than of the pick's plan position,
+	# because those are two different places on a limb and only one of them is
+	# where the mouth is sent: `Creature.aim_contact` resolves a leg onto the chain
+	# its cells and its capsules are posed along. Solving against the plan spot
+	# instead measures a reach onto the patch of ground the foot stands on, which
+	# on a deep-chested animal is most of a lizard from the foot.
 	player.aim_at(low)
+	var down: Reach = player.aim_reach
+	_check(down != null and down.possible,
+		"the same lizard could not reach the planted foot beside it (%s)"
+			% ("no reach solved" if down == null else down.describe()))
 	_check(player.request_bite(low.at),
 		"a lizard refused to bite a foot it can reach")
 	_strike_through(player, target)
@@ -680,8 +715,9 @@ func _check_refusing_what_it_cannot_reach(player: Creature, target: Creature) ->
 	# Something solid in between is the same refusal from the third direction.
 	main.terrain.clear()
 	var mouth: Vector2 = player.jaw_point()
-	main.terrain.add(mouth.lerp(low.at, 0.5), 30.0, 40.0, 0.0, "rock")
-	var blocked: Reach = Reach.solve(player, low.at, low.band, main.terrain)
+	var flesh: Vector2 = player.aim_contact
+	main.terrain.add(mouth.lerp(flesh, 0.5), 30.0, 40.0, 0.0, "rock")
+	var blocked: Reach = Reach.solve(player, flesh, low.band, main.terrain)
 	_check(not blocked.possible and blocked.obstructed,
 		"jaws closed on something on the far side of a rock (%s)" % blocked.describe())
 	main.terrain.clear()
