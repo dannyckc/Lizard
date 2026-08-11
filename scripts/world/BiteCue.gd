@@ -117,6 +117,12 @@ func _draw() -> void:
 		# Prints swell very slightly as they fade, which is blood spreading out
 		# of the puncture rather than the puncture growing.
 		var bloom: float = 1.0 + (1.0 - p.remaining / DURATION) * 0.18
+		# The closing happened at a height, and the print is drawn through the
+		# same projection as the flesh it was made in — a bite on a flank sits on
+		# the drawn flank, not on the ground plane behind it. The impressions
+		# themselves stay in plan coordinates: this is where the mark is *shown*,
+		# and the cells it ate were chosen by the mark's own reach.
+		var drop: Vector2 = Posture.drop(p.mark.height, 0.0)
 		for imp in p.mark.impressions:
 			# Depth is the whole of the colour: a tooth that only creased the
 			# skin leaves a faint print and one that reached meat leaves a dark
@@ -130,7 +136,7 @@ func _draw() -> void:
 			var across: float = imp.half_across * bloom
 			for k in FACETS:
 				var a: float = TAU * float(k) / float(FACETS)
-				_points[v + k] = imp.pos \
+				_points[v + k] = imp.pos + drop \
 					+ imp.axis * (cos(a) * along) + side * (sin(a) * across)
 				_colors[v + k] = tint
 			for k in range(1, FACETS - 1):

@@ -2637,10 +2637,11 @@ the other senses.
 
 ## Tests
 
-Twenty headless checks cover controls, movement feel, simulation, rendering,
+The headless checks cover controls, movement feel, simulation, rendering,
 UI, combat, sight, smell, hearing, anatomy, feeding, the bodies in the habitat,
 the vertical axis, leaving the ground, the four stances, what a limb is and how
-it is joined on, how the feet come down and getting past things:
+it is joined on, how the feet come down, getting past things and the bite as a
+three-dimensional interaction:
 
 ```sh
 godot --headless --path . --script tests/ControlsTest.gd # input/head-look isolation
@@ -2664,6 +2665,7 @@ godot --headless --path . --script tests/ArticulationTest.gd # joints, girdles a
 godot --headless --path . --script tests/VolumeTest.gd    # every cell in three axes
 godot --headless --path . --script tests/TraversalTest.gd # under, over, onto or stopped
 godot --headless --path . --script tests/LatticeTest.gd   # the 3D cell lattice, one census
+godot --headless --path . --script tests/BiteReachTest.gd # the bite's 3D contact point
 ```
 
 Four diagnostic harnesses sit beside the tests and are not part of the suite.

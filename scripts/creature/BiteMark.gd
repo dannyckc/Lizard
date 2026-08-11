@@ -63,6 +63,14 @@ var hi: Vector2 = Vector2.ZERO
 ## Unbounded by default, so a caller that knows nothing about height bites what
 ## it always bit.
 var reach: Vector2 = Stature.UNBOUNDED
+## The height the jaws closed at, for whatever draws the mark: the print in the
+## world is displaced by the same `Posture.drop` projection as the flesh it was
+## made in, so a bite taken on a flank is drawn on the flank rather than on the
+## patch of ground the flank is standing over. Zero — the ground plane — for a
+## caller that never says, which is every mark that predates the third axis.
+## Presentation only: the cells the mark erodes are gated by `reach`, never by
+## this.
+var height: float = 0.0
 
 
 ## The mark a mouthful parting from a body leaves, rather than one teeth closing

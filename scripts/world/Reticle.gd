@@ -300,7 +300,12 @@ static func _meet(found: Pick, actor: Creature, mouth: Vector2) -> void:
 ## a rise strikes at the rise rather than at the plane under it.
 static func _short_of(found: Pick, actor: Creature, mouth: Vector2) -> Pick:
 	var direction: Vector2 = _toward(found.at, mouth)
-	var limit: Pick = _ground(mouth + direction * (Reach.span(actor) * CLAMP_MARGIN))
+	# The arm onto the *floor*, not the level-ground span: the point being
+	# offered is down there, and sweeping the mouth down to it costs the neck
+	# part of its plan reach — Reach charges the strike the same way, and the two
+	# have to agree or the marker would offer a place the body then declines.
+	var limit: Pick = _ground(mouth + direction
+		* (Reach.span_onto(actor, Volume.ground()) * CLAMP_MARGIN))
 	var terrain: Terrain = actor.terrain()
 	if terrain != null:
 		limit.height = terrain.surface(limit.at, 0.0).x

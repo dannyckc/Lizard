@@ -450,12 +450,16 @@ func _hold(biter: Creature, victim: Creature, biter_name: String, victim_name: S
 		# into the toe they grazed, and a graze is not a hold. Biting the shin is
 		# also simply what the fixture means: it is the run of leg a low predator
 		# can actually get its jaws around.
+		#
+		# Picked through the cursor's own resolver rather than assembled by hand,
+		# because the pick carries more than a place now: which structure it is,
+		# and therefore where that structure's flesh is actually met — a leg is
+		# posed on its drawn chain, and a strike sized to the aim needs the pick
+		# to know it. The pointer goes on the drawn shin, exactly where a player's
+		# would.
 		var leg: Limb = victim.gait.limbs[0]
-		var shin: Vector2 = leg.plan[1].lerp(leg.plan[2], 0.6)
-		var mark := Reticle.Pick.new()
-		mark.at = shin
-		mark.band = victim.anatomy.tissue.limb_band(leg.key, 1)
-		biter.aim_at(mark)
+		var shin: Vector2 = leg.joints[1].lerp(leg.joints[2], 0.6)
+		biter.aim_at(Reticle.resolve(Reticle.pick(self, shin, 8.0, biter), biter))
 		for _i in 12:
 			biter._physics_process(TICK)
 			victim._physics_process(TICK)

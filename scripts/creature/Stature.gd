@@ -52,8 +52,27 @@ var depth: float = 0.0
 ## grounded creature is drawn exactly where the simulation puts it and only the
 ## parts above and below it are displaced.
 var reference: float = 0.0
-## Centre height of the head.
+## Centre height of the head, as it is *currently carried*: the rest perch plus
+## however far the neck is sweeping it right now — see `head_rest` and `carry`.
+## This is the height the lattice poses the skull's cells at and the view draws
+## the jaws at, so a creature reaching for the floor genuinely has its head down
+## there, and everything that reads the posed head — another animal's bite
+## included — finds it where it is.
 var head_height: float = 0.0
+## The same height with no carry in it: where the neck perches the head when the
+## animal is not reaching for anything. The envelope (`bite`) and every reach
+## budget are measured from here, never from `head_height` — a head already
+## dipped must not read as an animal with less reach, or the reach test would
+## chase its own answer.
+var head_rest: float = 0.0
+## How far off that perch the head is being carried this tick, after clamping to
+## what the neck can actually do. Written by `update` from the raw request the
+## creature hands in; everything above the shoulders is a consequence of it.
+var carry: float = 0.0
+## The neck's own length in the world — the radius of the arc the head sweeps
+## on. Plan-view reach spent carrying the mouth off level is read off this, and
+## only off this: see `neck_pullback`.
+var neck_arc: float = 0.0
 
 ## Occupied bands, absolute. `whole` is their union — what another body has to
 ## reach to touch this one anywhere.
@@ -112,9 +131,16 @@ var elevation: float = 0.0
 ##
 ## `loco` is what this body's joints can do; left out, the sprawled defaults
 ## answer, which is what a body with no locomotion solved yet has to use.
+##
+## `p_carry` is how far off its rest perch the animal is asking to carry its
+## head this tick — the vertical half of reaching for something, handed in by
+## the creature the same way the crouch is spent through the legs. It is a
+## request rather than a fact: this file owns what the neck can do, so the
+## request is clamped to the sweep before anything downstream sees it.
 func update(posture: Posture, body: BodyShape, p: CreatureParams, scale: float,
 		body_length: float, height: float, gape: float, standing: bool = true,
-		held: Vector2 = Vector2(-1.0, -1.0), loco: Locomotion = null) -> void:
+		held: Vector2 = Vector2(-1.0, -1.0), loco: Locomotion = null,
+		p_carry: float = 0.0) -> void:
 	elevation = maxf(height, 0.0)
 	if posture == null or body == null or p == null or body.widths.is_empty():
 		torso = Vector2(elevation, elevation)
@@ -122,6 +148,10 @@ func update(posture: Posture, body: BodyShape, p: CreatureParams, scale: float,
 		limbs = torso
 		whole = torso
 		bite = torso
+		carry = 0.0
+		neck_arc = 0.0
+		head_rest = elevation
+		head_height = elevation
 		return
 
 	# How high the sockets are being carried: what the feet have measured if they
@@ -161,8 +191,22 @@ func update(posture: Posture, body: BodyShape, p: CreatureParams, scale: float,
 	# animal, and so a long-necked browser is one number away. A neck holds a head
 	# up; it does not hold one up off the floor, so a body that is not standing
 	# has it laid down with the rest of itself.
-	head_height = reference + (p.neck_lift * body_length if standing else 0.0)
+	head_rest = reference + (p.neck_lift * body_length if standing else 0.0)
 	var head_half: float = maxf(body.head_radius, 0.5)
+
+	# The neck itself, and what the head may currently be doing on the end of it.
+	# The arc is the neck's real length; the carry is the creature's request,
+	# honoured only as far as the neck goes — down to the whole of the descent the
+	# bite band already grants (off the perch to the shoulder, then the sweep
+	# below it), up by the sweep alone — and only on a body whose neck is holding
+	# anything at all. The carried height is what everything above the shoulders
+	# is posed from; every *budget* stays quoted off the rest perch, or a head
+	# already down would read as a shorter neck.
+	neck_arc = (posture.neck_reach + p.neck_lift * NECK_STOOP) * body_length
+	var reach_sweep: float = neck_arc + gape * GAPE_REACH
+	carry = clampf(p_carry, -(head_rest - reference + reach_sweep), reach_sweep) \
+		if standing else 0.0
+	head_height = head_rest + carry
 
 	torso = Vector2(clearance, clearance + depth) + Vector2(elevation, elevation)
 	head = Vector2(head_height - head_half, head_height + head_half) \
@@ -189,9 +233,11 @@ func update(posture: Posture, body: BodyShape, p: CreatureParams, scale: float,
 	# pillars still get its mouth most of the way to the floor and then need the
 	# last of its fold to arrive — which is exactly the animal that has almost no
 	# fold, so it is the one this has to be right about.
-	var sweep: float = (posture.neck_reach + p.neck_lift * NECK_STOOP) * body_length \
-		+ gape * GAPE_REACH
-	var high: float = head_height + sweep
+	# ...and stated off the rest perch, deliberately: the envelope is what the
+	# animal *could* reach, and a head currently swept to the floor has not
+	# surrendered the top of its range — it is spending it.
+	var sweep: float = reach_sweep
+	var high: float = head_rest + sweep
 	# Downward is three movements rather than one, and it used to be a clamp: an
 	# animal standing on the ground was simply granted the ground, on the grounds
 	# that the interesting direction was upward. It is not, and the clamp was
@@ -259,6 +305,37 @@ func socket_hang(body: BodyShape, posture: Posture, widest: float) -> float:
 ## quoted "per animal" — a leap, a step up, a thing it can see over.
 func stand_height() -> float:
 	return clearance + depth
+
+
+## Plan-view reach the neck gives up — or gains — carrying the mouth `dv` off
+## its rest height. Positive is reach lost, negative is reach found.
+##
+## A neck is a real length, so the head sweeps on an arc rather than a rail,
+## and what points forward at any moment is the same cosine every limb already
+## pays — see Posture.plan_reach, which is this exact projection stated for a
+## leg. The subtlety is where on the arc the neck *starts*: a species that
+## perches its head high is already carrying the neck rotated up, so bringing
+## the head down toward its own back swings the arc through level and the
+## mouth comes *forward* before it ever comes back. That is a browser gaining
+## a nose-length lowering its head to chest height, and the same browser
+## folded all the way to its feet losing it again — both out of one cosine,
+## with no case written for either.
+##
+## Charged in both places that spend it: the posed head moves by this much
+## (Creature poses the spine with it) and the reach test takes the same number
+## out of the arm — so what is drawn, what is offered and what connects are
+## one answer. Saturates at the arc's own ends; the vertical feasibility of
+## getting there at all is not this function's business — the bite band
+## already owns it.
+func neck_pullback(dv: float) -> float:
+	if neck_arc <= 0.001:
+		return 0.0
+	# The rest perch, as the sine of the angle the neck is already carried at:
+	# what it holds the head above the shoulder, over its own length.
+	var rest_sin: float = clampf((head_rest - reference) / neck_arc, 0.0, 1.0)
+	var to_sin: float = clampf(rest_sin + dv / neck_arc, -1.0, 1.0)
+	return neck_arc * (sqrt(maxf(1.0 - rest_sin * rest_sin, 0.0))
+		- sqrt(maxf(1.0 - to_sin * to_sin, 0.0)))
 
 
 ## Whether two height bands touch at all. The whole vertical rule, and the only

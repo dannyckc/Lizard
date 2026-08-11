@@ -487,7 +487,11 @@ func _check_the_marker_is_where_the_bite_lands(player: Creature, target: Creatur
 		% picked_at.distance_to(met.at))
 
 	# --- and in to arm's length, when it is past it ----------------------------
-	var span: float = Reach.span(player)
+	# The arm onto the floor, because that is where the brought-in point is: the
+	# neck spends part of its plan reach sweeping the mouth down to the ground,
+	# so the marker sits just inside `span_onto` rather than the level span — the
+	# same number the reach test refuses at, which is the whole claim.
+	var span: float = Reach.span_onto(player, Volume.ground())
 	var away: Vector2 = mouth + Vector2.RIGHT.rotated(deg_to_rad(12.0)) * (span * 6.0)
 	var reached: Reticle.Pick = Reticle.resolve(Reticle.pick(self, away, 8.0, player), player)
 	_check(reached.beyond != null,
@@ -651,10 +655,16 @@ func _check_refusing_what_it_cannot_reach(player: Creature, target: Creature) ->
 
 	# ...and the foot standing next to it, which it can. Same animal, same lizard,
 	# same instant: only the height of the target differs.
+	#
+	# Picked through the cursor's own resolver rather than assembled by hand,
+	# because the pick carries which structure it is now, and the strike is sent
+	# to where that structure's flesh is actually posed — a limb lives on its
+	# drawn chain. The pointer goes on the drawn foot, exactly where a player's
+	# would.
 	var foot: Limb = _nearest_limb(target, player.jaw_point())
-	var low := Reticle.Pick.new()
-	low.at = foot.plan[2]
-	low.band = target.anatomy.tissue.limb_band(foot.key, 2)
+	var low: Reticle.Pick = Reticle.pick(self, foot.joints[2], 8.0, player)
+	_check(low.hit != null and low.creature == target,
+		"a cursor on the elephant's drawn foot selected %s" % low.describe())
 	var down: Reach = Reach.solve(player, low.at, low.band)
 	_check(down.possible,
 		"the same lizard could not reach the planted foot beside it (%s)" % down.describe())
