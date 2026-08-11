@@ -1,0 +1,320 @@
+# Evolution v2 — Unified Body Design & Implementation Plan
+
+**Status:** Draft for review · **Reference animal:** domestic cat · **Scope:** replaces AnatomyLattice + TissueGrid + the three partial skeletons with one unified body model; keeps the UI shell and the locomotion behaviour.
+
+---
+
+## 1. Goals
+
+1. **One model.** What is hit is exactly what is displayed. Physics, damage, mass, and rendering all read the same structure; there is no translation or mirroring step anywhere.
+2. **Simpler physics.** One chain system (spine + neck + tail + limbs), one gravity, one centre of mass, one integrator.
+3. **Performance.** Cost scales with *segments and rings*, never with *volume in cells*. Damage is written once in body space; posing never re-carves anything.
+4. **Elegance.** Biology is data, physics is process. A creature is one resource file; every physical behaviour (mass, power, compliance, wound response) is *derived* from that file, never authored twice.
+
+### Laws carried over from v1 (learned the hard way, non-negotiable)
+
+- **One owner per quantity.** One gravity/integrator, one centre of mass, one mass census. If two systems disagree about a number, the design is wrong, not the tuning.
+- **Fix the mechanism, not the look.** "Looks off" means the rendering is lying about the state.
+- **Nothing pose-derived in build inputs.** The body model is built from rest-pose data only; the live pose only *transforms* it. (This is what made carving re-fire 16 ms mid-gait in v1 — in v2 it is impossible by construction, keep it that way.)
+- **Requests vs. delivery.** Speed is what the legs deliver; thrust derives from push and fades with effort. No hidden acceleration parameters, no reading solved-gait state to compute drive.
+- **Tests state claims, not constants.** Calibrated numbers are re-pinned per body; the claim ("Froude quotes stance height", "stride ≤ plan reach") is what's ported.
+
+---
+
+## 2. Architecture overview
+
+Three layers, strictly one-directional reads:
+
+```mermaid
+flowchart TD
+    A["ARMATURE — unified Verlet chain graph\n(sticks, joints, constraints, gravity, contacts)"]
+    C["CORPUS — layered body model in bone space\n(rings: bone/muscle/fat/skin per station+sector,\norgans/vessels/nerves as features,\nHP lives here — the one census)"]
+    S["SHELL — everything that reads\n(SpecimenMesh skinning, panels via BodyReadout,\nhit tests, senses)"]
+    C -- "derives mass, COM, strength,\ncompliance → drives" --> A
+    A -- "pose transforms rings\n(never rebuilds them)" --> S
+    C -- "tissue state at (chain,t,θ,d)" --> S
+```
+
+- **Armature** replaces: Spine.gd's Verlet core + Limb joint chains + Stature's neck arc + Ragdoll — one graph of sticks and joints.
+- **Corpus** replaces: AnatomyLattice + TissueGrid + TissueForm + BodyShape + the census halves of Physique/Plumb. It is *the* census: mass, damage, and shape are the same numbers.
+- **Shell** keeps: SpecimenMesh's ring-skinning approach (now reading Corpus directly), the HUD dock and drawers, CreatureView draw order. Panels are ported onto a small `BodyReadout` interface (§8).
+
+The key structural change from v1: **the census moves from world space to body space.** v1's lattice was cartesian cells in the posed world, so posing moved flesh, carving was pose-sensitive, and damage had to be mirrored between two grids. v2's census is polar cells (station × sector × layer) attached to chain segments. Cells never move in body space; posing is just placing ring frames along the posed chain. Carving happens once, at build. Damage writes into the same cells that mass and rendering read.
+
+---
+
+## 3. What "schema" means, concretely
+
+The schema is the answer to: *what fields, at what resolution, in what coordinate system, are the authoritative description of a creature's body?* Everything else in the game is either a process that updates those fields (physics, damage) or a view that reads them (mesh, panels, senses). Getting it right first matters because every phase of the rebuild reads it; changing it later means re-touching every phase.
+
+It has five parts, each specified below with options where there is a real choice:
+
+1. The **chain graph** — which chains exist, how many nodes each has, how they attach (§4).
+2. The **ring model** — how cross-sections and tissue layers are represented along each chain (§5).
+3. The **feature set** — organs, vessels, nerves as coordinates in body space (§6).
+4. The **derivations** — how mass, COM, strength, compliance fall out of 1–3 (§7).
+5. The **authoring format** — the single file a creature is tuned from (§7.5).
+
+---
+
+## 4. Schema part 1 — the chain graph
+
+### 4.1 Dimensionality — DECISION
+
+The v1 spine is a 2D plan-view chain (`PackedVector2Array`) with heights carried per-cell, and all the gait mathematics (stride discs, plan reach, sway budget, Froude) is plan-view math.
+
+- **Option A — full 3D Verlet.** Nodes are `Vector3`, constraints solve in 3D. Cleanest on paper; but every piece of ported locomotion math (stride/stance/sway share one plan disc, posture-tilt foreshortening, plan-limit caps) must be re-derived, and 3D chain stability under ground contact is a research project of its own.
+- **Option B — 2.5D (recommended).** Nodes are `Vector3` where XY is the plan and Z is height, but constraint solving is plan-dominant: distance/angle constraints act on the plan projection exactly as v1's solver does, while Z is governed by the stature/terrain channel (stance height, clearance, terrain, leaps, head carry). This is what v1 already converged on ("posture and height are one angle", "heights live on cells") — v2 just makes the Z channel a first-class per-node value on the chain instead of a per-cell afterthought.
+
+**Recommendation: Option B.** All bite/combat addressing is still fully 3D (§9) because ring frames are 3D; only the *constraint solver* stays plan-dominant. Revisit full 3D only if a future feature (climbing, swimming rolls) demands it.
+
+### 4.2 The graph for the cat reference
+
+One rooted graph, six chains. Node counts are **functional stations, not vertebrae** — see 4.3.
+
+| Chain | Nodes | Attaches at | Notes |
+|---|---|---|---|
+| `trunk` | 8 | — (root chain) | pelvis → sacrum → lumbar ×2 → thoracic ×3 → withers. Carries both girdle frames. |
+| `neck` | 4 + head node | trunk[withers] | cervical arc; head node carries the jaw frame (bite origin). Successor of Stature's neck arc — the carry projection becomes ordinary chain posing. |
+| `tail` | 6 | trunk[pelvis] | free Verlet follower; graded bend limit (v1 lesson: grade the bend, don't damp per-station, or the tail pumps the undulation). |
+| `limb FL/FR` | 4 | trunk[withers − 1] | scapula-pivot → elbow → wrist → toe. Cats are digitigrade: the 4th node is the metacarpus/paw, which is what actually makes cat legs read right. |
+| `limb HL/HR` | 4 | trunk[pelvis] | hip → knee → hock → toe. Hock (ankle) sits high — this is the cat's "backwards knee". |
+
+Total: **~32 nodes / ~28 sticks**. That is the entire physics skeleton.
+
+Per **node**: `pos: Vector3`, `prev: Vector3` (Verlet), `frame` (forward/perp/up, computed).
+Per **stick**: `rest_length`, `bone_radius` (the rigid core the rings wrap, §5), `bone_break_hp` (optional, late).
+Per **joint** (node with ≥2 sticks): cone limit (min/max bend in plan, as v1's `_solve_angle_symmetric`), stiffness, and for limb joints the FABRIK role. The tendon-insertion gearing (swing vs. push trade at 0.30 no-op) ports as a joint property.
+
+Girdle attachment gets one extra scalar worth keeping from cat anatomy: the forelimb girdle is **muscle-slung** (cats have no functional clavicle — the scapula floats). Model as attachment compliance: hind girdle rigid to trunk, fore girdle a stiff spring. This is one number, it is what makes a cat's front end absorb landings, and it feeds soft-landing behaviour for free.
+
+### 4.3 Station density — DECISION
+
+- **Option A — per-vertebra** (7C + 13T + 7L + 3S + ~21Cd ≈ 50 spine nodes): anatomically flattering, but triples solver cost for no behavioural gain; v1's whole gait repertoire runs on far fewer stations.
+- **Option B — functional stations (recommended):** the ~32-node graph above for *physics*, with **render rings interpolated** between stations (Catmull-Rom along the posed chain, exactly how `Spine.sample(t)` already yields frames at arbitrary t). Physics cost stays fixed while visual smoothness is a free dial (`RINGS_PER_STICK`, start at 3).
+
+**Recommendation: Option B.** The chain is a *controller*, not a vertebral census; smoothness belongs to the sampler.
+
+---
+
+## 5. Schema part 2 — the ring model (the census)
+
+This is the heart of v2 and the direct replacement for both grids.
+
+### 5.1 Coordinates
+
+Every point in a creature's flesh has a **body address**:
+
+```
+(chain, t, θ, d)
+  chain : which chain            t : arc position along it [0..1]
+  θ     : angle around the axis  d : depth from the surface inward
+```
+
+Body addresses are stable under animation — a wound on the left flank stays on the left flank through every gait cycle, because the address is in bone-local frame. Converting a world-space contact point to a body address is: nearest point on posed chain (capsule test, as v1 `hit_test`/`aim_contact` already do) → two dot products and an `atan2`. This is the coordinate attacks target in 3D.
+
+### 5.2 Discretization
+
+The census quantizes body addresses into **polar cells**:
+
+```
+cell = (chain, station, sector, layer)
+  station : fixed subdivisions along each chain   (trunk 16, neck 6, tail 8, limbs 6 each)
+  sector  : fixed angular wedges around the axis  (trunk/neck 10, tail 6, limbs 6)
+  layer   : BONE=0, MUSCLE=1, FAT=2, SKIN=3       (radial order, per the cat: muscle
+            is bound to the skeleton and drives it; fat wraps muscle; skin wraps fat)
+```
+
+Cat total: 16·10 + 6·10 + 8·6 + 4·6·6 = **412 columns × 4 layers ≈ 1 650 cells.** Compare thousands of dense cartesian cells in v1, most of them interior filler. Every v2 cell is *meaningful* — it is a wedge of a specific tissue at a specific place.
+
+Per cell, two numbers:
+
+- `thickness` — radial extent of that tissue in that wedge, **at build** (rest anatomy).
+- `hp` — current integrity ∈ [0..1]. **This is the entire damage state.** TissueGrid's ledger role collapses into the census; the damage translation step ceases to exist. Effective thickness = `thickness × hp` (a chewed-away wedge is thinner, so the mesh dents, the mass drops, and the next bite lands deeper — all automatically, because they all read this cell).
+
+The surface radius of column (station, sector) is `bone_radius + Σ thickness·hp` over layers. Rings for rendering, capsules for contact, and depth for wound resolution are all this one sum.
+
+### 5.3 Authoring representation — DECISION
+
+Nobody should hand-author 412 columns. The question is what the *tuning* representation is, compiled into cells at build:
+
+- **Option A — raw cells.** Author the full arrays. Maximum control, unmaintainable, and every physique tweak is a 400-number diff. Reject.
+- **Option B — elliptical layers per station.** Per station, per layer: `(rx, rz, ventral_offset)`. Compact (~16 numbers/station), smooth, and captures the real asymmetries (deep chest = ventral offset at thoracic stations; belly fat hangs low = fat layer ventral offset). Wounds still live per-sector on top.
+- **Option C — knot profiles (recommended, = v1's proven pattern).** Author sparse **knots** along each chain — exactly the `tail_base/tail_length/neck_width/trunk_lift` pattern the silhouette system already uses, extended per layer: e.g. muscle knots at shoulder/loin/thigh, fat knots at scruff/belly/inguinal, skin near-uniform with a scruff bump. Knots → interpolated per-station elliptical layers (Option B's form) → quantized into sector cells. Three levels: **knots (authored) → stations (compiled) → cells (census)**.
+
+**Recommendation: Option C compiled through B.** Authoring stays at ~10 numbers per tissue per chain; the census stays uniform for the machine. The compile step is the successor of the carve — but it runs in microseconds, from rest-pose data only, exactly once per physique change.
+
+### 5.4 The cat layout (initial knot set)
+
+Values are proportions of trunk length / local bone radius; exact numbers get pinned by the Phase-2 probe.
+
+- **Bone:** thin sheath everywhere except: skull (head node bulge), ribcage (thoracic stations get a `rib_cage` flag — bone layer spans the whole sector ring, which is why flank wounds there stop at bone), pelvis, scapula plate on the fore-girdle station.
+- **Muscle** (the mover — its volume is what strength derives from, §7): epaxial ridge along dorsal trunk sectors; **hindquarters dominant** (thigh columns are the deepest muscle on the body — cats are rear-engined, matching v1's girdle-share model); shoulder/triceps mass on fore-limb upper stations; masseter/temporalis at the head node (bite force); tail and distal limbs nearly muscle-free (tendon-operated — which is *why* legs are light and swing fast; fast-twitch swing-time coupling survives).
+- **Fat:** subcutaneous wash (thin, everywhere), inguinal/belly pad (ventral lumbar stations), scruff pad (dorsal neck). Leanness is one multiplier on the fat knot set.
+- **Skin:** near-uniform thin; thicker + looser at scruff and dorsal neck (bite there grips skin before muscle — pre-modelled by the thicker skin+fat wedge).
+- **Whiskers/claws/teeth:** not census tissue; features (§6) and Dentition port.
+
+### 5.5 Thin parts
+
+v1 lesson: parts under ~4 cells across have no interior — "sheathe, don't rewrite the census." The polar census obeys this natively: a thin part is simply columns whose muscle/fat thickness → 0, leaving bone + skin. No special case, no grid-parity floor. The v1 "thin conduits need a grid floor" rule dies here; conduits are features (§6) with their own radius, not census tissue.
+
+---
+
+## 6. Schema part 3 — features (organs, vessels, nerves)
+
+Features are **not cells** — they are geometry in body coordinates, checked only when a wound reaches them:
+
+```
+Organ   : { name, chain, t_range, θ_centre, θ_spread, depth_band, hp, effect }
+Vessel  : polyline of (chain, t, θ, d) + radius + flow_rate      (bleed on breach)
+Nerve   : polyline + region_served                               (function loss on cut)
+```
+
+Cat placement (all on `trunk`/`neck`, t as fraction from pelvis→withers):
+
+- **Heart** — thoracic t≈0.80–0.88, ventral, deep (inside rib bone layer). Successor of the `BodyState.arrested` organ; *death is a stopped heart* carries over verbatim.
+- **Lungs** — thoracic t≈0.72–0.95, lateral pair, deep. Feed the aerobic ceiling (stamina = blood over engine).
+- **Liver** t≈0.62–0.72 ventral-right; **stomach/gut** lumbar t≈0.35–0.60 ventral; **kidneys** t≈0.45–0.55 dorsal pair.
+- **Aorta/vena cava** — ventral to the spine bone layer, full trunk run; **carotid/jugular** — neck, ventral-lateral, *shallow* (this is why throat bites kill — the schema encodes it as geometry, no special case); **femoral** — inner thigh proximal stations.
+- **Spinal cord** — dorsal, *inside* the bone layer (protected until vertebra breached).
+
+Wound resolution: bite resolves depth `d` through the column's layers (skin→fat→muscle→bone, subtracting `thickness×hp` in order, damaging each) → surviving depth intersects features in that (t, θ) neighbourhood → vessel breach starts bleed, organ hit applies its effect. The vessel/nerve *overlays* in the anatomy view render these polylines directly — same data, no TissueForm re-derivation.
+
+---
+
+## 7. Schema part 4 — derivations (biology → physics)
+
+All read-only functions of the census; each has exactly one owner.
+
+1. **Mass** — Σ over cells: wedge-shell volume (closed-form frustum sector between inner and outer radius, along the stick) × tissue density (bone 1.9, muscle 1.06, fat 0.92, skin 1.1 rel.) × hp. Owner: `Corpus.mass()`. Per-node masses feed the solver so a heavy head actually droops the neck chain.
+2. **Centre of mass** — same summation, position-weighted, in body space; posed through ring frames per tick (cheap: 32 node masses, not 1 650 cells — cells bake to per-node mass + offset at compile). Owner: Plumb's successor `Poise`. Support polygon/stability logic ports as-is.
+3. **Strength** — muscle cells only, grouped into **compartments** — DECISION:
+   - *Option A — per-joint muscle accounting.* Anatomically pure, but v1 already proved the per-girdle abstraction carries the whole gait repertoire.
+   - *Option B — compartments (recommended):* `fore_girdle`, `hind_girdle`, `epaxial` (spine power — leaps, gallop flex), `neck`, `jaw`. Each = Σ muscle volume of its stations. Girdle-share, drive, bite force, spine power all fall out. Maps 1:1 onto v1's `girdle_muscle`/`girdle_drive`, so Locomotion ports with a renamed input.
+4. **Load & girth** — supported mass per limb from COM position (v1 logic); girth per station = mean surface radius, feeding the load^0.4 relation and silhouette width.
+5. **Compliance (the soft-body feel)** — per column: `fat/(muscle+bone)` thickness ratio → contact stiffness + damage attenuation. A fat flank dents (visual ring deformation, §10) and cushions; a bony shin is stiff and fragile. **This is the whole soft-body system** — no soft-body dynamics, softness is a material property of contacts (see §9.1).
+6. **Stamina** — aerobic ceiling from heart size (organ), lung capacity (organ), and locomotor muscle mass; v1's blood-over-engine model unchanged, inputs now from Corpus.
+
+### 7.5 Schema part 5 — the authoring file
+
+One `.tres` resource per creature (successor of CreatureParams' physique half):
+
+```
+CatBody.tres
+├─ chains        : node counts, stick lengths, bone radii, joint limits, girdle compliance
+├─ tissue knots  : per chain × layer, the §5.3 knot lists
+├─ features      : organ/vessel/nerve table (§6)
+├─ fibre         : fast_twitch, tendon insertions, spine_freedom  (behavioural scalars kept from v1)
+└─ posture       : stance datum, tilt, stance_range               (Stance/Posture inputs)
+```
+
+"Properties adjustable from a single location" = this file. The Creature Creator's sliders write knot multipliers here (leaner ↓fat knots, bulkier ↑muscle knots, longer-limbed ↑stick lengths) and everything downstream re-derives. **Pin the default build exactly:** the compiled default cat's mass/strength/COM go into reference constants at 6+ decimals, with a probe asserting the fixed point (v1's 0.3%-drift lesson).
+
+---
+
+## 8. The `BodyReadout` interface (what "keep the UI" means)
+
+The HUD shell survives untouched: HudDock, drawers, camera-focus-pays-for-drawers, MinimalSlider, PipMeter, InkToggle, F3 cycle. The content panels currently read the lattice; they get ported one drawer at a time onto one read-only interface:
+
+```gdscript
+class_name BodyReadout   # implemented by the v2 creature; panels depend only on this
+func mass() / strength(compartment) / stamina_state() / gait_state()   # GaitPanel
+func surface_radius(chain, station, sector) -> float                   # SpecimenMesh rings
+func tissue_at(chain, t, theta) -> Array   # [(layer, thickness, hp), …] AnatomyView probe
+func features_in(chain, t_range) -> Array  # organ/vessel overlays
+func wounds() -> Array                     # damage listing, BiteMark visuals
+func vitals() -> Dictionary                # heart/lungs state — "death is a stopped heart"
+```
+
+Panel-by-panel: **GaitPanel** stays a live view quoting measured gait state — same fields, new provider. **AnatomyView/AnatomyPanel** lose their lattice-walking code (the bulk of AnatomyView's 2 752 lines) and instead render rings + feature overlays — a substantial internal rewrite behind an unchanged visual design; the .dc.html mocks remain the layout spec (take the layout, take the numbers from the live systems). **CreatureCreator** sliders write the authoring file. **SpecimenMesh** is the big winner: its ring/band machinery stops *deriving* rings from a cell census and reads them directly — bands, sectors, gap-fill logic simplify or vanish.
+
+---
+
+## 9. Combat, damage, contacts
+
+### 9.1 Contacts
+Creature–creature and creature–world contact = **capsule vs. capsule on posed sticks** (radius = mean surface radius of the stick's stations). ~28 capsules/creature, broad-phase by chain AABBs — the v1 "bound the overlap first" lesson, now with no per-cell lookups at all behind it. Contact response: positional correction into the Verlet nodes, stiffness scaled by local compliance (§7.5). Softness = the flank *gives* (nodes displace, rings dent visually) instead of bouncing.
+
+### 9.2 Bites and targeted attacks
+The v1 bite pipeline survives structurally — one 3D contact point, hover-preview → click-commits, lunge as rigid body shift capped by support, reach measured from rest pose, verticals gate before horizontals, underbody bites anchored at the jaws. What changes is the *addressing*: `hit_test` resolves to a body address `(chain, t, θ)`; wound application is §6's depth walk. TargetMark/Reticle/BiteCue keep working on the contact point; Mouthful/Dentition port with tooth depth mapping straight onto layer thickness.
+
+### 9.3 Wounds
+A wound is *only* hp reduction on cells (+ feature effects). No separate wound object for physics — BiteMark keeps cosmetic state (tooth pattern) but reads geometry from the census. Bleed = flow_rate accumulation on breached vessels into BodyState's blood pool (stamina and death already hang off blood/heart — unchanged).
+
+---
+
+## 10. Rendering
+
+- **SpecimenMesh v2:** for each render ring (interpolated station, §4.3), place the ring frame on the posed chain, radius per sector from the census, skin adjacent rings into tube quads; limb tubes off limb chains (limb flesh lives on the drawn chain — already true in v1). Band by axis where sticks bend sharply (v1 lesson). Wounds render as *the same rings, thinner* — dents appear because the data got thinner, plus a BiteMark material decal for the surface look.
+- **Layer peel** (anatomy view): render rings at bone-only, +muscle, +fat, +skin radii — the peel view is four evaluations of the same sum, no second geometry system.
+- **Contact dent:** transient sector-radius offsets decaying over ~0.3 s, driven by contact impulses × compliance — purely visual, never written to the census.
+- Draw-cost lessons carry: bank shades per (layer, hp bucket), hoist packed arrays, cull before working.
+
+---
+
+## 11. Implementation strategy
+
+### 11.1 Ground rules
+
+- **Build alongside, never in place.** `scripts/creature2/` + `scenes/V2Lab.tscn` (minimal Main: camera, terrain, input pump, one v2 creature). v1 keeps running as the executable spec/oracle for gait feel, silhouettes, and bite behaviour.
+- **Do not strip v1 first.** Deletion is one commit at the end (Phase 7), an afternoon; stripping first is a month of working blind with the reference destroyed.
+- **Port claims, not constants.** Every v1 test that survives is re-expressed against the cat body with freshly pinned numbers.
+- **Harness lore still applies:** new `class_name`s need `--import` before headless tests see them (and the errors point at the wrong files); failing script tests hang — never pipe to `tail`; RenderSmoke draw counts are not a signal; profiling needs manual ticks (PerfProbe pattern); UI screenshots need a windowed SceneTree script.
+
+### 11.2 Phases
+
+Each phase has a **gate** — a probe or test that must pass before the next phase starts. Rough sizing assumes v1's actual line counts as the porting base.
+
+**Phase 0 — Scaffold (small). ✅ COMPLETE (2026-08-11)**
+`scripts/creature2/`, `V2Lab.tscn`, `CatBody.tres` stub, schema constants file (station/sector counts, layer enum, densities). Gate: lab scene opens, headless import clean.
+*Done as: `BodySchema.gd` (layers, densities, station/sector counts, ring dial), `BodySpec.gd` (authoring resource — class defaults are the reference cat, so `CatBody.tres` is a plain instance overriding nothing), `scenes/V2Lab.tscn` + `V2Lab.gd` (camera, terrain, input pump: zoom/reset/collapse/drop/node-drag). Gate passed: import registers all creature2 classes clean, scene opens headless exit 0.*
+
+**Phase 1 — Armature (the skeleton core). ✅ COMPLETE (2026-08-11)**
+`Armature.gd`: node/stick/joint graph, Verlet step, plan-dominant constraint solver (port `_solve_distance_symmetric` / `_solve_angle_symmetric` from Spine.gd — they are chain-agnostic already), Z channel, Gravity as sole integrator, FABRIK for limb chains (port Fabrik.gd), ragdoll = constraints-loosened mode (replaces Ragdoll.gd).
+Gate: `ArmatureProbe` — cat graph stands under gravity, joint limits hold, drop test settles, per-node mass droop visible on neck/tail. Claims from GravityTest/RagdollTest.
+*Done as: `Armature.gd` (35 nodes / 34 sticks in six chains; the whole axial body — tail→trunk→neck→head — is one relaxation sequence to the solver while Chain objects keep per-chain addressing; symmetric solvers and FABRIK ported verbatim; live limbs placed by sagittal-plane FABRIK so bone lengths are exact in 3D; Z channel = stance heights + carry lines + the Droop beam-law walk reading provisional per-node masses that Corpus takes over in Phase 2; `Gravity.Fall` is the only vertical integrator) and `Creature2.gd` (lab node, honest debug draw). Gate passed — `tests/ArmatureProbe.gd`: stands at what the legs deliver (pelvis 30.8 / withers 25.1 px), 160 px drop lands in 0.47 s per the world's closed form and stands back up, bends legal under a hard tail-haul with sticks exact to 0.0004 px on release and the body towed by the pull, tail sags 4.98 px in a tip-steepening curve clear of the floor, a 1.4× skull deepens neck sag 0.473→0.732 px, collapse lies flat with anatomy intact and rests drift-free. v1 oracles GravityTest/RagdollTest still green alongside.*
+
+**Phase 2 — Corpus (the census).**
+Knot compiler (knots → station ellipses → sector cells), `Corpus.gd` cell arrays + surface-radius/mass/COM/compartment derivations, `Poise.gd` (Plumb successor: bake cells → per-node mass+offset, posed COM, support polygon — port hull/stability math), feature table, `CatBody.tres` fully authored per §5.4/§6.
+Gate: `CorpusProbe` — prints mass, COM, compartment strengths, per-station girth for the default cat; values pinned to 6 decimals as the reference constants. Claims from PlumbTest/VolumeTest/AnatomyTest.
+
+**Phase 3 — Locomotion (the big port).**
+Gait.gd (1 981 lines — port, don't rewrite: patterns, duty factors, rotary-gallop spine threshold), Locomotion (push-derives-and-fades drive, swing floor, fast-twitch coupling), Footfall, Stance/Posture (two-axis model, RULES table), Balance, Leap/Jump, Traversal — all reading Armature nodes + Poise + Corpus compartments instead of v1 structures. Stride/stance/sway still share one plan disc.
+Gate: `SprintProbe`/`GaitProbe` v2 — walk/trot/gallop stable on terrain, Froude off stance height, measured top speed = stride/cycle delivery. Side-by-side eyeball vs. v1 in the lab. This phase is where "keeps the locomotion behaviour" is proven.
+
+**Phase 4 — Skinning.**
+`SpecimenMesh2`: rings from census via interpolated stations; CreatureView port (draw order, shading banks); silhouette check against the Gait HUD .dc.html geo blocks (still the spec).
+Gate: screenshot probe — standing/walking cat silhouette matches v1/mock within tolerance; RenderBenchmark comparison (expect a large win; don't trust single runs).
+
+**Phase 5 — Damage & combat.**
+Capsule contacts + compliance response; body-address `hit_test`; wound depth-walk; features (bleed, organ effects, arrest); Mouthful/Dentition/BiteMark port; lunge/strike pipeline rewired (TargetMark, Reticle, BiteCue keep their roles); Grip/feeding.
+Gate: CombatTest/BiteReachTest/FeedingTest claims re-expressed — bite anchors at jaws, wound depth matches tooth/layer math, throat bite bleeds, heart hit arrests, "what is hit is what is displayed" verified by biting a flank and diffing the rendered ring against the census.
+
+**Phase 6 — UI port.**
+`BodyReadout` implemented on the v2 creature; drawers ported one at a time (suggested order: GaitPanel → SpecimenMesh view → AnatomyView/AnatomyPanel → CreatureCreator → EvolutionHUD vitals). Shell untouched.
+Gate: F3 cycle fully working against v2 in the lab; UIInteractionTest claims (note: the sphere-drag checks were already red on clean v1 main — do not chase them as regressions).
+
+**Phase 7 — Cutover & deletion.**
+Main spawns the v2 creature; senses/world hooks (ScentField, CarrionField, SoundField read positions/masses — thin adapters); one commit deletes `scripts/creature/` v1 files + lattice-era tests; remaining tests re-pinned; memory/docs updated.
+Gate: full game session parity — spawn, walk, hunt, bite, feed, die.
+
+### 11.3 Sequencing notes & risks
+
+- **Phases 1–2 are deliberately small and gate everything.** If the schema needs a change, it must happen before Phase 3 starts consuming it.
+- **Phase 3 is the schedule risk** (biggest port, subtlest behaviour). Mitigation: the v1 oracle running side-by-side, and porting Gait's tables verbatim before touching its inputs.
+- **Two creatures of code coexist for the whole rebuild.** Class-name collisions are the practical annoyance — suffix v2 classes (`Armature`, `Corpus`, `Poise`, `SpecimenMesh2`…) and never reuse a v1 class_name until Phase 7's deletion.
+- **Scope discipline:** no new features during the rebuild (no climbing, no new senses, no extra species beyond the cat). Second species (retune knots, re-pin probe) is the *first post-v2 task* and the proof the authoring layer works.
+
+---
+
+## 12. Decisions taken in this draft (override here, before Phase 0)
+
+| # | Decision | Chosen | Rejected |
+|---|---|---|---|
+| 1 | Chain dimensionality | 2.5D — Vector3 nodes, plan-dominant solving (§4.1 B) | full 3D solver |
+| 2 | Station density | ~32 functional nodes; render rings interpolated (§4.3 B) | per-vertebra |
+| 3 | Census structure | body-space polar cells (station × sector × layer), hp on cells (§5.2) | any world-space grid |
+| 4 | Authoring | knots → station ellipses → cells (§5.3 C) | raw cells; ellipses only |
+| 5 | Strength mapping | 5 muscle compartments (§7.3 B) | per-joint accounting |
+| 6 | Soft body | material compliance on capsule contacts + visual dents (§7.5, §9.1) | soft-body dynamics |
+| 7 | Rebuild mode | alongside in-repo, v1 as oracle, delete last (§11.1) | in-place; strip-first; fork |
