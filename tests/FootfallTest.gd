@@ -190,16 +190,33 @@ func _check_two_legs_is_a_measurement(player: Creature) -> void:
 
 	# The same arithmetic with the spring turned up. A hop is the identical
 	# collapse of the hind girdle a Cheetah's bound is, on a body with nothing
-	# else on the floor to be out of phase with.
+	# else on the floor to be out of phase with — and a Kangaroo pairs its hind
+	# feet at *every* speed, for two different reasons that meet in the middle.
+	# Fast it is the asymmetric collapse. Slow it is the pentapedal crawl: a
+	# macropod cannot stride its hind legs out of phase on the ground, and what
+	# affords the paired swing at a walk is the tail — a strut thick enough to
+	# stand on, dropped to the floor by the reared trunk. See
+	# Locomotion.tail_prop.
 	var slow: Dictionary = _measure(player, "Kangaroo", 0.25)
 	var fast: Dictionary = _measure(player, "Kangaroo", 1.0)
-	_check(float(slow["hind_together"]) < 0.3,
-		"a Kangaroo moving slowly hopped (%.0f%% of landings paired)"
+	_check(float(slow["hind_together"]) > 0.6,
+		"a Kangaroo moving slowly alternated its hind feet (%.0f%% of landings paired)"
 			% (float(slow["hind_together"]) * 100.0))
+	_check(String(slow["gait"]) == "pentapedal crawl",
+		"a slow Kangaroo's gait read as \"%s\", not the tail-propped crawl"
+			% slow["gait"])
 	_check(float(fast["hind_together"]) > 0.6,
 		"a Kangaroo at speed did not put its hind feet down together (%.0f%%)"
 			% (float(fast["hind_together"]) * 100.0))
-	notes.append("T. rex strides on two, Kangaroo pairs %.0f%% -> %.0f%% of landings"
+	# ...and the crawl is the prop's, not a rule about bipeds: the T. rex has
+	# the heavier tail and carries it level, a whole hip height off the floor,
+	# so its slow gait keeps the alternating stride the same measurement gives
+	# any unpropped pair of legs.
+	var rex_slow: Dictionary = _measure(player, "T. rex", 0.25)
+	_check(float(rex_slow["hind_together"]) < 0.3,
+		"a slow T. rex paired its hind feet (%.0f%%) — its level tail cannot prop"
+			% (float(rex_slow["hind_together"]) * 100.0))
+	notes.append("T. rex strides on two, Kangaroo crawls %.0f%% then hops %.0f%% paired"
 		% [float(slow["hind_together"]) * 100.0, float(fast["hind_together"]) * 100.0])
 
 

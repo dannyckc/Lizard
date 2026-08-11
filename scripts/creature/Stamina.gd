@@ -44,13 +44,15 @@
 class_name Stamina
 extends RefCounted
 
-## Locomotor muscle cells per unit of body weight on the default Lizard build, so
+## Locomotor muscle cells per unit of body weight on the default build, so
 ## `engine` reads exactly 1.0 there and every other creature is a ratio against
 ## it. A constant rather than a measured baseline for the same reason Physique's
 ## census rulers are: it has to mean the same thing after the creation menu has
 ## rebuilt the body underneath it. Re-measure with tests/StaminaProbe.gd if the
-## default build or the carve rules change.
-const REFERENCE_ENGINE: float = 721.7163
+## default build or the carve rules change — its first row is the default build
+## and must read engine 1.000 exactly. Last moved with the cord claim floor
+## (AnatomyLattice, `cord_reach`) and the census re-pin that followed it.
+const REFERENCE_ENGINE: float = 863.0
 
 ## The share of flat out the reference build holds indefinitely, with a sound heart
 ## and ordinary fibre. Comfortably over the two thirds a Lizard walks at and well

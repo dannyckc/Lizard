@@ -24,9 +24,10 @@
 ##     pronk depending on what the other girdle is doing.
 ##
 ## That is the whole vocabulary. A trot, a pace, an amble, a lateral-sequence
-## walk, a transverse gallop, a rotary gallop, a bound, a half-bound, a two-legged
-## stride and a two-legged hop are all read off the same three numbers, so none of
-## them is a mode, a preset or a name anything checks for.
+## walk, a transverse gallop, a rotary gallop, a bound, a half-bound, a
+## two-legged stride, a two-legged hop and a tail-propped pentapedal crawl are
+## all read off the same three numbers, so none of them is a mode, a preset or a
+## name anything checks for.
 ##
 ## And the three are derived, not authored. What sets them:
 ##
@@ -195,6 +196,16 @@ var swing_share: float = 0.5
 ## to walk alone — which is what being two-legged is, and it is a measurement of
 ## the arms rather than a category anything selects.
 var forelimbs_bear: bool = true
+## How much of the walking gait is being stood on the tail, 0..1 — the
+## pentapedal crawl, and the product of two readings that cannot both be large
+## anywhere else: a tail the body can genuinely prop on (Locomotion.tail_prop, a
+## fact about the build) and the caution of the walking regime (a fact about how
+## fast it is going). A hopping Kangaroo has the prop and no caution; a walking
+## T. rex has the caution and no prop; a walking Kangaroo has both, and its hind
+## pair stops alternating — both feet swing forward together over the planted
+## tail, which is what the real animal does because a macropod's hind legs
+## cannot stride out of phase on the ground at all.
+var crawl: float = 0.0
 
 var _phase: Dictionary = {"RL": 0.0, "RR": 0.5, "FL": 0.5, "FR": 0.0}
 
@@ -209,10 +220,12 @@ var _phase: Dictionary = {"RL": 0.0, "RR": 0.5, "FL": 0.5, "FR": 0.0}
 ## inside limb.
 ## `spring` is how completely this build can throw itself off the ground — see
 ## Leap.launch, which works it out from the same joints, muscle and elastic tissue
-## a jump is taken with.
+## a jump is taken with. `prop` is how much of a standing strut the tail is —
+## see Locomotion.tail_prop — and only a biped's walk reads it.
 func update(posture: Posture, loco: Locomotion, p: CreatureParams,
 		hip: float, speed: float, reach: Vector2, gap: float,
-		lead: float, bearing: bool, spring: float = 0.0) -> void:
+		lead: float, bearing: bool, spring: float = 0.0,
+		prop: float = 0.0) -> void:
 	if posture == null or loco == null or p == null:
 		return
 	forelimbs_bear = bearing
@@ -323,8 +336,21 @@ func update(posture: Posture, loco: Locomotion, p: CreatureParams,
 	# A two-legged body has no fore girdle to be out of phase with. Both numbers
 	# still exist and are still solved — the arms are carried, and something has to
 	# say where they are in the cycle — but nothing weight-bearing reads them.
+	crawl = 0.0
 	if not forelimbs_bear:
 		girdle_lag = 0.5
+		# The pentapedal crawl. A careful biped's split sits at a half because
+		# alternating is what standing on your legs one at a time means — but a
+		# biped with a strut under its pelvis is not standing on its legs one
+		# at a time, it is standing on the strut, and the pair is free to swing
+		# forward together exactly as it does in the hop. So the same collapse
+		# the asymmetric regime buys with speed, the prop buys with caution:
+		# the two ends of this animal's range arrive at the same paired gait
+		# for opposite reasons, and only the alternating middle was ever a
+		# fiction. Nothing selects it — a build without the prop keeps the
+		# alternating walk it actually has.
+		crawl = clampf(prop, 0.0, 1.0) * caution
+		hind_split = lerpf(hind_split, SPLIT_FLOOR, crawl)
 		fore_split = hind_split
 
 	_phase["RL"] = 0.0
@@ -338,8 +364,13 @@ func update(posture: Posture, loco: Locomotion, p: CreatureParams,
 	# symmetrical gait has a pair off the ground; and a suspension — every foot
 	# clear at once — is only ever available to a body that can genuinely throw
 	# itself, which is what `aerial` already measures.
+	# The careful tier asks whether the body would still be standing with the
+	# foot up, and a tail prop changes the answer: a crawling biped with both
+	# hind feet swinging is on its tail, not on nothing, so the crawl keeps the
+	# symmetric allowance the pair needs to move together.
 	lift_limit = LIFT_SYMMETRIC
-	if caution > 0.55 or posture.feet_down >= 3 and aerial <= 0.0:
+	if caution > 0.55 and crawl < 0.5 \
+			or posture.feet_down >= 3 and aerial <= 0.0:
 		lift_limit = LIFT_CAREFUL
 	if aerial >= SUSPENSION_AT:
 		lift_limit = LIFT_SUSPENDED
@@ -413,7 +444,9 @@ func off_beat(key: String, since: String, elapsed: float) -> float:
 ## it exists so the creation menu and the tests can say what came out.
 func describe() -> String:
 	if not forelimbs_bear:
-		return "hop" if hind_split < 0.2 else "two-legged stride"
+		if hind_split < 0.2:
+			return "pentapedal crawl" if crawl > 0.5 else "hop"
+		return "two-legged stride"
 	if hind_split < 0.2 and fore_split < 0.2:
 		return "pronk" if absf(girdle_lag) < 0.12 or girdle_lag > 0.88 else "bound"
 	if aerial > 0.25:

@@ -559,6 +559,17 @@ func _carve_body(plan: BodyPlan, profile: PackedFloat32Array, clip: float,
 		var vert_r: float = minf(maxf(VERT_MIN, b * VERT_SHARE),
 			maxf(axis_room, CELL * 0.75))
 		var cord_r: float = minf(maxf(CORD_MIN, b * CORD_SHARE), vert_r * CORD_IN)
+		# What the cord may *claim*, floored at the innermost ring of grid
+		# centres — the same concession the vertebrae get a few lines up, for
+		# the same reason. The cord is thinner than the lattice's own pitch, so
+		# its literal radius only catches a cell when the spine's height happens
+		# to land near a row of centres: a waist half a cell deeper than the
+		# last one carried its canal between two rows and the cord simply
+		# stopped there, which is how widening an animal's middle came to
+		# *shorten* its spinal cord. The canal test below stays on the
+		# anatomical radius — whether there is room for a cord is a fact about
+		# the section, not about the grid laid over it.
+		var cord_reach: float = maxf(cord_r, CELL * 0.72)
 		# Whether there is a canal here at all: room for the cord to take cells of
 		# its own and still leave the bone a ring the grid can find cells in.
 		#
@@ -675,12 +686,12 @@ func _carve_body(plan: BodyPlan, profile: PackedFloat32Array, clip: float,
 					t = ORGAN
 					org = BodyPlan.BRAIN
 					pt = PART_CEREBRUM if x < -head_r * 0.19 else PART_BRAINSTEM
-				elif in_head and x > -head_r * 0.30 and radial <= cord_r \
+				elif in_head and x > -head_r * 0.30 and radial <= cord_reach \
 						and deep_enough:
 					# The cord's forward end, rising into the brainstem.
 					t = NERVE
 					pt = PART_CORD
-				elif not in_head and canal and off_spine <= cord_r:
+				elif not in_head and canal and off_spine <= cord_reach:
 					t = NERVE
 					pt = PART_CORD
 				elif not in_head and off_spine <= vert_r:
@@ -710,7 +721,7 @@ func _carve_body(plan: BodyPlan, profile: PackedFloat32Array, clip: float,
 					t = VESSEL
 					pt = PART_ARTERY
 				elif organ_here == BodyPlan.HEART and deep_enough \
-						and _in_heart(x, y, z, length, heart_rx, a, b):
+						and _in_heart(x, y, z, length, heart_rx, a, b, plan.heart_col):
 					t = ORGAN
 					org = BodyPlan.HEART
 					pt = PART_ATRIUM if z > -b * HEART_DROP else PART_VENTRICLE
@@ -736,11 +747,12 @@ func _carve_body(plan: BodyPlan, profile: PackedFloat32Array, clip: float,
 
 
 ## Whether a point is inside the heart's ellipsoid. The heart hangs in the chest
-## at the plan's own heart column, a little below the section's midline, sized to
-## the chest that holds it.
+## at the plan's own heart column — derived off the shoulder bar, see
+## BodyPlan.heart_col — a little below the section's midline, sized to the chest
+## that holds it.
 func _in_heart(x: float, y: float, z: float, length: float, rx: float,
-		a: float, b: float) -> bool:
-	var cx: float = (float(BodyPlan.HEART_COL) + 0.5) / float(BodyPlan.TORSO_COLS) * length
+		a: float, b: float, heart_at: int) -> bool:
+	var cx: float = (float(heart_at) + 0.5) / float(BodyPlan.TORSO_COLS) * length
 	var dx: float = (x - cx) / maxf(rx, 0.001)
 	var dy: float = y / maxf(a * HEART_RY, 0.001)
 	var dz: float = (z + b * HEART_DROP) / maxf(b * HEART_RZ, 0.001)

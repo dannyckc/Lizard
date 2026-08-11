@@ -131,16 +131,16 @@ func _check_verdict_is_anatomy(player: Creature) -> void:
 		"the three builds did not carry their shoulders at three different heights")
 
 	# One kerb, and the three builds do not agree about it. Broad enough to be a
-	# surface rather than something to step around, and 11 px high — which is over
-	# a sprawled animal's shoulder and well under an upright one's.
-	var kerb: float = 11.0
+	# surface rather than something to step around, and 16 px high — which is over
+	# a sprawled animal's sockets and well under an upright one's.
+	var kerb: float = 16.0
 	var verdicts: Dictionary = {}
 	for preset in ["Lizard", "Cat", "Elephant"]:
 		verdicts[preset] = Traversal.assess(readings[preset], 0.0, kerb, 60.0, 0.0)
 	var spread: Array[String] = []
 	for preset in ["Lizard", "Cat", "Elephant"]:
 		spread.append("%s %s" % [preset, Traversal.name_of(verdicts[preset])])
-	summary.append("11 px kerb: %s" % ", ".join(spread))
+	summary.append("16 px kerb: %s" % ", ".join(spread))
 	_check(verdicts["Lizard"] == Traversal.BLOCKED,
 		"a sprawled animal climbed a kerb standing higher than its own shoulder (%s)"
 			% Traversal.name_of(verdicts["Lizard"]))
@@ -284,7 +284,10 @@ func _check_climbing_on(player: Creature) -> void:
 	var stood: float = _walk_and_measure(player)
 	var ledge: float = 7.0
 	main.terrain.clear()
-	main.terrain.add(Vector2(600.0, 0.0), 520.0, ledge, 0.0, "ledge")
+	# Wide enough that wherever thirteen seconds of this build's own cruise ends,
+	# it ends well inside the surface — the walk is held to the speed the sheet
+	# asks for, so the span is sized to that rather than to a distance.
+	main.terrain.add(Vector2(750.0, 0.0), 1100.0, ledge, 0.0, "ledge")
 	var climbed: float = _walk_and_measure(player)
 
 	var feet_up: int = 0
@@ -620,7 +623,10 @@ func _check_refusing_what_it_cannot_reach(player: Creature, target: Creature) ->
 	# stacked one. Across the flank, the same offset means the same thing to both.
 	var beside: Limb = _nearest_limb(target, player.head_pos)
 	var across: Vector2 = target.body.anchors[beside.key].perp * beside.side
-	player.reset(beside.plan[2] + across * 26.0, (-across).angle())
+	# Close enough that the horizontal solve always succeeds — the refusal this
+	# check exists to read is the vertical one, so the stand-off is inside any
+	# build's lunge rather than calibrated to one species' head.
+	player.reset(beside.plan[2] + across * 22.0, (-across).angle())
 	for _tick in 20:
 		player._physics_process(TICK)
 		target._physics_process(TICK)

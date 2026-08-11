@@ -96,8 +96,17 @@ const REFERENCE_MUSCLE_CELLS: float = 172.0
 ## tail back in the census (3804.94 units -> 3822.34 on the default build). The
 ## new cells are vertebra and sheath at the very tip of the tail: no muscle
 ## joined them, so the muscle ruler holds still.
-const REFERENCE_LATTICE_UNITS: float = 3810.2835
-const REFERENCE_LATTICE_MUSCLE: float = 1146.7139
+##
+## Both moved when the spinal cord's cell claim got the same grid floor the
+## vertebrae already had (AnatomyLattice, `cord_reach`): a cord thinner than
+## the lattice pitch used to vanish wherever the spine's height fell between
+## two rows of centres, so the fix converts a run of vertebra cells to nerve
+## down the whole trunk — units fall with the density swap (nerve is lighter
+## than bone) and the muscle ruler moves by the handful of cells the wider
+## claim displaced. Measured on the default build with tests/LatticeProbe.gd,
+## whose first row must read mass 1.000 / strength 1.000 exactly.
+const REFERENCE_LATTICE_UNITS: float = 3769.14
+const REFERENCE_LATTICE_MUSCLE: float = 1151.0
 
 ## Least a girdle may be reduced to by having its muscle eaten. Not zero: a leg
 ## with nothing driving it is dragged rather than deleted, and every consumer of

@@ -928,7 +928,8 @@ func _solve_pattern(delta: float, body: BodyShape, p: CreatureParams,
 
 	footfall.update(posture, loco, p,
 		maxf(stance_hip if stance_hip > 0.0 else hip_height, 1.0), speed,
-		Vector2(fore, rear), gap, lead, loco.forelimbs_bear, leap.launch)
+		Vector2(fore, rear), gap, lead, loco.forelimbs_bear, leap.launch,
+		loco.tail_prop)
 	_measure_gather(body)
 
 

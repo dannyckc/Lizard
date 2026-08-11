@@ -128,9 +128,14 @@ const BRAIN_TO_COL: int = HEAD_COLS
 const BRAIN_FROM_ROW: int = 2
 const BRAIN_TO_ROW: int = 5
 
-## The heart, in the chest. Its column is a *rib* column, for exactly the reason
-## above: the ribcage is what stands between a bite and it.
-const HEART_COL: int = 5
+## The heart, in the chest — this many rib columns behind the shoulder bar. An
+## offset rather than a column, for the same reason the region boundaries are
+## variables: the heart hangs just behind the pectoral girdle on any animal, so
+## a build that carries its shoulders far forward carries its heart forward with
+## them. A constant column here had the heart of a short-chested build sitting
+## in its own lumbar region. The offset lands on the legacy fifth rib column at
+## the reference build's shoulder placement, so nothing about that animal moves.
+const HEART_BEHIND: int = 2
 const HEART_FROM_ROW: int = 2
 const HEART_TO_ROW: int = 5
 
@@ -230,6 +235,10 @@ var pelvis_col: int = PELVIS_COL
 var lumbar_col: int = 0
 var pelvis_from: int = 0
 var loin_col: int = 0
+## The rib column the heart hangs at — see HEART_BEHIND. Derived in `_lay_out`
+## with the boundaries above, and clamped inside the thorax those boundaries
+## define, so an organ can never lie outside its own region by construction.
+var heart_col: int = 5
 
 
 func _init() -> void:
@@ -262,6 +271,9 @@ func _lay_out() -> void:
 	pelvis_from = clampi(pelvis_col - PELVIS_FORE, shoulder_col + 1, TORSO_COLS - 1)
 	loin_col = clampi(pelvis_col + PELVIS_AFT, pelvis_from + 1, TORSO_COLS)
 	lumbar_col = clampi(pelvis_from - LUMBAR_SPAN, shoulder_col + 1, pelvis_from)
+	# The heart rides the shoulder bar the way the pelvic block rides the hip
+	# bar: just behind it, and never past the ribcage it lives inside.
+	heart_col = clampi(shoulder_col + HEART_BEHIND, THORAX_COL, maxi(lumbar_col - 1, THORAX_COL))
 	# The sockets next: the networks below run out through them, so where the
 	# girdles are has to be settled before anything is plumbed across one.
 	for key in LIMB_KEYS:
@@ -338,7 +350,7 @@ func organ_at(patch_key: String, col: int, row: int) -> int:
 	if col >= BRAIN_FROM_COL and col < BRAIN_TO_COL \
 			and row >= BRAIN_FROM_ROW and row < BRAIN_TO_ROW:
 		return BRAIN
-	if col == HEAD_COLS + HEART_COL \
+	if col == HEAD_COLS + heart_col \
 			and row >= HEART_FROM_ROW and row < HEART_TO_ROW:
 		return HEART
 	return NO_ORGAN

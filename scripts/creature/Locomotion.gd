@@ -215,10 +215,26 @@ const PUSH_CEILING: float = 0.55
 ## than a category. A shoulder is carried at the height the hind legs set; an arm
 ## shorter than that cannot be put on the floor without the animal pitching onto
 ## its face, so it is not put on the floor. Comfortably below any real quadruped —
-## the shortest-armed one in the file is at 0.85 of its own leg — and comfortably
-## above the vestigial forelimbs of anything that walks on two, so the threshold
-## itself never has to be argued about.
+## the shortest-armed one in the file is the Lizard at 0.77 of its own leg — and
+## comfortably above the vestigial forelimbs of anything that walks on two, so
+## the threshold itself never has to be argued about.
 const BEARING_RATIO: float = 0.46
+
+## When a biped's tail reaches the floor with something to spare, and when it is
+## thick enough at the root to be stood on. Both are shares — of the hip height
+## the drop is measured against, and of the hip width the girth is — and between
+## them they are the whole of whether an animal has a fifth limb. See `tail_prop`.
+##
+## The reach window sits around one because that is what it measures: a drop of
+## exactly the hip height is a tail whose tip just brushes the ground, and a prop
+## wants length *past* contact — a strut has to be planted, not tangent. The
+## girth window is where a rope becomes a column: a Cheetah's rudder is a fifth
+## of its hip and props nothing; a macropod tail at seven tenths is the third
+## leg of the animal's own tripod rest.
+const PROP_REACH_MIN: float = 0.8
+const PROP_REACH_FULL: float = 1.1
+const PROP_GIRTH_MIN: float = 0.4
+const PROP_GIRTH_FULL: float = 0.7
 
 ## How much of the rise and fall of a vaulting leg the animal takes up in its own
 ## joints rather than showing in its back. A leg with a foot planted lifts the
@@ -288,6 +304,12 @@ var duty: float = 0.5
 ## Whether the forelimbs reach the ground at all — see BEARING_RATIO. False
 ## leaves the hind pair walking on their own, which is what two-legged means.
 var forelimbs_bear: bool = true
+## How much of a standing prop this build's tail is, 0..1 — the fifth limb, and
+## a measurement rather than a mode. Nothing on a quadruped, whatever its tail;
+## see `update` for the derivation and Footfall for the one thing that reads it:
+## a biped with a prop under its pelvis does not have to alternate its hind legs
+## to stay standing at a walk, which is the pentapedal crawl.
+var tail_prop: float = 0.0
 ## How many limbs are actually carrying the animal. Two or four, and it is what
 ## every share of the body's weight and every duty factor is quoted against.
 var bearing_limbs: int = 4
@@ -337,6 +359,33 @@ func update(posture: Posture, physique: Physique, p: CreatureParams, scale: floa
 	# not — its knuckles are on the ground because they reach it.
 	forelimbs_bear = bears_on_forelimbs(p)
 	bearing_limbs = 4 if forelimbs_bear else 2
+
+	# Whether the tail is a limb this body can stand on. Three measurements
+	# multiplied, and each is a fact the sheet already states somewhere else:
+	#
+	#   * only a biped has the question at all. A quadruped's tail is behind an
+	#     animal that is already standing on four corners, and nothing about its
+	#     slow gait is waiting for a prop.
+	#   * the tail has to reach the floor. A biped rears its trunk over its hips
+	#     — see `trunk_lift_deg` — and the spine is one beam over that fulcrum,
+	#     so the flesh behind the pelvis is carried *down* at the same angle the
+	#     trunk is carried up. A Kangaroo's near-vertical trunk drops a tail
+	#     nearly half its own length straight to the ground; a T. rex's level
+	#     beam carries a longer tail out behind it a whole hip height in the
+	#     air, which is why the same arithmetic props one and not the other.
+	#   * the root has to be a strut rather than a rope: girth against the hip
+	#     it hangs from.
+	if forelimbs_bear or not p.tail_enabled:
+		tail_prop = 0.0
+	else:
+		var hip_stand: float = p.leg_length * articulation.hind.stand * sin(posture.tilt)
+		var flesh: float = p.segment_length * float(p.segment_count - 1) \
+			* (1.0 - p.rear_limb_t) * p.tail_length
+		var drop: float = flesh * sin(deg_to_rad(p.trunk_lift_deg))
+		tail_prop = smoothstep(PROP_REACH_MIN, PROP_REACH_FULL,
+				drop / maxf(hip_stand, 1.0)) \
+			* smoothstep(PROP_GIRTH_MIN, PROP_GIRTH_FULL,
+				p.tail_base_width / maxf(p.hip_width, 0.001))
 
 	# Ground push, in gravities and then in pixels — and no longer in a parameter.
 	# What a foot presses with is the muscle standing behind it: `power` is that

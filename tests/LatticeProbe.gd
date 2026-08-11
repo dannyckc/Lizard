@@ -29,8 +29,14 @@ func _process(_delta: float) -> bool:
 
 func _run() -> void:
 	var player: Creature = main.get_node("Creature")
-	for preset in ["Lizard", "Cat", "Elephant", "Cheetah", "T. rex", "Kangaroo"]:
-		player.params.apply_preset(preset)
+	# The reference build first — the class defaults, which no preset is any
+	# more. It is the body the two rulers are measured on, so its row is the
+	# one that has to read mass 1.000 and strength 1.000 exactly.
+	for preset in ["(default)", "Lizard", "Cat", "Elephant", "Cheetah", "T. rex", "Kangaroo"]:
+		if preset == "(default)":
+			player.params.copy_from(CreatureParams.new())
+		else:
+			player.params.apply_preset(preset)
 		player.reset(Vector2.ZERO, 0.0)
 		var t0: int = Time.get_ticks_usec()
 		player._physics_process(TICK)

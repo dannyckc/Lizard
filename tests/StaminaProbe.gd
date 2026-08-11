@@ -36,8 +36,14 @@ func _run() -> void:
 	# seconds printed below would be a measurement of the habitat.
 	main.terrain.clear()
 	main.target_creature.reset(Vector2(0.0, -40000.0), 0.0)
-	for preset in ["Lizard", "Cat", "Elephant", "Cheetah", "T. rex", "Kangaroo"]:
-		player.params.apply_preset(preset)
+	# The reference build first — the class defaults, which no preset is any
+	# more. REFERENCE_ENGINE is measured on its row: loco/mass there is the
+	# ruler, so its engine must read exactly 1.000.
+	for preset in ["(default)", "Lizard", "Cat", "Elephant", "Cheetah", "T. rex", "Kangaroo"]:
+		if preset == "(default)":
+			player.params.copy_from(CreatureParams.new())
+		else:
+			player.params.apply_preset(preset)
 		player.reset(Vector2.ZERO, 0.0)
 		for _tick in 30:
 			player._physics_process(TICK)

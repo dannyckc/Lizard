@@ -585,6 +585,9 @@ func _draw_note() -> void:
 		second = "CLOSE CONTROL — HELD TO %d%% OF TOP SPEED, FOLDED %d PX DOWN ITS OWN LEGS, DUTY %.2f." % [
 			int(round(Creature.STALK_SPEED * 100.0)),
 			int(round(subject.stature.fold)), subject.gait.duty_measured()]
+	elif footfall.crawl > 0.5:
+		second = "PENTAPEDAL — TAIL PROP %.2f BEARS THE WALK, SO THE HIND PAIR SWINGS TOGETHER AT CAUTION %.2f." % [
+			loco.tail_prop, footfall.caution]
 	elif not footfall.forelimbs_bear:
 		second = "TWO-LEGGED BY MEASUREMENT — ARM %d UNDER LEG %d × BEARING %.2f, SO THE FORE GIRDLE CARRIES NOTHING." % [
 			int(round(subject.params.arm_length)), int(round(subject.params.leg_length)),

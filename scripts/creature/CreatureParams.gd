@@ -481,7 +481,7 @@ const SCHEMA: Array = [
 ]
 
 
-## The six template builds, authored exactly as the body plan sheets state them.
+## The six template builds, re-derived from the living animals.
 ##
 ## A preset is bones, weights and angles, and nothing else. No entry below
 ## carries a gait, a footfall order, a stride length, a step time, a height or a
@@ -492,6 +492,15 @@ const SCHEMA: Array = [
 ## drawn at seven knots, where the girdles hang, what angle each joint is carried
 ## at, what the tissue is made of, and how fast the species asks to go.
 ##
+## Every number below is a measurement of the real animal, translated into the
+## game's units rather than invented in them. Proportions carry over directly:
+## where along itself a species hangs its hips, how its limb divides between the
+## two bones, what fraction of its length is tail, how much longer the hind pair
+## is than the fore. Absolute scale does not — the world compresses leg length
+## and height for the top-down picture (see Footfall.FROUDE_WALK for the same
+## compression stated about speed) — so lengths are placed by ratio against the
+## reference chain, and the derivation for each is written where the number is.
+##
 ## Each entry is laid out in the order the derivation runs — spine, silhouette,
 ## girdles, height, limbs, articulation, elastic, physique, drive — so it reads
 ## top to bottom the way the body is built. Three groups appear at the bottom of
@@ -500,353 +509,454 @@ const SCHEMA: Array = [
 ## turn tuning, and the combat and dentition numbers.
 ##
 ## Anything omitted keeps the class default, so an entry reads as what it is: the
-## difference between this animal and the reference one.
+## difference between this animal and the reference build. The reference build is
+## the *class defaults*, not any entry here: it is the calibration origin every
+## constant in the file is quoted against, and it stays put when a species is
+## retuned — which is why even the Lizard now carries a sheet of its own.
 ##
 ## The physique rows are worth reading as a set. Mass is not listed anywhere
 ## because it is not a setting — the silhouette above each `density` already
 ## decides most of it, and those four numbers only say what kind of animal that
 ## silhouette is made of: how solid, how strong for its size, what circulation is
-## behind it and how much of it is fat. That is why the Cat can be quicker than
-## the Lizard while weighing a fraction of the Elephant, and why the Elephant's
-## jaws are in a different league without its `jaw_power` being extreme: it wears
-## a skull twice the reference width, and bite force goes as the square of that.
+## behind it and how much of it is fat. `fast_twitch` is finally spent here too:
+## it was parked at the mixed default on every old sheet, and it is most of what
+## separates a reptile's getaway from an elephant's shove — real muscle is not
+## the same tissue in the two of them, and now the sheets say so.
 const PRESETS: Dictionary = {
-	# 01 · SPRAWLED · TILT 12° · JOINT 102°
+	# 01 · LIZARD · SPRAWLED · TILT 12° · JOINT 102°
 	#
-	# The reference build, and the one entry that is empty on purpose: every
-	# default above *is* this animal, and every other number in the file is
-	# quoted against it. Nothing here is a decision about a lizard so much as the
-	# origin the other five are measured from.
+	# A large terrestrial lizard — a monitor is the model. The build the class
+	# defaults were authored as, so its sheet is short: what is written is where
+	# a real lizard disagrees with the reference origin, and everything omitted
+	# is a statement that the origin already measured this animal.
 	#
-	# What it demonstrates is that a stance is enough on its own to decide a
-	# gait. Sprawled limbs row out sideways, so sin(12°) starves the launch term
-	# and the asymmetric regime never opens however hard the body is driven —
-	# flat out is a trot, and nothing anywhere forbids it a gallop. The stride
-	# given up to that is bought back by the back: `wave_gain` is 1.0 at this
-	# stance and at no other, so the lateral undulation genuinely does part of
-	# the walking.
-	"Lizard": {},
+	# The skeleton first. A lizard is mostly tail — 1.3 to 1.5 snout-vent lengths
+	# of it on a monitor — so the vent sits at 0.42 of the animal and the whole
+	# 58% behind it tapers away smoothly: no base knot and no neck knot, because
+	# a lizard genuinely is one unbroken spindle from snout to tip. The hind
+	# limbs are a third longer than the fore (the sprint pair — the fastest
+	# lizards lift their forelimbs off the ground entirely), and the femur is
+	# swung through a wide arc from the hip while the shoulder rows a narrower
+	# one, which is the sprawled stride: retraction of the whole limb, not
+	# flexion of its joints.
+	#
+	# What a stance is worth it demonstrates on its own: sin(12°) starves the
+	# launch term, so the asymmetric regime never opens however hard the body is
+	# driven — flat out is a trot, and nothing anywhere forbids it a gallop. The
+	# stride given up to that is bought back by the back: `wave_gain` is 1.0 at
+	# this stance and no other, and 24° over fourteen stations is a spine that
+	# genuinely walks.
+	#
+	# The physique is the reptile half of the sheet. Squamate locomotor muscle
+	# is fast glycolytic fibre nearly throughout — a lizard is thrown by tissue
+	# built to spend — and the circulation behind it cannot keep any of it up:
+	# a three-chambered heart, and lungs a running trunk flexes sideways
+	# through (Carrier's constraint — a sprinting lizard can barely breathe).
+	# So: fast_twitch well above the mixed default, a heart well below the
+	# reference mammal's, and a getaway animal that must stop when the store
+	# does. The fat lives in the tail, and there is not much of it.
+	"Lizard": {
+		"max_bend_deg": 24.0,
+		"body_wave": 6.0, "wave_frequency": 0.85,
+		# One smooth spindle: chest the widest station, head most of a chest
+		# wide on almost no neck, and the tail a plain continuation of the hips
+		# down to a whip tip.
+		"head_width": 12.0, "chest_width": 15.0, "waist_width": 11.5,
+		"hip_width": 12.5, "tail_tip_width": 1.0,
+		"front_limb_t": 0.15, "rear_limb_t": 0.42,
+		# Hind limb 0.55 of snout-vent length, forelimb 0.40 — the monitor's
+		# ratio, and the reason the hips ride higher than the shoulders: the
+		# same stance angle on a longer bone is more clearance.
+		"arm_length": 34.0, "leg_length": 44.0, "stance_width": 0.95,
+		"fore_swing_deg": 60.0, "hind_swing_deg": 72.0,
+		# Long toes on a flat foot: real push at the end of a rowing stance,
+		# and nothing like a digitigrade's.
+		"toe_push": 0.20,
+		# Reptile tendon stores next to nothing — the spring in a lizard start
+		# is the muscle itself.
+		"fore_spring": 0.10, "hind_spring": 0.15,
+		"fast_twitch": 0.72, "heart_power": 0.75, "fat_reserve": 0.9,
+		"move_speed": 95.0, "sprint_multiplier": 1.90,
+		"turn_responsiveness": 13.0, "turn_pivot": 42.0,
+		# A pleurodont mouth: many small keen teeth in a wide gape, none of
+		# them specialised, replaced throughout life — a mouth for holding and
+		# tearing small prey rather than for killing large.
+		"jaw_power": 0.9, "bite_damage": 2.0, "bite_reach": 28.0,
+		"bite_radius": 15.0, "bite_cooldown": 0.40,
+		"tooth_count": 14, "tooth_size": 0.12, "tooth_sharpness": 0.68,
+		"jaw_gape_deg": 72.0, "tooth_variation": 0.22,
+	},
 
-	# 02 · SEMI-UPRIGHT · TILT 50° · JOINT 132°
+	# 02 · CAT · SEMI-UPRIGHT · TILT 50° · JOINT 132°
 	#
-	# Two legs doing opposite jobs and arriving at one level back. In front, a
-	# strut: the elbow is carried 18° straighter than its stance and folds a
-	# shade less than it, because a cat's foreleg is there to hold the front of
-	# the animal up and to land on. Behind, an engine: the knee stands 18° more
-	# flexed, folds a fifth past its stance, swings through a wider fan and
-	# carries the longer, lighter distal bone — which between them are the
-	# crouch, the gather and the leap.
+	# The domestic cat, measured: 46 cm of head and body ahead of 30 cm of tail
+	# — the tail base at 0.56 of the animal — on a chain of twelve stations,
+	# because a cat's back is short and extraordinarily mobile for its length.
+	# The intermembral ratio is the felid 0.80: forelimb four fifths of the
+	# hind, and the two ends do opposite jobs with it. In front a strut, the
+	# elbow carried 16° straighter than its stance, there to hold the front of
+	# the animal up and to land on. Behind an engine: the knee stands 20° more
+	# flexed, folds a quarter past its stance, swings a far wider fan and
+	# carries the longer, lighter shank — the crouch, the gather and the leap.
+	# Nothing arranges the level back: a longer hind limb folded further and a
+	# shorter foreleg held straight clear the ground by the same amount.
 	#
-	# Nothing arranges the level back. A longer hind limb folded further and a
-	# shorter foreleg held straight simply clear the ground by the same amount.
+	# The bend budget is deliberately one notch short of the Cheetah's: a cat's
+	# gallop is transverse — the back works, but it is the dorsomobile
+	# specialist a station further on that reverses its leads. See
+	# Footfall.ROTARY_SPINE, which is the line the two sheets straddle.
 	#
-	# Digitigrade, so `toe_push` is three times the reference: it stands on its
-	# toes already and there is real push there. The physique is an ambush
-	# hunter's — half again the muscle for its weight behind a slightly small
-	# heart, which is an animal that spends hard and cannot keep it up.
+	# Digitigrade — it already stands on its toes, and there is real push
+	# there. The physique is an ambush hunter's: fast fibre well over the mixed
+	# default, half again the muscle for its weight, a heart a shade under the
+	# reference — an animal built to spend hard for seconds and then stop.
 	"Cat": {
 		"posture": Posture.SEMI_UPRIGHT,
 		"segment_count": 12, "segment_length": 14.0, "max_bend_deg": 26.0,
-		"body_wave": 5.0, "wave_frequency": 0.9, "wave_speed": 2.0,
-		# A round skull on a waisted neck, and a rope of a tail hung off a
-		# rounded rump rather than a body tapering away: the base knot steps the
-		# profile down behind the pelvis to a third of the hip and it barely
-		# tapers from there. That near-constant section is also real counterweight
-		# behind the hips, which the hind-driven leap is standing on.
-		"head_width": 11.0, "neck_width": 8.0, "chest_width": 15.0,
-		"waist_width": 12.0, "hip_width": 15.0,
+		"body_wave": 4.5, "wave_frequency": 0.9, "wave_speed": 2.0,
+		# A round skull on a waisted neck; a rope of a tail hung off a rounded
+		# rump. The base knot steps the profile down behind the pelvis to a
+		# third of the hip and it barely tapers from there — a cat's tail is a
+		# near-constant section, and it is real counterweight behind the hips.
+		"head_width": 11.5, "neck_width": 8.5, "chest_width": 14.5,
+		"waist_width": 11.5, "hip_width": 14.0,
 		"tail_base_width": 5.0, "tail_tip_width": 2.2,
-		"front_limb_t": 0.17, "rear_limb_t": 0.50,
+		"front_limb_t": 0.16, "rear_limb_t": 0.52,
 		"neck_lift": 0.10,
-		"arm_length": 40.0, "leg_length": 46.0, "stance_width": 0.85,
-		"fore_flex_deg": -18.0, "hind_flex_deg": 18.0,
-		"fore_fold_range": 0.95, "hind_fold_range": 1.20,
-		"fore_upper_share": 0.50, "hind_upper_share": 0.45,
-		"fore_swing_deg": 56.0, "hind_swing_deg": 74.0,
-		"toe_push": 0.45,
+		"arm_length": 38.0, "leg_length": 47.0, "stance_width": 0.85,
+		"fore_flex_deg": -16.0, "hind_flex_deg": 20.0,
+		"fore_fold_range": 0.92, "hind_fold_range": 1.25,
+		"fore_upper_share": 0.50, "hind_upper_share": 0.46,
+		"fore_swing_deg": 58.0, "hind_swing_deg": 76.0,
+		"toe_push": 0.50,
 		# The hind tendons come in close to the joint — a lever geared a shade
-		# for speed, which is what lets the engine end turn its legs over quicker
-		# than the strut end without carrying different muscle. The foreleg stays
-		# at the reference insertion, where the lever changes nothing at all.
-		"hind_insertion": 0.28,
+		# for speed, which is what lets the engine end turn its legs over
+		# quicker than the strut end without carrying different muscle. The
+		# foreleg stays at the reference insertion, an exact no-op.
+		"hind_insertion": 0.27,
 		# ...and a good deal of rope behind it. The girdle that folds tighter
-		# than its stance is the only one with travel to wind a store with, which
-		# is why the spring sits where the fold does. The foreleg's share is the
-		# smaller half of the same tissue, spent on landings rather than take-offs.
-		"fore_spring": 0.35, "hind_spring": 0.55,
-		"density": 0.68, "muscle_power": 1.56,
-		"heart_power": 0.95, "fat_reserve": 0.8,
-		# No push number: how hard this animal gets away is its own muscle
-		# through its own levers, and `density` and `muscle_power` have already
-		# said what there is of both.
-		"move_speed": 85.0, "sprint_multiplier": 1.80,
+		# than its stance is the only one with travel to wind a store with,
+		# which is why the spring sits where the fold does. The foreleg's share
+		# is spent on landings rather than take-offs.
+		"fore_spring": 0.30, "hind_spring": 0.60,
+		"density": 0.65, "muscle_power": 1.60, "fast_twitch": 0.68,
+		"heart_power": 0.90, "fat_reserve": 0.9,
+		"move_speed": 88.0, "sprint_multiplier": 1.85,
 		"spine_stiffness": 0.88, "spine_damping": 0.64,
-		"turn_responsiveness": 14.0, "turn_pivot": 40.0,
-		# Few teeth, long and keen: a killing mouth rather than a holding one, so
-		# almost no contact area and what force there is goes straight in.
-		"jaw_power": 1.1, "bite_damage": 2.4, "bite_reach": 30.0,
-		"bite_radius": 14.0, "bite_cooldown": 0.32, "chew_interval": 0.40,
-		"tooth_count": 7, "tooth_size": 0.30, "tooth_sharpness": 0.92,
-		"jaw_gape_deg": 58.0, "tooth_variation": 0.20,
+		"turn_speed_deg": 210.0, "turn_responsiveness": 14.0, "turn_pivot": 38.0,
+		"turn_speed_falloff": 0.50, "reverse_speed_factor": 0.60,
+		# Thirty teeth in a short-muzzled skull: long canines with a nerve-fine
+		# kill spot, carnassials behind them, and almost nothing else — a
+		# killing mouth, all point and no grinding surface.
+		"jaw_power": 1.15, "bite_damage": 2.5, "bite_reach": 30.0,
+		"bite_radius": 13.0, "bite_cooldown": 0.30, "chew_interval": 0.35,
+		"tooth_count": 7, "tooth_size": 0.32, "tooth_sharpness": 0.95,
+		"jaw_gape_deg": 62.0, "tooth_variation": 0.15,
 	},
 
-	# 03 · COLUMNAR · TILT 72° · JOINT 170°
+	# 03 · ELEPHANT · COLUMNAR · TILT 72° · JOINT 170°
+	#
+	# The African bush elephant: the graviportal extreme, and the sheet where
+	# almost every row is the same fact — weight — measured somewhere else.
 	#
 	# The stance already stands its joints at 170°; this leans a few degrees
-	# either side of that — the elbow straighter than the knee, which is a real
-	# elephant — and then takes the fold almost entirely away.
+	# either side of that — elbow straighter than knee, which is a real
+	# elephant — and then takes the fold almost entirely away. That last number
+	# is the whole build, because it is not a pose: a joint that cannot close
+	# is an animal that cannot crouch, cannot gather, cannot spring, and cannot
+	# lengthen its stride by sinking into its own legs. What is left to move it
+	# along is the swing of the whole limb from the shoulder and the toe at the
+	# end of it — the real animal walks on its toe tips over a fibrous heel
+	# pad, however flat its foot looks from outside.
 	#
-	# That last number is the whole build, because it is not a pose. A joint that
-	# cannot close is an animal that cannot crouch, cannot gather, cannot spring,
-	# and cannot lengthen its stride by sinking into its own legs. Every one of
-	# those was previously either absent or written down somewhere as a special
-	# case for heavy animals; here they are one number, and what is left to move
-	# the creature along is the swing of the whole limb from the shoulder and the
-	# toe at the end of it.
+	# The proportions are measured ones. Shoulder height roughly equals body
+	# length on a bush elephant, the forelimb is the longer pair (the shoulder
+	# is its highest point), the humerus and femur are long over short thick
+	# distal bones (upper shares near the graviportal ceiling), and the tail is
+	# a rope with a tuft — about a quarter of the animal, clipped short, hung
+	# off rounded hindquarters. The skull is enormous and sits directly on the
+	# pectoral girdle: an elephant has almost no neck, and the head is carried
+	# high because the shoulder it rides on is.
 	#
 	# Its top speed never crosses FROUDE_WALK — the hip is a whole leg off the
 	# ground and mass cubes where muscle squares — so the run is an amble, and
-	# nothing had to forbid a gallop.
+	# nothing had to forbid a gallop. The physique says why twice over: muscle
+	# that is the slowest fibre in the file (elephant locomotor muscle is
+	# overwhelmingly slow-oxidative — tissue built to hold weight up all day),
+	# behind the largest heart in it. An animal that covers ground from dawn to
+	# dark and cannot chase anything.
 	"Elephant": {
 		"posture": Posture.COLUMNAR,
-		"segment_count": 16, "segment_length": 19.0, "max_bend_deg": 10.0,
-		"body_wave": 3.0,
-		# Rounded hindquarters and a stump. The base knot rounds the rump off at
-		# the pelvis and the length clips the flesh there, so the spine behind it
-		# still exists and is simply not elephant — without which this animal
-		# wears a tail the size of its own trunk.
-		"head_width": 24.0, "chest_width": 34.0, "waist_width": 29.0,
-		"hip_width": 31.0, "tail_base_width": 3.0, "tail_tip_width": 2.0,
-		"tail_length": 0.55,
-		# Shoulders brought up close behind the skull: an elephant is a huge head
-		# carried on almost no neck, and the whole of that is where the pectoral
-		# girdle sits. The trunk between the girdles gains what the neck gives up.
-		"front_limb_t": 0.14, "rear_limb_t": 0.54,
-		"neck_lift": 0.14,
+		"segment_count": 16, "segment_length": 19.0, "max_bend_deg": 9.0,
+		"body_wave": 2.5,
+		# One deep barrel: chest and hips nearly the same station, almost no
+		# waist between them, and a head most of a chest wide blending straight
+		# into the shoulders with no neck knot at all.
+		"head_width": 24.0, "chest_width": 33.0, "waist_width": 30.0,
+		"hip_width": 31.0, "tail_base_width": 2.5, "tail_tip_width": 1.5,
+		"tail_length": 0.60,
+		"front_limb_t": 0.14, "rear_limb_t": 0.56,
+		"neck_lift": 0.15,
 		# Held nearly vertical, so the clearance is most of the leg and the
-		# plan-view reach is under a third of it, which is what lands the feet
-		# close underneath the body. The forelimbs are the longer pair, and the
-		# back slopes down from the shoulder because of it rather than because
-		# anything draws it that way.
-		"arm_length": 92.0, "leg_length": 88.0, "stance_width": 0.75,
-		"fore_flex_deg": -3.0, "hind_flex_deg": 4.0,
+		# plan-view reach under a third of it, which is what lands the feet
+		# close beneath the body — an elephant's trackway is famously narrow.
+		"arm_length": 92.0, "leg_length": 88.0, "stance_width": 0.70,
+		"fore_flex_deg": -2.0, "hind_flex_deg": 5.0,
 		"fore_fold_range": 0.45, "hind_fold_range": 0.50,
-		# Weight carried high: a long humerus and femur over short, thick distal
-		# bones. Graviportal proportions, and what make a leg read as a pillar
-		# rather than as a long shin with a knob at the top.
-		"fore_upper_share": 0.58, "hind_upper_share": 0.56,
-		"fore_swing_deg": 46.0, "hind_swing_deg": 50.0,
-		# It walks on its toes over a fibrous pad, and with the joints doing so
-		# little this is most of what actually pushes the animal along.
+		"fore_upper_share": 0.60, "hind_upper_share": 0.57,
+		"fore_swing_deg": 45.0, "hind_swing_deg": 49.0,
 		"toe_push": 0.60,
-		# Tendons well out along the bone at both ends: a lever geared for force
-		# rather than sweep, which is what a limb whose whole job is holding
-		# weight against the ground should be. The swing pays for it, and on a leg
-		# this heavy the pendulum was the slower term already.
-		"fore_insertion": 0.36, "hind_insertion": 0.36,
-		# Real elastic tissue that is entirely useless for jumping, which is the
-		# interesting half of this build: a store gives its work back by pushing a
-		# joint open, and a knee that opens by a seventh of the limb returns a
-		# seventh of what it holds. Nothing here says an Elephant cannot jump. It
-		# simply cannot spend them.
-		"fore_spring": 0.30, "hind_spring": 0.30,
-		"density": 1.66, "muscle_power": 1.31,
-		# A large heart on the animal with the least muscle per unit of weight in
-		# the file, and a walk that is already three quarters of everything it
-		# has: a creature that covers ground all day and cannot chase anything.
-		"heart_power": 1.20, "fat_reserve": 1.6,
-		"move_speed": 65.0, "sprint_multiplier": 1.30,
+		# Tendons well out along the bone at both ends: a lever geared for
+		# force rather than sweep, which is what a limb whose whole job is
+		# holding weight against the ground should be. The swing pays for it,
+		# and on a leg this heavy the pendulum was the slower term already.
+		"fore_insertion": 0.38, "hind_insertion": 0.37,
+		# The heel pads are real elastic tissue and entirely useless for
+		# jumping: a store gives its work back by pushing a joint open, and a
+		# knee that opens by a seventh of the limb returns a seventh of what it
+		# holds. Nothing here says an Elephant cannot jump. It cannot spend them.
+		"fore_spring": 0.25, "hind_spring": 0.25,
+		"density": 1.42, "muscle_power": 1.30, "fast_twitch": 0.25,
+		"heart_power": 1.25, "fat_reserve": 1.7,
+		"move_speed": 62.0, "sprint_multiplier": 1.35,
 		"spine_stiffness": 0.95, "spine_damping": 0.50,
-		"turn_speed_falloff": 0.70, "turn_responsiveness": 5.0,
-		"turn_pivot": 110.0, "reverse_speed_factor": 0.40,
-		# Broad flat molars — the bluntest mouth here. It spreads a very large
-		# bite over a very large area, so it crushes and grinds where the Cat opens.
-		"jaw_power": 5.5, "bite_damage": 2.8, "bite_reach": 34.0,
-		"bite_radius": 22.0, "bite_cooldown": 0.70, "chew_interval": 0.60,
-		"tooth_count": 6, "tooth_size": 0.16, "tooth_sharpness": 0.15,
-		"jaw_gape_deg": 46.0, "tooth_variation": 0.14,
+		"turn_speed_deg": 120.0, "turn_speed_falloff": 0.70,
+		"turn_responsiveness": 5.0, "turn_pivot": 115.0,
+		"reverse_speed_factor": 0.40,
+		# Four molars the size of bricks, worked fore-and-aft: the bluntest
+		# mouth in the file, spreading an enormous bite over an enormous area.
+		# It crushes and grinds where the Cat's opens.
+		"jaw_power": 6.0, "bite_damage": 2.7, "bite_reach": 33.0,
+		"bite_radius": 22.0, "bite_cooldown": 0.75, "chew_interval": 0.65,
+		"tooth_count": 5, "tooth_size": 0.15, "tooth_sharpness": 0.10,
+		"jaw_gape_deg": 42.0, "tooth_variation": 0.12,
 	},
 
-	# 04 · ERECT · TILT 66° · JOINT 150°
+	# 04 · CHEETAH · ERECT · TILT 66° · JOINT 150°
 	#
-	# The Cat's asymmetry taken further: a foreleg that is nearly a strut over a
-	# hind leg that folds tighter than anything else in the file and swings
-	# through half again the fan. That is the gather, and it is the same two rows
-	# of the same table the Elephant fills in the other direction.
+	# The fastest terrestrial animal, and a sheet that is one sentence said
+	# five ways: everything is spent on stride rate. The build is the Cat's
+	# asymmetry taken to its limit — a near-strut foreleg over a hind leg that
+	# folds tighter than anything else in the file and swings half again the
+	# fan — on limbs half as long again for the body, a drawn waist, and a
+	# skull shrunk to a dome (a cheetah's head is small even for its weight;
+	# the airway through it is not).
 	#
 	# The back is what makes it a different gait rather than a faster one.
-	# Fifteen stations at 34° of bend put `spine_freedom` clear of ROTARY_SPINE
-	# 0.85, so past 0.70 of a gather the fore split reverses and the gallop comes
-	# out rotary, doubly suspended, with the spine adding and removing ±16% of
-	# body length every stride.
+	# Fifteen stations at 36° of bend put `spine_freedom` clear of ROTARY_SPINE,
+	# so past 0.70 of a gather the fore split reverses and the gallop comes out
+	# rotary, doubly suspended — the dorsomobile cycle the real animal runs,
+	# with the spine adding and removing a sixth of body length every stride.
+	# The tail is the other flight surface: as long as the trunk, thick enough
+	# to steer with, hung off its own base knot. A rudder at speed.
 	#
-	# The highest-geared limbs here (insertions .28 / .25) behind the smallest
-	# heart and the most muscle: everything is spent out of the store, nothing is
-	# sustained, and the animal that runs down anything on the plain is also the
-	# one that has to stop first.
+	# The physique is the sprint stated as tissue. Cheetah locomotor muscle is
+	# the fastest measured in any large mammal — the sheet's highest fibre
+	# share — behind the file's highest-geared tendons (insertions right in
+	# against both joints) and its biggest hind spring share. What bounds the
+	# chase in life is heat: it cannot dump what thirty seconds of this
+	# produces. The simulation has no thermometer, so the same wall is stated
+	# through the one organ that means "cannot keep it up" here — the smallest
+	# heart in the file, on the most muscle. Nothing is sustained; everything
+	# is spent out of the store; the animal that runs down anything on the
+	# plain is the one that has to stop first.
 	"Cheetah": {
 		"posture": Posture.ERECT,
-		"segment_count": 15, "segment_length": 15.0, "max_bend_deg": 34.0,
-		"body_wave": 4.0, "wave_frequency": 0.9, "wave_speed": 2.2,
-		# The greyhound outline: deep chest, drawn waist, small skull on a waisted
-		# neck, and a tail as long as the trunk and no thicker than a rope, hung
-		# off its own base knot instead of tapering out of the hips. It is a
-		# rudder at speed and it reads as one.
-		"head_width": 9.0, "neck_width": 6.5, "chest_width": 14.0,
-		"waist_width": 9.0, "hip_width": 13.0,
-		"tail_base_width": 3.0, "tail_tip_width": 1.4,
-		"front_limb_t": 0.15, "rear_limb_t": 0.48,
-		"neck_lift": 0.08,
-		"arm_length": 52.0, "leg_length": 58.0, "stance_width": 0.70,
-		"fore_flex_deg": -8.0, "hind_flex_deg": 28.0,
-		"fore_fold_range": 1.05, "hind_fold_range": 1.45,
-		"fore_upper_share": 0.50, "hind_upper_share": 0.44,
-		"fore_swing_deg": 62.0, "hind_swing_deg": 84.0,
-		"toe_push": 0.70,
+		"segment_count": 15, "segment_length": 15.0, "max_bend_deg": 36.0,
+		"body_wave": 3.5, "wave_frequency": 0.9, "wave_speed": 2.2,
+		# Deep-chested and drawn in hard at the loin: the coursing outline. The
+		# small domed skull rides a long waisted neck.
+		"head_width": 8.5, "neck_width": 6.0, "chest_width": 15.0,
+		"waist_width": 10.0, "hip_width": 14.0,
+		"tail_base_width": 3.5, "tail_tip_width": 1.8,
+		"front_limb_t": 0.15, "rear_limb_t": 0.52,
+		"neck_lift": 0.09,
+		# The leggiest quadruped here: shoulder height ~0.65 of head-and-body
+		# on the real animal, against the Cat's ~0.45, and the forelimb nearly
+		# the hind's equal (intermembral ~0.9 — a galloper drives with both
+		# ends where a leaper drives with one).
+		"arm_length": 53.0, "leg_length": 59.0, "stance_width": 0.65,
+		"fore_flex_deg": -6.0, "hind_flex_deg": 26.0,
+		"fore_fold_range": 1.10, "hind_fold_range": 1.45,
+		"fore_upper_share": 0.49, "hind_upper_share": 0.44,
+		"fore_swing_deg": 66.0, "hind_swing_deg": 86.0,
+		# Digitigrade on semi-retractable claws that grip like track spikes.
+		"toe_push": 0.65,
 		# Tendons right in against the joints, so every contraction is spent on
-		# sweep. The same trade the long light shin is making — force given up for
-		# foot speed — and most of why these legs turn over the way they do.
-		"fore_insertion": 0.28, "hind_insertion": 0.25,
-		"fore_spring": 0.40, "hind_spring": 0.65,
-		"density": 0.57, "muscle_power": 1.89,
-		"heart_power": 0.70, "fat_reserve": 0.4,
-		"move_speed": 130.0, "sprint_multiplier": 2.00,
+		# sweep. The same trade the long light shin is making — force given up
+		# for foot speed — and most of why these legs turn over the way they do.
+		"fore_insertion": 0.27, "hind_insertion": 0.24,
+		"fore_spring": 0.45, "hind_spring": 0.70,
+		"density": 0.62, "muscle_power": 1.95, "fast_twitch": 0.85,
+		"heart_power": 0.65, "fat_reserve": 0.4,
+		"move_speed": 135.0, "sprint_multiplier": 2.00,
 		"spine_stiffness": 0.80, "spine_damping": 0.70,
-		"turn_speed_falloff": 0.50, "turn_responsiveness": 13.0,
-		"turn_pivot": 44.0, "reverse_speed_factor": 0.45,
-		"jaw_power": 1.0, "bite_damage": 2.2, "bite_reach": 34.0,
+		# The falloff is the lowest of the fast builds: a cheetah corners at
+		# speed — the tail and the claws are for exactly that — where every
+		# other sprinter has to slow first.
+		"turn_speed_deg": 175.0, "turn_speed_falloff": 0.45,
+		"turn_responsiveness": 13.0, "turn_pivot": 45.0,
+		"reverse_speed_factor": 0.45,
+		# The weakest bite of any big cat — the skull gave its muscle room to
+		# the airway, and the kill is a clamp on the windpipe held for minutes
+		# rather than a puncture. Small canines, keen cheek teeth.
+		"jaw_power": 0.9, "bite_damage": 2.0, "bite_reach": 33.0,
 		"bite_radius": 12.0, "bite_cooldown": 0.30, "chew_interval": 0.38,
-		"tooth_count": 8, "tooth_size": 0.28, "tooth_sharpness": 0.90,
-		"jaw_gape_deg": 54.0, "tooth_variation": 0.18,
+		"tooth_count": 7, "tooth_size": 0.24, "tooth_sharpness": 0.85,
+		"jaw_gape_deg": 52.0, "tooth_variation": 0.18,
 	},
 
-	# 05 · ERECT · BIPED BY MEASUREMENT
+	# 05 · T. REX · ERECT · BIPED BY MEASUREMENT
 	#
-	# Two legs, and nothing anywhere says so: an arm of 16 cannot reach a floor
-	# its own shoulder is a leg of 86 above, so it falls under leg × BEARING_RATIO
-	# and the forelimbs stop bearing. Everything after that is the rest of the
-	# simulation noticing — the shoulders are carried level by the back instead of
-	# by the forelimbs, duty and footfall are quoted against two legs, the pattern
-	# loses its fore girdle, and the arms are held folded against the chest
-	# because nothing is holding them out.
+	# Tyrannosaurus rex off the skeletal reconstructions: twelve metres nose to
+	# tail tip with the hip joint almost exactly halfway along, a skull a
+	# twelfth of the animal on a thick S-curved neck, a tail that is the entire
+	# back half, and an arm a quarter the hind limb's length. That last ratio
+	# is the sheet's one deliberate demonstration: an arm of 25 cannot reach a
+	# floor its own shoulder is a leg of 88 above, so it falls under
+	# leg × BEARING_RATIO and the forelimbs stop bearing. Everything after that
+	# is the rest of the simulation noticing — the shoulders are carried by the
+	# back instead of the arms, duty and footfall are quoted against two legs,
+	# and the arms are held folded against the chest because nothing is holding
+	# them out.
 	#
-	# Hips at 0.42 put two fifths of the animal behind them, and mass is read off
-	# the drawn silhouette, so the tail genuinely counterweighs. That is what
-	# affords the near-level trunk: 13° is a beam balanced over a heavier tail,
-	# and it is deliberately not zero.
+	# Hips at the real animal's halfway point put half of it behind them, and
+	# mass is read off the drawn silhouette, so the tail genuinely
+	# counterweighs — caudofemoral retraction made a T. rex's tail a third of
+	# its locomotor muscle, which is why it is drawn as deep as the hips and
+	# tapering over its whole length with no base knot: a theropod tail is not
+	# hung off the body, it *is* the body. That counterweight is what affords
+	# the near-level trunk: 12° is a beam balanced over a heavier tail, and it
+	# is deliberately not zero. It is also why the tail never props a slow
+	# walk the way the Kangaroo's does — carried at 12° it runs out behind the
+	# animal a whole hip height off the floor. See Locomotion.tail_prop.
+	#
+	# The knee stands markedly bent and stays bent — the bird's crouch, on the
+	# bird's leg: a long tibia and arctometatarsus below a shorter femur, and
+	# the fold shallow, because eight tonnes does not gather itself deeply onto
+	# one pair of joints. Biomechanics puts its top speed under 30 km/h, a fast
+	# walk rather than a run, and nothing here asserts it: the mass, the crouch
+	# and the fibre deliver it.
 	"T. rex": {
 		"posture": Posture.ERECT,
-		"segment_count": 15, "segment_length": 18.0, "max_bend_deg": 12.0,
+		"segment_count": 16, "segment_length": 19.5, "max_bend_deg": 13.0,
 		"body_wave": 2.5, "wave_frequency": 0.7, "wave_speed": 1.4,
-		# The one build whose tail should read as a continuation of the body — a
-		# theropod tail is the back half of the animal, thick at the hips and
-		# tapering over its whole length — so it keeps the legacy profile with no
-		# base knot and gets more of the spine instead. The neck knot pinches
-		# behind a skull that is most of the front end.
-		"head_width": 17.0, "neck_width": 12.0, "chest_width": 19.0,
-		"waist_width": 15.0, "hip_width": 20.0, "tail_tip_width": 1.5,
-		"front_limb_t": 0.20, "rear_limb_t": 0.42,
-		"neck_lift": 0.16, "trunk_lift_deg": 13.0,
-		# Narrow, but not on the midline: a two-legged animal tracks close to its
-		# own centreline and cannot track through it, and a leg this near vertical
-		# has very little fold plane left to keep its knee outboard with.
-		"arm_length": 16.0, "leg_length": 86.0, "stance_width": 0.72,
-		# A theropod knee stands markedly bent and stays bent — the bird's crouch
-		# — so the hind limb is flexed past its stance rather than straighter than
-		# it. The forelimb's articulation is real and entirely academic: nothing
+		"head_width": 21.0, "neck_width": 15.0, "chest_width": 24.0,
+		"waist_width": 19.0, "hip_width": 25.0, "tail_tip_width": 1.3,
+		"front_limb_t": 0.19, "rear_limb_t": 0.47,
+		"neck_lift": 0.15, "trunk_lift_deg": 12.0,
+		# Narrow, but not on the midline: a two-legged animal tracks close to
+		# its own centreline and cannot track through it.
+		"arm_length": 25.0, "leg_length": 88.0, "stance_width": 0.70,
+		# The forelimb's articulation is real and entirely academic: nothing
 		# stands on it, so it is folded against the chest whatever it says.
-		"fore_flex_deg": 50.0, "hind_flex_deg": 12.0,
-		"hind_fold_range": 0.80,
-		"hind_upper_share": 0.48,
-		"fore_swing_deg": 50.0, "hind_swing_deg": 70.0,
+		"fore_flex_deg": 55.0, "hind_flex_deg": 14.0,
+		"hind_fold_range": 0.78,
+		"fore_upper_share": 0.55, "hind_upper_share": 0.46,
+		"fore_swing_deg": 50.0, "hind_swing_deg": 72.0,
+		# Digitigrade on three spreading toes — most of a metre of foot rolling
+		# the animal over each stance.
 		"toe_push": 0.60,
-		# Geared a shade for force: four tonnes on two feet is a load path first
-		# and a swing second, and the lever leans the way the load does.
-		"hind_insertion": 0.32,
-		# A bird's leg, and the store goes with the crouch: real but modest, on a
-		# body far too heavy for it to be worth much. What comes out is a creature
-		# that can get itself off the ground and has no business doing it often.
-		"fore_spring": 0.18, "hind_spring": 0.22,
-		"density": 1.01, "muscle_power": 1.46,
-		# A good heart on four times the reference's weight, and it needs to be:
-		# this build walks at three quarters of everything it has, so the band it
-		# can borrow into is narrow and it is into it the moment the key goes down.
+		# Geared a shade for force: eight tonnes on two feet is a load path
+		# first and a swing second, and the lever leans the way the load does.
+		"hind_insertion": 0.33,
+		# A bird's leg, and the store goes with the crouch: real but modest, on
+		# a body far too heavy for it to be worth much.
+		"fore_spring": 0.20, "hind_spring": 0.25,
+		# Pneumatised skull and vertebrae over a dense hindquarter — near water
+		# overall — carrying the most absolute muscle in the file at a middling
+		# fibre mix: a tyrannosaur was no sprinter, and its prey were slower.
+		"density": 1.15, "muscle_power": 1.50, "fast_twitch": 0.42,
 		"heart_power": 1.05, "fat_reserve": 0.9,
-		"move_speed": 205.0, "sprint_multiplier": 1.35,
+		"move_speed": 205.0, "sprint_multiplier": 1.30,
 		"spine_stiffness": 0.93, "spine_damping": 0.55,
-		"turn_speed_falloff": 0.60, "turn_responsiveness": 7.0,
-		"turn_pivot": 90.0, "reverse_speed_factor": 0.45,
-		"jaw_power": 7.0, "bite_damage": 4.0, "bite_reach": 40.0,
-		"bite_radius": 20.0, "bite_cooldown": 0.60, "chew_interval": 0.55,
-		"tooth_count": 11, "tooth_size": 0.30, "tooth_sharpness": 0.70,
-		"jaw_gape_deg": 62.0, "tooth_variation": 0.22,
+		"turn_speed_deg": 140.0, "turn_speed_falloff": 0.60,
+		"turn_responsiveness": 7.0, "turn_pivot": 95.0,
+		"reverse_speed_factor": 0.45,
+		# The hardest bite of any terrestrial animal ever measured, delivered
+		# through banana-thick serrated spikes set in a metre and a half of
+		# skull: teeth built to shatter bone rather than to slice, so they are
+		# stout and only moderately keen, and the damage is depth.
+		"jaw_power": 8.5, "bite_damage": 4.5, "bite_reach": 42.0,
+		"bite_radius": 21.0, "bite_cooldown": 0.65, "chew_interval": 0.55,
+		"tooth_count": 12, "tooth_size": 0.32, "tooth_sharpness": 0.62,
+		"jaw_gape_deg": 64.0, "tooth_variation": 0.25,
 	},
 
-	# 06 · ERECT · BIPED · HIND SPRING 0.95
+	# 06 · KANGAROO · ERECT · BIPED · HIND SPRING 0.95
 	#
-	# The same two-legged arithmetic with the spring turned all the way up. Arms
-	# a third of the legs, so it is bipedal for exactly the reason the T. rex is;
-	# and then the deepest crouch in the file (fold 1.50), the longest foot in it
-	# (toe 0.85), and a hind limb that is mostly rope below the knee.
+	# The red kangaroo: the same two-legged arithmetic as the T. rex with every
+	# remaining row pushed to the macropod extreme. Arms a third of the legs,
+	# so it is bipedal for exactly the reason the T. rex is; then the deepest
+	# crouch in the file (the Z-folded rest limb), the longest foot in it (a
+	# third of the hind limb is foot — the family is named for it), and a hind
+	# limb that is mostly rope below the knee: the gastrocnemius and plantaris
+	# tendons that make the hop cheaper the faster it goes.
 	#
-	# What comes out of those three is a hop, and it is not a gait anything
-	# selects: past its own transition `hind_split` collapses and the two hind
-	# limbs stop alternating and land together, which is the identical collapse
-	# that turns the Cheetah's gallop into a bound. One mechanism, and a body with
-	# only two legs on the ground makes it look like a different animal. Below the
-	# transition it goes back to alternating steps, which is right — a kangaroo
-	# moving slowly does not hop either.
+	# The hop is not a gait anything selects. Past its own transition
+	# `hind_split` collapses and the two hind limbs stop alternating and land
+	# together — the identical collapse that turns the Cheetah's gallop into a
+	# bound, on a body with only two legs on the ground.
 	#
-	# Note the body plan flags one gap here: it draws that slow walk pentapedal,
-	# with tail and arms bearing as a fifth limb, and records that the sim does a
-	# plain alternating stride instead. That is a recommendation and not yet
-	# implemented, so nothing below claims it.
+	# Below the transition the real animal cannot alternate at all: large
+	# macropods are anatomically unable to stride their hind legs out of phase
+	# on the ground, and what they do instead is the pentapedal crawl — plant
+	# the tail, swing both hind feet forward past it as one. The sheet is built
+	# to afford exactly that and the gait engine now delivers it: the trunk is
+	# reared 55° over the hips (a kangaroo from the side is a Z of leg, a near
+	# vertical body and a tail closing the tripod), so a tail that is nearly
+	# half the animal runs *down* from the pelvis and reaches the floor with
+	# girth to spare — see Locomotion.tail_prop, which measures precisely this,
+	# and finds nothing on the level-trunked T. rex.
+	#
+	# The tail carries a fifth of the animal's muscle in life, and the base
+	# knot says so: a stout root stepped down from heavy hindquarters, its own
+	# structure and not a tapering body.
 	"Kangaroo": {
 		"posture": Posture.ERECT,
-		"segment_count": 12, "segment_length": 16.0, "max_bend_deg": 20.0,
+		"segment_count": 12, "segment_length": 16.0, "max_bend_deg": 22.0,
 		"body_wave": 2.0,
-		# A thick muscular tail that is nevertheless its own structure: the base
-		# knot steps it down from the rump into a stout root, deeper than anything
-		# the Lizard trails, because this tail is the third leg of the tripod rest
-		# and a working counterweight to the hop rather than a tapering body.
-		# Small skull on a real neck, heavy hindquarters over a drawn waist.
+		# Slight shoulders, heavy hindquarters: the whole animal deepens toward
+		# its engine. A small deer-like skull on a real neck.
 		"head_width": 7.0, "neck_width": 5.0, "chest_width": 13.0,
-		"waist_width": 11.0, "hip_width": 16.0,
-		"tail_base_width": 12.5, "tail_tip_width": 3.5,
-		"front_limb_t": 0.20, "rear_limb_t": 0.42,
-		# Reared: the trunk is carried most of the way to upright over the hips,
-		# which is what a kangaroo is from the side — a Z of leg, a near vertical
-		# body, and a tail closing the tripod.
-		"neck_lift": 0.12, "trunk_lift_deg": 50.0,
+		"waist_width": 12.0, "hip_width": 17.0,
+		"tail_base_width": 12.0, "tail_tip_width": 3.5,
+		"front_limb_t": 0.19, "rear_limb_t": 0.46,
+		"neck_lift": 0.13, "trunk_lift_deg": 55.0,
 		"arm_length": 22.0, "leg_length": 62.0, "stance_width": 0.50,
 		"fore_flex_deg": 46.0, "hind_flex_deg": 30.0,
 		"hind_fold_range": 1.50,
-		"hind_upper_share": 0.42,
-		"fore_swing_deg": 50.0, "hind_swing_deg": 78.0,
-		"toe_push": 0.85,
+		# Femur 0.30 of the limb, tibia 0.35, foot the rest: the shortest upper
+		# share the chain allows, under a toe that is most of the propulsion.
+		"hind_upper_share": 0.40,
+		"fore_swing_deg": 48.0, "hind_swing_deg": 80.0,
+		"toe_push": 0.90,
 		# Tendons in close on the hind pair — the gastrocnemius end of the same
 		# rope the spring row describes, geared for the sweep a hop is.
-		"hind_insertion": 0.26,
+		"hind_insertion": 0.25,
 		# Nearly all rope. The whole hind limb below the knee is a spring wound
-		# along the longest foot in the file, which is the other half of what makes
-		# this a hop rather than a stride — and the reason the same animal is a
-		# poor walker: a store is cheap to bounce on and expensive to carry.
+		# along the longest foot in the file, which is the other half of what
+		# makes this a hop rather than a stride — and the reason the same
+		# animal is a poor walker: a store is cheap to bounce on and expensive
+		# to carry.
 		"fore_spring": 0.25, "hind_spring": 0.95,
-		"density": 0.64, "muscle_power": 2.09,
-		# A shade under the reference on a light body carrying plenty of muscle,
-		# which leaves it an ordinary store and the widest band in the file to
-		# spend it across: it walks at under half of what it has. The hop it is
-		# famous for being cheap at is the tendon above rather than anything here.
-		"heart_power": 0.95, "fat_reserve": 0.8,
-		"move_speed": 170.0, "sprint_multiplier": 2.35,
+		# The hop's economy is the tendon, not the heart — but the heart is a
+		# sound one, because a red kangaroo covers desert distances: an
+		# ordinary store behind the widest band in the file to spend it across.
+		"density": 0.66, "muscle_power": 2.00, "fast_twitch": 0.62,
+		"heart_power": 1.00, "fat_reserve": 0.7,
+		"move_speed": 165.0, "sprint_multiplier": 2.30,
 		"spine_stiffness": 0.88, "spine_damping": 0.62,
-		"turn_speed_deg": 60.0, "turn_speed_falloff": 0.55,
+		"turn_speed_deg": 65.0, "turn_speed_falloff": 0.55,
 		"turn_responsiveness": 9.0, "turn_pivot": 60.0,
 		"reverse_speed_factor": 0.40,
-		"jaw_power": 0.8, "bite_damage": 1.6, "bite_reach": 26.0,
+		# A grazer's mouth: incisors in front, a molar battery behind, and a
+		# gap where a predator keeps its canines. Nothing here is a weapon —
+		# the animal's weapon is the same hind limb everything else is.
+		"jaw_power": 0.75, "bite_damage": 1.5, "bite_reach": 25.0,
 		"bite_radius": 9.0, "bite_cooldown": 0.50, "chew_interval": 0.45,
-		"tooth_count": 8, "tooth_size": 0.12, "tooth_sharpness": 0.15,
-		"jaw_gape_deg": 44.0, "tooth_variation": 0.14,
+		"tooth_count": 7, "tooth_size": 0.11, "tooth_sharpness": 0.12,
+		"jaw_gape_deg": 40.0, "tooth_variation": 0.14,
 	},
 }
 

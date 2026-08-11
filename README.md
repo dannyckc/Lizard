@@ -69,8 +69,9 @@ a range of *heights* as well as a place on the ground, and an attack connects on
 where the two ranges overlap — so a leap clears a charge, a low animal on a tall
 one can reach its legs and nothing above them, and forage over your head is not
 food. How high an animal stands is not a setting either: it is its legs, times the
-angle its **posture** carries them at. Three stances ship — sprawled, semi-upright
-and columnar — and that one angle is the whole difference between them.
+angle its **posture** carries them at. Four stances ship — sprawled,
+semi-upright, erect and columnar — and that one angle is the whole difference
+between them.
 
 ## How it works
 
@@ -532,13 +533,12 @@ so nothing has to know which of them went wrong:
 
 ```
               stands   foot lift   jump   heights   pushes with
- Elephant     147 px     32 px      —       —       — cannot leave the ground
- Lizard        22 px      9 px     17 px   0.8      36% fore / 64% hind
- Camel        112 px     25 px     61 px   0.5      27% / 73%
- T. rex       109 px     24 px     83 px   0.8       0% / 100%  (two legs)
- Cat           60 px     13 px    123 px   2.1      25% / 75%
- Cheetah       69 px     15 px    190 px   2.8      24% / 76%
- Kangaroo      76 px     17 px    220 px   2.9       0% / 100%  (two legs)
+ Elephant     151 px     20 px      —       —       — cannot leave the ground
+ Lizard        26 px     10 px     17 px   0.7      42% fore / 58% hind
+ T. rex       129 px     20 px     68 px   0.5       0% / 100%  (two legs)
+ Cat           59 px     10 px     98 px   1.6      43% / 57%
+ Cheetah       74 px     13 px    152 px   2.0      43% / 57%
+ Kangaroo      98 px     16 px    203 px   2.1       0% / 100%  (two legs)
 ```
 
 Nothing in that table was typed in. Shorten the Cat's shin, straighten its knee,
@@ -972,6 +972,7 @@ them:
 | pronk | 0 | ~0 | ~0 |
 | two-legged stride | — | ½ | — |
 | hop | — | ~0 | — |
+| pentapedal crawl | — | ~0 | — |
 
 Nothing in the simulation stores those names. They are what a phase measurement
 is called afterwards. What sets the three numbers is:
@@ -1048,8 +1049,23 @@ whose arms are *longer* than its legs — is emphatically not bipedal, because i
 knuckles reach the ground. The same collapse of the hind girdle that turns a
 Cheetah's gallop into a bound turns a Kangaroo's stride into a hop; there is one
 mechanism, and a body with only two legs on the floor makes it look like a
-different animal. Below its transition speed a Kangaroo goes back to alternating
-steps, which is right: one moving slowly does not hop either.
+different animal.
+
+Below its transition speed the same Kangaroo does not go back to alternating
+steps, because a macropod cannot stride its hind legs out of phase on the
+ground at all. What it does instead is the **pentapedal crawl**: the tail
+plants and both hind feet swing forward past it as one. Whether a build has
+that gait is a measurement, not a mode — `Locomotion.tail_prop` asks whether
+the flesh behind the pelvis, carried down at the angle the reared trunk sets,
+reaches the floor with girth at the root to bear on. A Kangaroo's near-vertical
+trunk drops a tail nearly half its own length straight to the ground and the
+prop reads full; a T. rex carries a heavier tail *level*, a whole hip height in
+the air, and the same arithmetic reads nothing — so it keeps the alternating
+two-legged stride, and nothing anywhere named either animal. With the prop
+down, a careful biped may swing the pair together at a walk (the tail is the
+third support the caution rule was protecting), and the paired gait arrives at
+both ends of the speed range for opposite reasons: caution buys it slowly,
+launch buys it fast, and only the alternating middle was ever a fiction.
 
 #### The back is part of the gait
 
@@ -2218,19 +2234,19 @@ every creature going full pelt: a body at its limit is trying as hard as it can
 whatever species it is, and what separates two animals is how much of that their
 blood covers. Off the shipped presets:
 
-| | engine | heart | sustains | sprint holds for |
+| | engine | heart | sustains | winded after |
 |---|---|---|---|---|
-| Cheetah | 2.10 | 0.70 | 0.61 | 13 s |
-| Lizard | 1.00 | 1.00 | 0.72 | 16 s |
-| Elephant | 0.73 | 1.20 | 0.80 | 18 s |
-| Kangaroo | 1.59 | 0.95 | 0.77 | 19 s |
-| T. rex | 1.38 | 1.05 | 0.82 | 22 s |
-| Cat | 1.91 | 0.95 | 0.80 | 22 s |
-| Camel | 1.41 | 1.15 | 0.90 | 39 s |
+| Cheetah | 2.27 | 0.65 | 0.54 | 14 s |
+| Cat | 1.79 | 0.90 | 0.73 | 18 s |
+| T. rex | 1.05 | 1.05 | 0.77 | 19 s |
+| Kangaroo | 1.67 | 1.00 | 0.80 | 24 s |
+| Lizard | 0.99 | 0.75 | 0.53 | 28 s |
+| Elephant | 0.93 | 1.25 | 0.92 | 41 s |
 
 The Cheetah carries the most muscle per unit of weight in the file and blows
-first, because a store is not a supply; the Camel is the stayer on an ordinary
-build and a good heart. Neither is a number anybody typed in — swap the heart and
+first, because a store is not a supply; the Elephant is the stayer on the
+biggest heart and the slowest fibre, and the Lizard sustains barely half of
+what it can do once — a reptile's circulation behind a sprinter's muscle. Neither is a number anybody typed in — swap the heart and
 they swap places. Damage arrives the same way: a torn heart, a body that has bled,
 a cut artery to a hind leg and a hip eaten hollow all lower the same two terms,
 and the store cannot be held above what the circulation is delivering, so a
@@ -2430,9 +2446,10 @@ of these sliders written down.
   the control that carried it; edited rows are dotted in the margin, counted in
   the header, and put back by one button.
 
-Seven presets ship, laid out along the posture axis: **Lizard** (sprawled),
-**Cat** (semi-upright), **Elephant** (columnar), and **Camel**, **Cheetah**,
-**T. rex** and **Kangaroo** (erect).
+Six presets ship, laid out along the posture axis: **Lizard** (sprawled),
+**Cat** (semi-upright), **Elephant** (columnar), and **Cheetah**, **T. rex**
+and **Kangaroo** (erect) — each re-derived from the living animal's own
+proportions, articulation and tissue.
 Mass is not among the sliders — it is on the specimen's readout instead, because
 it is something the creature *has* rather than something you set.
 

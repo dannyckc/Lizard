@@ -242,8 +242,15 @@ func _check_cells_agree_with_the_body(player: Creature) -> void:
 		_check(absf(deepest - stature.depth) < 2.0,
 			"a %s's deepest trunk cells were %.1f px through where its stature says %.1f"
 				% [preset, deepest, stature.depth])
-		_check(off_level < 0.5,
-			"a %s's back wandered %.1f px off the height it stands at" % [preset, off_level])
+		# Against the line its own girdles hold, not one flat height: a build
+		# whose hind legs outreach its arms is genuinely pitched — that is the
+		# derived attitude, the same one a short-armed biped stands nose-down
+		# by — so the trunk may lie anywhere on the slope between the two ends
+		# and the claim is only that it lies *on* it.
+		var tipped: float = absf(player.gait.shoulder_height - player.gait.hip_height)
+		_check(off_level < 0.5 + tipped * 0.5,
+			"a %s's back wandered %.1f px off the line its girdles hold (tip %.1f)"
+				% [preset, off_level, tipped])
 		_check(risen < 0.5,
 			"a %s's tail rode %.1f px above the back it hangs off" % [preset, risen])
 		_check(descending,
@@ -428,8 +435,13 @@ func _check_collision_is_volumetric(player: Creature, target: Creature) -> void:
 		player._physics_process(TICK)
 		target._physics_process(TICK)
 	var foot: Vector2 = target.spine.points[3]
+	# The probe band has to reach the body it is stepping on: the claim is
+	# about a foot set down *on* the target, so it spans from the floor to
+	# just over the target's own belly rather than to a constant height one
+	# particular build used to stand at.
 	var grounded: Vector2 = player._limb_contact_push(
-		TissueGrid.LIMB_KEYS[0], 2, foot, foot, 10.0, Vector2(0.0, 8.0))
+		TissueGrid.LIMB_KEYS[0], 2, foot, foot, 10.0,
+		Vector2(0.0, maxf(8.0, target.stature.torso.x + 2.0)))
 	var raised: Vector2 = player._limb_contact_push(
 		TissueGrid.LIMB_KEYS[0], 2, foot, foot, 10.0, Vector2(400.0, 408.0))
 	_check(grounded != Vector2.ZERO,

@@ -88,10 +88,11 @@ func _check_projection() -> void:
 func _check_trait_is_the_only_difference(player: Creature) -> void:
 	player.params.apply_preset("Lizard")
 	player.params.posture = Posture.SPRAWLED
+	var legs_before: float = player.params.leg_length
 	var flat: Dictionary = _measure(player)
 	player.params.posture = Posture.COLUMNAR
 	var tall: Dictionary = _measure(player)
-	_check(player.params.leg_length == CreatureParams.new().leg_length,
+	_check(player.params.leg_length == legs_before,
 		"changing the stance quietly changed the legs as well")
 	_check(tall["clearance"] > flat["clearance"] * 3.0,
 		"the same legs held upright did not raise the body (%.1f -> %.1f)"
