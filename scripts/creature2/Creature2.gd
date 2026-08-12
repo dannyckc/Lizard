@@ -8,23 +8,24 @@
 ##   census → stance → the chain settles → the body is carried → the limbs are
 ##   solved → the weight is posed and checked against the feet → the skin.
 ##
-## **There is no locomotion here.** The movers were taken out to be rewritten (see
-## the `v2-locomotion` branch for the first attempt), so this body stands, poses,
-## droops, ragdolls and skins, and nothing travels it across the world. What is
-## left behind is the shape of the tick with that step cut out of it, which is the
-## seam the rewrite plugs into:
+## **The locomotion is the loop in `motion/Travel.gd`** — intent → desired
+## velocity → delivered acceleration → the body shifts → the legs support and
+## rebalance → the physical result → repeat. This file only sequences it into
+## the tick; `travel` and its stages own every decision, and they write the
+## same seam the phase-3 reopening left behind:
 ##
-##   * `command` is written every tick by the lab and read by nobody. It is what
-##     is being *asked* of the animal.
-##   * `speed`, `speed_norm`, `ang_vel`, `heading`, `move_dir` and `head_pos` are
-##     what a mover writes, and they are already read: the armature's lateral wave
-##     and the attitude's hysteresis are both quoted against `speed_norm`, and the
-##     chain follows `head_pos` because the head is the one point that is placed
-##     rather than solved. They sit at zero until something drives them.
-##   * `armature.fore_carry`/`hind_carry` and `limb.foot_driven` are where a gait
-##     takes ownership of the girdle heights and the feet. Untouched, the armature
-##     stands at what the rest stance delivers and plants its feet at their leads —
-##     which is why there is still an animal on screen with no gait behind it.
+##   * `command` is written every tick by the lab and read by the intent. It is
+##     what is being *asked* of the animal; what it gets is what the loop
+##     delivers.
+##   * `speed`, `speed_norm`, `ang_vel`, `heading`, `move_dir` and `head_pos`
+##     are the mover's publications: the armature's lateral wave and the
+##     attitude's hysteresis are quoted against `speed_norm`, and the chain
+##     follows `head_pos` because the head is the one point that is placed
+##     rather than solved.
+##   * `armature.fore_carry`/`hind_carry` and the limbs' `foot_target`/
+##     `socket_rise`/`foot_driven`/`grounded` are Footwork's: the girdles ride
+##     at what the planted feet actually deliver, and a foot is a world-fixed
+##     anchor until the body's own motion demands it step.
 ##
 ## The flesh is drawn by `Likeness`, a child node reading `contour` — the skin,
 ## posed at the end of the tick once every bone has been placed. What *this* node
@@ -66,6 +67,7 @@ var contour: Contour = Contour.new()
 var poise: Poise = Poise.new()
 var attitude: Attitude = Attitude.new()
 var command: Command = Command.new()
+var travel: Travel = Travel.new()
 
 ## Where the head is being led, and on what bearing. The body follows it: the head
 ## is the one point on the chain that is placed rather than solved. With no mover
@@ -110,6 +112,7 @@ func build(at: Vector2, p_heading: float) -> void:
 	speed_norm = 0.0
 	ang_vel = 0.0
 	armature.take_head(head_pos)
+	travel.build(self)
 
 
 func _physics_process(delta: float) -> void:
@@ -122,19 +125,26 @@ func _physics_process(delta: float) -> void:
 
 	var ground: float = _ground_under(armature.centre(), body.trunk_length * 0.25)
 
-	# The chain follows its head. With a gait this is also the point the feet may
-	# first be decided at, because a foot is placed relative to a socket and the
-	# socket has just moved — see the note at the top of this file.
-	armature.take_head(head_pos)
+	# The loop's front half: intent → velocity → the head is carried. Before the
+	# plan solve, so the chain follows this tick's motion.
+	travel.steer(delta, ground)
+	if not armature.collapsed:
+		armature.take_head(head_pos)
 	armature.advance(delta, ground, speed_norm, attitude.active.wave_gain)
+	# The sockets have moved; now the feet answer — the legs support and
+	# rebalance, and the carries become a measurement of the planted feet.
+	travel.support(delta, ground)
 	# ...and only now the vertical, because how high the body is held is a
-	# measurement of the feet. With nothing owning them it is the rest stance's own
-	# claim, which is the same arithmetic read one step earlier.
+	# measurement of the feet the support just made.
 	armature.carry(ground)
+	travel.perch()
 	armature.settle(ground)
 
 	poise.pose(armature)
 	poise.stand(armature)
+	# The physical result, reviewed: a weight over its edge demands rescue
+	# steps; one past rescue falls, and next tick's loop starts from that.
+	travel.review(delta)
 	# ...and last of all the skin, over bones that have finished moving. Nothing
 	# reads back from it, which is why it can be last: the flesh is a consequence
 	# of the tick, never a term in it.
@@ -143,9 +153,10 @@ func _physics_process(delta: float) -> void:
 
 
 ## The speed this creature walks at flat out without sprinting — the denominator
-## every pace in the game is quoted against. The request alone for now: what the
-## legs will actually deliver is the rewrite's to answer, and the lower of the two
-## is what this has to become again.
+## every pace in the game is quoted against. Deliberately the request: delivery
+## has no closed form in the new loop (it emerges from press, drift and swing
+## tempo), so the ask is the stable ruler and `speed_norm` reports honestly
+## against it — a body whose legs cannot keep up simply never reaches 1.
 func cruise_speed() -> float:
 	return maxf(body.move_speed, 1.0)
 
@@ -171,6 +182,7 @@ func reset() -> void:
 	ang_vel = 0.0
 	if not armature.collapsed:
 		armature.take_head(head_pos)
+	travel.reset()
 	contour.pose()
 
 
@@ -179,6 +191,7 @@ func toggle_collapsed() -> void:
 		armature.revive()
 		head_pos = armature.plan(armature.head_index())
 		armature.take_head(head_pos)
+		travel.reset()
 	else:
 		armature.collapse()
 	alive = not armature.collapsed
@@ -186,6 +199,13 @@ func toggle_collapsed() -> void:
 
 func drop(height: float) -> void:
 	armature.drop(height)
+
+
+## An external force, arriving as the plan velocity it imparted — the seam a
+## charge, a collision or a knock pushes through. Physics is not overridden:
+## the state changes here, and the loop recovers from it or fails to.
+func shove(dv: Vector2) -> void:
+	travel.impetus.shove(dv)
 
 
 func pick_node(world: Vector2, radius: float) -> int:
