@@ -59,6 +59,12 @@ var com_x: float = 0.0
 var built_com: float = -1.0
 ## x the fore girdle station, y the hind.
 var girdle_x: Vector2 = Vector2.ZERO
+## How hard the body is to roll about its own axis, and what it weighs — the
+## census's own second and zeroth moments, carried here for the same reason the
+## node masses are: Corpus derives, Poise bakes, the mover reads. `Keel` divides
+## its torques by these.
+var roll_inertia: float = 1.0
+var total_mass: float = 1.0
 
 
 # ----------------------------------------------------- posed, in the world ----
@@ -80,6 +86,10 @@ var overhang: Vector2 = Vector2.ZERO
 ## Radius of the support about its own middle.
 var span: float = 0.0
 var feet: int = 0
+## The patch of ground the widest planted paw is standing on — the pad every
+## distance here is grown by, kept because a tip pivots about the far edge of a
+## foot rather than about the point it is drawn at.
+var pad: float = 0.0
 
 var _prints: PackedVector2Array = PackedVector2Array()
 
@@ -178,6 +188,10 @@ func bake(corpus: Corpus, armature: Armature) -> bool:
 	com_x = corpus.com().x
 	if built_com < 0.0:
 		built_com = com_x
+	# ...and what it takes to move that weight about the body's own axis, which
+	# is the same census asked one more question. Keel is the only reader.
+	total_mass = maxf(corpus.mass(), MIN_MASS)
+	roll_inertia = maxf(corpus.roll_inertia(), MIN_MASS)
 	var trunk: Armature.Chain = armature.chain(BodySchema.TRUNK)
 	var fore_arc: float = 0.0
 	for j in range(1, trunk.nodes.size() - 1):
@@ -221,7 +235,7 @@ func pose(armature: Armature) -> void:
 ## and the same deliberate refusal to call a distance a verdict.
 func stand(armature: Armature, prop: Vector2 = Vector2.INF) -> void:
 	_prints.clear()
-	var pad: float = 0.0
+	pad = 0.0
 	base = Vector2.ZERO
 	for limb in armature.limbs:
 		var toe: int = limb.nodes[limb.nodes.size() - 1]
@@ -310,6 +324,29 @@ func bias_floor(reach: float, fore: bool) -> float:
 		return 0.0
 	# Out past the girdle, and then past it by the margin a stance keeps in hand.
 	return past / reach + KEEP
+
+
+## The two feet a roll turns about: how far the outermost planted paw reaches to
+## each side of the plumb line along `lat`, right in x and left in y, each grown
+## by its own patch of ground.
+##
+## Deliberately the *outermost print*, not the hull's nearest boundary. The
+## `clearance` above answers "how far is the weight from going over any edge",
+## which is the right question for a stumble and the wrong one for a heel: a body
+## tipping right turns about its right-hand feet, and the fore-and-aft shape of
+## the hull has nothing to say about it. Negative means the weight is already
+## outside that side — the pivot has passed under the line — which is exactly the
+## state a shove leaves and the state `Keel` starts rolling from.
+func flanks(lat: Vector2) -> Vector2:
+	if feet == 0 or not posed:
+		return Vector2.ZERO
+	var right: float = -INF
+	var left: float = -INF
+	for point in _prints:
+		var off: float = (point - centre).dot(lat)
+		right = maxf(right, off)
+		left = maxf(left, -off)
+	return Vector2(right + pad, left + pad)
 
 
 ## How much of its own support the line is inside, as a share of the

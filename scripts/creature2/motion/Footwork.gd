@@ -216,8 +216,9 @@ func tick(delta: float, creature: Creature2, velocity: Vector2, lean: Vector2,
 			# longer support, whatever the foot would prefer, and saying so is
 			# what lets the review see a body going over an edge as one losing
 			# its feet rather than as one mysteriously still standing.
-			var span: Vector2 = f.anchor - _socket(a, f)
-			var rise: float = a.pos[f.limb.parent_node].z - f.anchor_z
+			var seat: Vector3 = a.socket_of(f.limb)
+			var span: Vector2 = f.anchor - Vector2(seat.x, seat.y)
+			var rise: float = seat.z - f.anchor_z
 			var held: float = sqrt(span.length_squared() + rise * rise)
 			if held > creature.body.limb_length(f.fore) * 1.05:
 				f.urgency = Rhythm.DESPERATE
@@ -269,10 +270,13 @@ func tick(delta: float, creature: Creature2, velocity: Vector2, lean: Vector2,
 
 
 ## The armature has just been carried — copy each socket's solved height onto
-## its limb, so the leg is solved from where the body actually holds it.
+## its limb, so the leg is solved from where the body actually holds it. The
+## socket's own height, not the girdle's: on a heeled body they are not the same
+## number, and it is the difference between them that folds one leg up and
+## stretches the other off the ground.
 func perch(a: Armature) -> void:
 	for f in feet:
-		f.limb.socket_rise = a.pos[f.limb.parent_node].z
+		f.limb.socket_rise = a.socket_of(f.limb).z
 
 
 ## A balance demand from the review: the weight is going over the edge in
@@ -437,11 +441,12 @@ func _measure(creature: Creature2) -> void:
 		reach.press = (fore_pair if fore else hind_pair) / total
 
 
-## Where the foot's socket is on the plan — the same arithmetic the armature
-## places the limb with, so the two can never disagree.
+## Where the foot's socket is on the plan — the armature's own answer, not a
+## second copy of the arithmetic, so a heeled body's shortened plan offset is
+## here the moment it is there.
 func _socket(a: Armature, f: Foot) -> Vector2:
-	var p: int = f.limb.parent_node
-	return a.plan(p) + a.perp[p] * (f.limb.side * a.stick_bone[f.limb.sticks[0]])
+	var seat: Vector3 = a.socket_of(f.limb)
+	return Vector2(seat.x, seat.y)
 
 
 ## The foot's comfortable spot: out from its socket by the rest lead, shifted

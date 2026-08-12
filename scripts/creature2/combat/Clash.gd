@@ -10,9 +10,18 @@
 ## dimensions off the posed nodes, so two trunks meet at their real heights —
 ## a leaping body sails over the carcass a walking one is pressed around, a
 ## raised head passes over a low back, and nothing anywhere compares flat
-## silhouettes. The *response* is plan-dominant, as every v2 correction is:
+## silhouettes. The *separation* is plan-dominant, as every v2 correction is:
 ## the push out is horizontal, because the vertical belongs to the carries and
 ## the fall.
+##
+## What is not flattened any more is the contact's **height**. It was measured
+## here in three dimensions and then spent on a plan shove and a yaw lever, and
+## the one thing a height is actually for went with it: a body pressed high on
+## the flank heels over away from the press, one pressed at the knees heels
+## toward it, and the two are the same multiplication with the lever's sign
+## changed. Both bodies take it — mine through the impact `deflect` took out of
+## me, the other through the shove I hand it — at the same point, because it is
+## the same contact.
 ##
 ## Nothing here is a second physics. An intrusion changes the state through
 ## the same seams a wall uses — the armature is shifted whole (feet not moved:
@@ -127,13 +136,16 @@ static func _press_pair(me: Creature2, other: Creature2) -> void:
 		var impact: float = me.travel.impetus.deflect(dir)
 		if impact > 0.0:
 			if not other.armature.collapsed:
-				other.shove(-dir * (impact * (1.0 - share)))
+				other.shove(-dir * (impact * (1.0 - share)), at)
 			# A press off the body's middle swings it — the same glancing
 			# lever the terrain contact turns.
 			var lever: Vector2 = Vector2(at.x, at.y) - me.centre()
 			var torque: float = lever.x * dir.y - lever.y * dir.x
 			me.spin(clampf(torque * impact / maxf(lever.length_squared(), 1.0),
 				-GLANCE_MAX, GLANCE_MAX))
+			# ...and the same press about the other axis: the velocity that
+			# died in me died at a height, and that is what rolls an animal.
+			me.travel.twist(dir * impact, at)
 
 
 ## Closest approach of two 3D segments: [distance, point on a, point on b].

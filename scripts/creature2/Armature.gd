@@ -194,6 +194,22 @@ var driven: bool = false
 var fore_carry: float = 0.0
 var hind_carry: float = 0.0
 
+## How far the body is heeled over about its own fore-and-aft axis, radians,
+## positive with the animal's right side down.
+##
+## Assigned, never integrated — the same law the heights already live under, and
+## for the same reason: `Keel` is the one attitude integrator and `Travel` writes
+## its answer here once a tick, exactly as Footwork writes the carries above.
+## What this file does with it is *express* it — the trunk heels about its own
+## feet, the limb sockets on the low side drop and the high ones lift, and a body
+## that has gone over lies on its flank instead of on its belly. `Contour` reads
+## the same number for its ring frames, so the drawn animal and the solved one
+## cannot disagree about which way up it is.
+var roll: float = 0.0
+## What it was when the limbs were last settled — the tumble's carry is the
+## difference, and nothing else reads it.
+var _rolled: float = 0.0
+
 ## Where the mouth is being carried this tick, world height — NAN when nothing
 ## is reaching and the neck rides its rest carry line. Written by the strike
 ## (a bite at the floor carries the head down to it, one at a tall flank
@@ -222,6 +238,10 @@ var spawn_heading: float = 0.0
 var body_length: float = 0.0
 var fore_stance: float = 0.0
 var hind_stance: float = 0.0
+## How far each girdle carries its sockets out from the spine — the half-base a
+## heel turns about, and the same number the sockets are placed at.
+var fore_half: float = 0.0
+var hind_half: float = 0.0
 var _trunk: Chain
 var _neck: Chain
 var _tail: Chain
@@ -312,6 +332,14 @@ func build(p_spec: BodySpec, at: Vector2, heading: float) -> void:
 	_build_axial()
 	fore_stance = spec.stance_height(true)
 	hind_stance = spec.stance_height(false)
+	fore_half = 0.0
+	hind_half = 0.0
+	for limb in limbs:
+		var out: float = stick_bone[limb.sticks[0]]
+		if limb.parent_node == _trunk.nodes[0]:
+			hind_half = maxf(hind_half, out)
+		else:
+			fore_half = maxf(fore_half, out)
 	fore_carry = fore_stance
 	hind_carry = hind_stance
 	wave_offset.resize(total_nodes)
@@ -398,6 +426,8 @@ func _layout(at: Vector2, heading: float) -> void:
 	collapsed = false
 	driven = false
 	pinned.fill(0)
+	roll = 0.0
+	_rolled = 0.0
 	fore_carry = fore_stance
 	hind_carry = hind_stance
 	head_reach_z = NAN
@@ -446,7 +476,7 @@ func reset() -> void:
 func step(delta: float, surface: float = 0.0) -> void:
 	advance(delta)
 	carry(surface)
-	settle(surface)
+	settle(delta, surface)
 
 
 ## The plan solve: inertia, the wave, relaxation, rest, frames. Everything that
@@ -477,12 +507,17 @@ func carry(surface: float = 0.0) -> void:
 
 
 ## The limbs: placed where the gait put their feet while the body is alive, and
-## integrated from their sockets when nothing is holding them out.
-func settle(surface: float = 0.0) -> void:
+## integrated from their sockets when nothing is holding them out. The tumble is
+## an integration and takes the tick it is integrating over.
+func settle(delta: float, surface: float = 0.0) -> void:
 	if collapsed:
-		_tumble_limbs(surface)
+		_tumble_limbs(delta, surface)
 	else:
 		_place_limbs(surface)
+	# The heel this tick's limbs were solved at. A placed limb re-derives itself
+	# from its socket every tick and does not care; a tumbled one is carried by
+	# the *change*, and it has to be the change since it was last carried.
+	_rolled = roll
 
 
 ## The travelling lateral wave. Kinematic and speed-locked: the phase advances with
@@ -668,18 +703,25 @@ func _compute_frames() -> void:
 # -------------------------------------------------------------- Z channel ----
 
 ## Heights for the axial body. Alive: the trunk is held between its girdles at
-## what the legs deliver, and everything past a girdle is a cantilever — the
-## carry line rises at the chain's carry angle and the droop walk sags below
-## it by the beam law. Dead: nothing is held, and the whole line lies on the
-## surface (plus whatever the fall still owes). Z is assigned, never
-## integrated — the one integrator in the vertical is `fall`.
+## what the legs deliver, heeled over by whatever attitude the body is in, and
+## everything past a girdle is a cantilever — the carry line rises at the chain's
+## carry angle and the droop walk sags below it by the beam law. Dead: nothing is
+## held, and the whole line lies on whichever of its surfaces it came down on
+## (plus whatever the fall still owes). Z is assigned, never integrated — the one
+## integrator in the vertical is `fall`, and the one in the attitude is `Keel`.
 func _solve_heights(surface: float) -> void:
 	var clearance: float = fall.height
 	if collapsed:
+		# A body that went over rests its spine one half-width off the floor,
+		# because it is lying on its flank; one that simply stopped lies on its
+		# belly at nothing. Same statement, and the heel is the whole of the
+		# difference between being knocked down and being killed.
+		var lie: float = absf(sin(roll))
 		for k in axial.size():
 			var i: int = axial[k]
-			pos[i] = Vector3(pos[i].x, pos[i].y, surface + clearance)
-			prev[i] = Vector3(prev[i].x, prev[i].y, surface + clearance)
+			var down: float = surface + clearance + flesh_r[i] * lie
+			pos[i] = Vector3(pos[i].x, pos[i].y, down)
+			prev[i] = Vector3(prev[i].x, prev[i].y, down)
 		# The droop readouts stay honest on a carcass: flat on the floor is
 		# the whole of the sag the carry line implies.
 		_neck.tip_sag = 0.0
@@ -691,8 +733,16 @@ func _solve_heights(surface: float) -> void:
 	# plus a stance: the carried heights are already quoted against whatever each
 	# foot is standing on, so a body half on a ledge is held where its own legs
 	# have it rather than being levelled onto the ground under its middle.
-	var pelvis_z: float = clearance + hind_carry
-	var withers_z: float = clearance + fore_carry
+	#
+	# ...taken through the heel, which is a rotation about the outermost foot on
+	# the side the body is going rather than about its own spine: a tipping animal
+	# turns over its feet, so the back rides *up* over the pivot as it starts to
+	# go and comes down the far side of it. Level, both terms are the stance
+	# exactly and not one number moves.
+	var heel: float = cos(roll)
+	var over: float = absf(sin(roll))
+	var pelvis_z: float = clearance + hind_carry * heel + hind_half * over
+	var withers_z: float = clearance + fore_carry * heel + fore_half * over
 	var n_trunk: int = _trunk.nodes.size()
 	for j in n_trunk:
 		var z: float = lerpf(pelvis_z, withers_z, float(j) / float(n_trunk - 1))
@@ -749,6 +799,25 @@ func _droop_chain(chain: Chain, start_z: float, floor_z: float, tone: float,
 
 # ------------------------------------------------------------------ limbs ----
 
+## Where a limb's socket is: the girdle station carried out to the shoulder or
+## the hip, foreshortened across the plan by the body's heel and dropped — or
+## lifted — by that same angle.
+##
+## The one statement of it. The placement below and the gait's own drift and
+## tear-off measurements all read this, so they cannot come to disagree about
+## where a leg hangs from, and the whole cascade a heel sets off runs through
+## this one function: the low side's socket sinks toward the ground and its leg
+## folds under it, the high side's lifts until the leg cannot reach its anchor
+## any more, that foot is torn off its footing and steps, and the support the
+## next tick measures is narrower on exactly the side the body is falling
+## toward. Nothing had to be told about any of that.
+func socket_of(limb: Chain) -> Vector3:
+	var p: int = limb.parent_node
+	var out: float = limb.side * stick_bone[limb.sticks[0]]
+	var plan: Vector2 = _p2(p) + perp[p] * (out * cos(roll))
+	return Vector3(plan.x, plan.y, pos[p].z - out * sin(roll))
+
+
 ## Places every limb: the socket rides its girdle, the foot reaches for the
 ## ground, and FABRIK folds the bones between the two in the limb's sagittal
 ## plane (x along the body axis from the socket, y absolute height). Bone
@@ -759,8 +828,9 @@ func _droop_chain(chain: Chain, start_z: float, floor_z: float, tone: float,
 func _place_limbs(surface: float) -> void:
 	for limb in limbs:
 		var p: int = limb.parent_node
-		var socket_plan: Vector2 = _p2(p) + perp[p] * (limb.side * stick_bone[limb.sticks[0]])
-		var socket_z: float = pos[p].z
+		var seat: Vector3 = socket_of(limb)
+		var socket_plan := Vector2(seat.x, seat.y)
+		var socket_z: float = seat.z
 		var target_plan: Vector2 = socket_plan + fwd[p] * limb.foot_lead
 		var target_z: float = surface
 		var axis: Vector2 = fwd[p]
@@ -812,21 +882,41 @@ func _repole(limb: Chain, lead: float) -> void:
 ## where the body puts it, and everything below hangs off it, keeps its bone
 ## lengths, folds no further than a limp joint folds, and is dragged wherever
 ## the body takes it. Solved flat on the plan: a dead limb is on the floor.
-func _tumble_limbs(surface: float) -> void:
+##
+## What the heel adds is where "down" is. A creature on its right flank has its
+## belly facing its own left, so its legs are out to the left — and they are
+## there because the body took them there. A frame turning by `droll` carries
+## everything hanging off it through that much of an arc, so the swing is a
+## *displacement*, applied to position and Verlet history together: kinematic,
+## exactly as the lateral wave is, and for the wave's reason. Shift `pos` alone
+## and the integrator takes the carry for real motion and keeps it; make it an
+## acceleration instead and the legs are still falling sideways long after the
+## animal has finished rolling, which draws them rammed straight out. A body
+## that has stopped going over has stopped moving its legs. Belly-down the term
+## is exactly zero and this is the ported step unchanged.
+func _tumble_limbs(delta: float, surface: float) -> void:
 	var fold: float = deg_to_rad(FOLD_MAX_DEG)
 	var floor_z: float = surface + fall.height
+	# How far the ventral direction's own plan shadow moved this tick: a leg
+	# hanging `along` px below its socket swings `along` times this across the
+	# ground, which is the arc and nothing more.
+	var sweep: float = sin(roll) - sin(_rolled)
 	for limb in limbs:
 		var p: int = limb.parent_node
 		var socket: int = limb.nodes[0]
-		var socket_plan: Vector2 = _p2(p) + perp[p] * (limb.side * stick_bone[limb.sticks[0]])
-		pos[socket] = Vector3(socket_plan.x, socket_plan.y, floor_z)
+		var seat: Vector3 = socket_of(limb)
+		pos[socket] = Vector3(seat.x, seat.y, floor_z)
 		prev[socket] = pos[socket]
+		var ventral: Vector2 = -perp[p] * sweep
 
+		var along: float = 0.0
 		for j in range(1, limb.nodes.size()):
 			var i: int = limb.nodes[j]
+			along += limb.bones[j - 1]
 			var vel: Vector2 = (_p2(i) - Vector2(prev[i].x, prev[i].y)) * LIMB_DAMPING
-			prev[i] = Vector3(pos[i].x, pos[i].y, floor_z)
-			_set_p2(i, _p2(i) + vel)
+			var carry: Vector2 = ventral * along
+			prev[i] = Vector3(pos[i].x + carry.x, pos[i].y + carry.y, floor_z)
+			_set_p2(i, _p2(i) + vel + carry)
 			pos[i] = Vector3(pos[i].x, pos[i].y, floor_z)
 
 		# Bones last — the fold limit is a projection that moves a joint, so

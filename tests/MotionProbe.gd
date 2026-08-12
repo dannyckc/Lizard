@@ -420,11 +420,15 @@ func _check_brink(c: Creature2) -> void:
 	worst_bend = maxf(worst_bend, a.worst_bend_excess())
 	worst_bone = maxf(worst_bone, a.worst_bone_error())
 	_check(fell, "shoved past the brink, the body never fell")
+	# Arrived on the plane below, not still up on the mesa. Not "flat at zero"
+	# any more: a body pushed off an edge goes over the edge, and one lying on
+	# its flank rests its spine a body-radius off the floor. The claim is the
+	# height it came down to; the pose it came down in is TippingProbe's.
 	var z: float = a.pos[a.pelvis_index()].z
-	_check(z < 5.0,
+	_check(z < top * 0.33,
 		"went over the brink but never arrived below (pelvis z %.1f)" % z)
-	notes.append("balks %.0f px short of a 60 px brink; shoved over, it falls and arrives below at z %.1f"
-		% [stopped_short, z])
+	notes.append("balks %.0f px short of a 60 px brink; shoved over, it falls and arrives below at z %.1f, heeled %.0f°"
+		% [stopped_short, z, rad_to_deg(absf(c.travel.keel.roll))])
 	main.terrain.clear()
 
 

@@ -129,8 +129,20 @@ func build(at: Vector2, p_heading: float) -> void:
 	ang_vel = 0.0
 	armature.take_head(head_pos)
 	travel.build(self)
+	_measure()
 	vitals = Vitals.new()
 	maw.build(self)
+
+
+## The weight, against the feet, right now. Every tick ends with this (below),
+## and so must every jump the body makes outside a tick: a build, a reset, a
+## revival. The loop's stages read the *last* measurement — that is what a
+## control loop does — so a body that has just been put somewhere else with the
+## old numbers still standing would spend its first tick balancing against feet
+## it no longer has, and the attitude would have it over before Poise caught up.
+func _measure() -> void:
+	poise.pose(armature)
+	poise.stand(armature)
 
 
 func _physics_process(delta: float) -> void:
@@ -174,6 +186,11 @@ func _physics_process(delta: float) -> void:
 	# both positional changes the support has not answered yet.
 	Clash.press(self)
 	maw.tick(delta)
+	# The attitude, once both contact stages have landed whatever they landed:
+	# the body's weight against the feet it is standing on, plus the twists the
+	# presses came with. Before the vertical, because how far over the body is
+	# being held is a term in how high it is being held.
+	travel.tip(delta)
 	# The sockets have moved; now the feet answer — the legs support and
 	# rebalance, and the carries become a measurement of the planted feet.
 	travel.support(delta, ground)
@@ -181,7 +198,7 @@ func _physics_process(delta: float) -> void:
 	# measurement of the feet the support just made.
 	armature.carry(ground)
 	travel.perch()
-	armature.settle(ground)
+	armature.settle(delta, ground)
 
 	poise.pose(armature)
 	poise.stand(armature)
@@ -232,6 +249,7 @@ func reset() -> void:
 	if not armature.collapsed:
 		armature.take_head(head_pos)
 	travel.reset()
+	_measure()
 	contour.pose()
 
 
@@ -244,6 +262,7 @@ func toggle_collapsed() -> void:
 		head_pos = armature.plan(armature.head_index())
 		armature.take_head(head_pos)
 		travel.reset()
+		_measure()
 	else:
 		# The same collapse a death is: the K key stops the heart, because a
 		# body on the floor with nothing wrong with it is not what the
@@ -268,11 +287,17 @@ func simulate(seconds: float) -> void:
 		_physics_process(step)
 
 
-## An external force, arriving as the plan velocity it imparted — the seam a
-## charge, a collision or a knock pushes through. Physics is not overridden:
-## the state changes here, and the loop recovers from it or fails to.
-func shove(dv: Vector2) -> void:
-	travel.impetus.shove(dv)
+## An external force, arriving as the plan velocity it imparted and — where the
+## caller knows it — the place it landed. The seam a charge, a collision or a
+## knock pushes through. Physics is not overridden: the state changes here, and
+## the loop recovers from it or fails to.
+##
+## `at` is a world point in three dimensions, and its height is the whole
+## difference between a body shoved along and a body rolled over: the lever is
+## the contact's height above the animal's own weight. Left out, the push acts
+## through the weight and does nothing to the attitude.
+func shove(dv: Vector2, at: Vector3 = Vector3.INF) -> void:
+	travel.shove(dv, at)
 
 
 ## The rotational half of the same seam: an external twist, as the turn rate

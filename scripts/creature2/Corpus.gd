@@ -99,6 +99,13 @@ var _by_name: Dictionary = {}
 var _derived_rev: int = -1
 var _mass: float = 0.0
 var _com: Vector3 = Vector3.ZERO
+## Second moment about the body's own fore-and-aft axis, taken at the origin —
+## Σ m·(y² + z²). The first moment above says where the weight is; this says how
+## hard it is to roll, and it is the same walk's other accumulator. Kept at the
+## origin rather than at the centre so the walk needs no second pass: the centre
+## is not known until the end, and the parallel-axis shift is one subtraction
+## afterward (`roll_inertia`).
+var _roll_moment: float = 0.0
 var _compartments: Dictionary = {}
 ## Muscle a chain still has against the muscle it was built with, as
 ## (effective, built) volume. What "how much of this leg is answering" is, and
@@ -397,6 +404,25 @@ func com() -> Vector3:
 	return _com
 
 
+## How hard the animal is to roll about its own fore-and-aft axis, through its
+## own centre of mass — the second moment to `com`'s first, off the same walk
+## and the same cells, so mass, weight and inertia can never be three opinions.
+##
+## Parallel axis, once, at the end: the walk accumulates about the body origin
+## because it does not know the centre until it has finished. What it buys is
+## real: a fat flank and a hanging leg are further from the axis than a spine
+## is, so they resist a roll out of proportion to what they weigh, and a body
+## bitten hollow through one side rolls easier because those cells stopped
+## counting — the same argument that made weight a census reading in v1.
+##
+## Body units, as mass is: the roll dynamics divide torque by this and both
+## sides carry the same scale.
+func roll_inertia() -> float:
+	_derive()
+	return maxf(_roll_moment - _mass * (_com.y * _com.y + _com.z * _com.z),
+		MIN_MASS)
+
+
 ## Where the weight is between the girdles: 0 at the pelvis, 1 at the
 ## withers. "Are the legs under the weight" is this fraction against [0, 1].
 func along() -> float:
@@ -693,6 +719,7 @@ func _derive() -> void:
 	var density: Array[float] = BodySchema.DENSITY
 	var total: float = 0.0
 	var moment := Vector3.ZERO
+	var roll_moment: float = 0.0
 	var fore_g: float = 0.0
 	var hind_g: float = 0.0
 	var epaxial: float = 0.0
@@ -728,6 +755,7 @@ func _derive() -> void:
 				* density[BodySchema.Layer.BONE]
 			st_mass += core_mass
 			moment += centre * core_mass
+			roll_moment += (centre.y * centre.y + centre.z * centre.z) * core_mass
 			# The core is bone that is not a cell — it cannot be bitten, so it
 			# stands in both the built body and the standing one.
 			_layer_mass[BodySchema.Layer.BONE] += core_mass
@@ -774,6 +802,7 @@ func _derive() -> void:
 						/ maxf(area2, 0.00001) * shape
 					var at: Vector3 = centre + dir * rbar
 					moment += at * m
+					roll_moment += (at.y * at.y + at.z * at.z) * m
 					st_mass += m
 					_layer_live[layer] += vol
 					_layer_mass[layer] += m
@@ -806,6 +835,7 @@ func _derive() -> void:
 
 	_mass = total
 	_com = moment / maxf(total, MIN_MASS)
+	_roll_moment = roll_moment
 	_compartments = {
 		&"fore_girdle": fore_g,
 		&"hind_girdle": hind_g,

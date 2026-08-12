@@ -295,6 +295,15 @@ func _segments(chain: Armature.Chain, axial_at: Dictionary) -> Array:
 ## touched unless a wound moved it.
 func pose() -> void:
 	refresh()
+	# The body's own attitude, banked once for the whole skin. A heel is a
+	# rotation of every ring's frame in its own cross-section — the right flank
+	# goes down and the back comes round to face that way — which is why a rolled
+	# animal reads as rolled from directly above with no view code involved: the
+	# same sector is simply somewhere else in the world, and the painter, the hit
+	# test and the shadow all read it from here.
+	var heel: float = armature.roll
+	var heel_cos: float = cos(heel)
+	var heel_sin: float = sin(heel)
 	for bi in bands.size():
 		var band: Band = bands[bi]
 		var last: int = band.first + band.count - 1
@@ -338,6 +347,12 @@ func pose() -> void:
 			# Dorsal completes the frame, read along the chain's own heading —
 			# which is why the tail's back is up and not down.
 			var up: Vector3 = (axis * band.sense).cross(lat)
+			if heel_sin != 0.0:
+				# ...and the heel turns the pair in their own plane, which keeps
+				# them orthonormal and keeps both square to the axis.
+				var heeled: Vector3 = lat * heel_cos - up * heel_sin
+				up = lat * heel_sin + up * heel_cos
+				lat = heeled
 			ring_axis[r] = axis
 			ring_lat[r] = lat
 			ring_up[r] = up
