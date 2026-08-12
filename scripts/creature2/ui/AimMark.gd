@@ -54,17 +54,21 @@ func show_aim(who: Creature2, camera_zoom: float) -> void:
 ##
 ## A ring where the jaws can be got onto it and a cross where they cannot, so
 ## "out of reach" is something the player sees before pressing the button rather
-## than something they infer from a bite that did nothing. And where the marker
-## has had to stop short of what was selected, a faint line runs on to it: the
-## ring is where this animal's mouth gets to, and the far end of that line is
-## what it was pointed at.
+## than something they infer from a bite that did nothing.
+##
+## The cross is the whole of what is drawn out there. There used to be more — the
+## marker brought in to the edge of the purse with a dotted line running on to
+## what had actually been pointed at — and it was drawing a selection that did
+## not exist: `Quarry.resolve` drops a target the moment it leaves the zone, so
+## outside the arc there is no body, no ring traced round it and nothing for a
+## line to join. What is left is a position and a refusal, which is exactly what
+## the player needs to know and exactly what the animal will do about it.
 func _draw() -> void:
 	if actor == null or actor.aim == null or not actor.alive:
 		return
 	var pick: Quarry.Pick = actor.aim
 	var reachable: bool = actor.can_reach_aim()
 	var scale: float = 1.0 / zoom
-	var selected: Quarry.Pick = pick.selected()
 	# Where the marker actually goes: off the surface, toward the viewer. The
 	# picture carries height up the screen, so "off the surface" is up it — and
 	# the lift is a fixed handful of screen pixels rather than anything derived,
@@ -78,10 +82,7 @@ func _draw() -> void:
 	var tint := Color(ink, 0.85 if reachable else 0.7)
 
 	_draw_bite_zone(scale)
-	if selected != pick:
-		draw_dashed_line(over, selected.seen, Color(_ink_over(selected), 0.35),
-			scale, 5.0 * scale, true)
-	_draw_target_shape(selected, scale)
+	_draw_target_shape(pick, scale)
 	# The drop: where the thing is in the picture against where it stands on the
 	# floor, which is the one reading that says how high up it is.
 	if pick.seen.distance_squared_to(pick.at) > 1.0:
@@ -110,37 +111,45 @@ func _ink_over(pick: Quarry.Pick) -> Color:
 
 ## The ground this mouth can be brought to bear on, drawn once, faintly.
 ##
-## Not a decoration and not a radius somebody chose: it is the maw's own purse
-## read out loud. The radius is `Maw.plan_reach` at the height being aimed at —
-## the arm plus the throw plus the gape's grab, less whatever the height costs —
-## which is the same number the strike is priced against, and it is swept either
-## side of where the head is pointing by exactly the cone a strike must address
-## its target inside. So the shape a player learns to read here is the shape that
-## decides every bite, and the two cannot drift apart.
+## Not a decoration and not a radius somebody chose: it is the maw's own reach
+## read out loud, and every term in it is the animal's rather than the drawing's.
 ##
-## Centred on the withers, because that is where the purse is centred: the neck
-## is an arc rooted at the shoulders, and anchoring the drawing anywhere else
-## would make it shrink and swell as the animal dipped its head.
+##   * **the radius** is `Maw.plan_reach` at the height being aimed at — the neck
+##     and head's own arm, plus the lunge the stance can still pay for, plus the
+##     grab of the gape, less whatever the height costs. Height spent is distance
+##     lost, so the arc genuinely closes in as the cursor climbs a tall animal.
+##   * **the sweep** is `Maw.window` — the neck's available rotation intersected
+##     with the cone a body can face. On this cat the neck is the tighter of the
+##     two, so the arc is narrower than the frontal cone by some eighteen degrees
+##     a side; when the heading runs ahead of the back the cone clips one edge
+##     and the arc goes lopsided, which is the truth about an animal mid-turn.
+##   * **the centre** is `Maw.purse_root`, the withers the neck pivots on.
+##
+## Which is to say the arc is not a picture *of* the reach test, it is drawn from
+## the reach test's own two numbers — so the shape a player learns to read here
+## is the shape that decides every bite, and the two cannot drift apart. Redrawn
+## every frame off the live pose, so it turns with the body, swings with the
+## heading, shrinks as the animal's weight goes out past its feet and opens again
+## when it gathers.
 func _draw_bite_zone(scale: float) -> void:
 	var maw: Maw = actor.maw
 	if maw == null or actor.armature == null:
 		return
-	var arm: float = maw.plan_reach(actor.aim.height)
-	if arm <= 1.0:
+	# Zero where the cursor has climbed above or dropped below the band the mouth
+	# can be carried through at all, and then there is no zone to draw: the arc
+	# vanishing is the honest picture of a bite that has no plan reach left.
+	var radius: float = maw.plan_reach(actor.aim.height)
+	if radius <= 1.0:
 		return
-	var root: Vector2 = actor.armature.plan(actor.armature.withers_index())
-	# Swept about the *body's* facing rather than the head's, because that is
-	# what the refusal is measured against: a mouth does not bite what is behind
-	# the animal wearing it, however far round the neck has turned.
-	var facing: float = actor.heading
+	var root: Vector2 = maw.purse_root()
+	var span: Vector2 = maw.window()
 	var edge := Color(INK, 0.18)
-	draw_arc(root, arm, facing - Maw.ADDRESS_CONE, facing + Maw.ADDRESS_CONE,
-		36, edge, scale, true)
+	draw_arc(root, radius, span.x, span.y, 36, edge, scale, true)
 	# The two ends of the sweep, so the arc reads as a region the mouth covers
 	# rather than as a stray curve lying on the ground.
-	for side in [-Maw.ADDRESS_CONE, Maw.ADDRESS_CONE]:
-		var out: Vector2 = Vector2.RIGHT.rotated(facing + side)
-		draw_line(root + out * (arm * 0.82), root + out * arm, edge, scale, true)
+	for side in [span.x, span.y]:
+		var out: Vector2 = Vector2.RIGHT.rotated(side)
+		draw_line(root + out * (radius * 0.82), root + out * radius, edge, scale, true)
 
 
 ## The outline of whatever is targeted, traced over the thing itself.

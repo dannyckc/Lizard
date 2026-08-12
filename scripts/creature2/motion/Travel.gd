@@ -35,6 +35,23 @@ extends RefCounted
 ## rather than the head leading it round an arc.
 const STANDSTILL: float = 0.30
 
+## How much of the give in a back a turn steers with, before the species' own
+## `spine_freedom` takes its share of that.
+##
+## A and D are a steer: the front of the animal goes first and the rest follows
+## it, so the back is held bent into the turn for as long as the turn lasts —
+## the fore girdle leads, the sockets hanging off it lead with it, the hips come
+## after. That lead is what makes the input read as a body changing direction
+## rather than as a sprite being rotated, and it is the whole of the difference.
+##
+## A *share* of what the back will physically give, and a fifth of it, because
+## those are two different numbers: `Armature.back_sweep` is what the joints
+## allow before the anatomy is violated — a carcass folding double — and this is
+## the working range a muscle steers inside. Asked for the whole of it, the
+## animal whips its own forehand out from under its weight and falls over, which
+## is exactly what it did.
+const STEER_BEND: float = 0.20
+
 ## How much of the true pendulum lean (thrust over gravity, at the weight's
 ## own height) the support is asked to express. Under one because the legs
 ## also brace — a body that leaned the whole term would be forever stepping.
@@ -61,6 +78,26 @@ const FALL_PATIENCE: float = 0.35
 ## rad/s — a cap on the lever arithmetic, not a second physics.
 const GLANCE_MAX: float = 2.0
 
+## How much harder a body sheds a turn nobody asked for than it takes one up, as
+## a multiple of the species' own `turn_responsiveness`.
+##
+## The two are one muscle and emphatically not one act, and this whole constant
+## exists because they were written as one line and it was wrong. Taking up a
+## turn is deliberate: the animal decides to change direction, and the weight in
+## how gradually the rate arrives is the good half of what A and D should feel
+## like. Shedding a spin a rock put into your shoulder is not deliberate at all —
+## it is bracing, and an animal braces as hard as it has legs to brace with.
+##
+## Eased at one rate, the two trade off against each other and there is no
+## setting that serves both: quick enough to stay pointed at what hit you and the
+## controls are a switch; weighted enough to feel like a body and a glancing
+## contact sends the animal round an obstacle it was walking into, still at full
+## cruise, because the yaw the contact opened never died. That was a real
+## regression and this is what it cost — one number, and the admission that the
+## body's own turning and the turning done to it are separate quantities that
+## add (`_asked` and `_spin`).
+const BRACE: float = 2.5
+
 ## What the review calls a real deficit: a walking body is out over its own
 ## edge several times a second (Poise's old law), so rescue asks for the line
 ## a share of the support past the boundary, held for longer than a beat.
@@ -79,6 +116,14 @@ var footwork: Footwork = Footwork.new()
 var lean: Vector2 = Vector2.ZERO
 ## How sunk the body is carried, 0..1 — the charge and the landing absorb.
 var crouch: float = 0.0
+
+## The two halves of `creature.ang_vel`, which is their sum and is written from
+## nowhere else: the turn the animal is taking (eased onto the hand's ask at the
+## body's own `turn_responsiveness`) and the turn the world has put into it (a
+## contact, a charge, a blow — shed at `BRACE` times that). Separate because they
+## are separate acts; see `BRACE`.
+var _asked: float = 0.0
+var _spin: float = 0.0
 
 var _charge: float = 0.0
 var _charging: bool = false
@@ -102,6 +147,8 @@ func reset() -> void:
 	keel.reset()
 	lean = Vector2.ZERO
 	crouch = 0.0
+	_asked = 0.0
+	_spin = 0.0
 	_charge = 0.0
 	_charging = false
 	_absorb = 0.0
@@ -158,29 +205,91 @@ func steer(delta: float, ground: float) -> void:
 	# The turn: a rate the anatomy and the pace gate, eased at the body's own
 	# responsiveness. Airborne there is nothing to turn against.
 	#
-	# Two inputs, and the hand has the last word: the head is asked for only as
-	# much of the turn as the player is not already taking by hand, so A and D
-	# still mean exactly what they meant and an animal walking forward with
-	# nothing held goes where it is looking. See `Gaze.lead`, which is where the
-	# whole of that is decided and bounded.
+	# One input, and it is the hand. A and D are the only thing in the game that
+	# writes `heading`, so where the body is pointed is somewhere the player put
+	# it and nothing else can quietly move it — the look does not steer (see
+	# `Gaze`), and neither does anything the cursor is resting on.
 	var falloff: float = lerpf(1.0, spec.turn_speed_falloff,
 		clampf(creature.speed_norm, 0.0, 1.0))
-	var by_hand: float = clampf(cmd.turn, -1.0, 1.0)
-	var demand: float = clampf(by_hand
-		+ creature.gaze.lead() * (1.0 - absf(by_hand)), -1.0, 1.0)
-	var want: float = 0.0
+	var demand: float = clampf(cmd.turn, -1.0, 1.0)
+	# The rate the animal's own legs turn it at — the ceiling on the heading and
+	# the ruler the steer's bend is quoted against.
+	var rate: float = 0.0
 	if not airborne:
-		want = demand * deg_to_rad(spec.turn_speed_deg) \
+		rate = deg_to_rad(spec.turn_speed_deg) \
 			* creature.attitude.active.agility * falloff
-	creature.ang_vel = lerpf(creature.ang_vel, want,
-		1.0 - exp(-spec.turn_responsiveness * delta))
-	var dtheta: float = creature.ang_vel * delta
-	creature.heading = wrapf(creature.heading + dtheta, -PI, PI)
+	# The animal's own turn, eased on and eased off at the weight the species
+	# carries — and the world's contribution shed under it, faster, because
+	# holding your line against a knock is not the same act as choosing to turn.
+	# They add, and their sum is the only thing anything else ever reads.
+	_asked = lerpf(_asked, demand * rate, 1.0 - exp(-spec.turn_responsiveness * delta))
+	_spin *= exp(-spec.turn_responsiveness * BRACE * delta)
+	creature.ang_vel = _asked + _spin
+	creature.heading = wrapf(creature.heading + creature.ang_vel * delta, -PI, PI)
 	var dir: Vector2 = Vector2.RIGHT.rotated(creature.heading)
 
 	# The middle of the loop: desire → demand → delivery → the real velocity.
 	impetus.propel(delta, dir * ask, dir, creature.attitude.active.drive,
 		footwork.grip, airborne)
+
+	var dtheta: float = creature.ang_vel * delta
+	# Which end is leading. A body going forward is *pulled*: the head is the
+	# pinned point, the chain follows it, and that is the whole of a head-driven
+	# solve. A body going backwards is *pushed* — there is nothing out in front
+	# of it to follow — so the animal is carried bodily and the head rides on it
+	# rather than being towed back through its own neck. Towing it was what
+	# jack-knifed a reversing animal: the pin was being driven into the chain, the
+	# trunk had to go somewhere, and it went sideways until the creature had spun
+	# itself round without one degree of it reaching the heading.
+	var pushed: float = clampf(-impetus.velocity.dot(dir)
+		/ maxf(STANDSTILL * creature.cruise_speed(), 1.0), 0.0, 1.0)
+
+	# The steer, first, because it changes the shape everything below is measured
+	# on: the back held bent into the turn, front ahead of hips, for as long as
+	# the animal is turning. This is what A and D *are* — the thing that moves
+	# first is the front of the body and the hindquarters come after it — and the
+	# rotation below is only how far round the animal has got.
+	#
+	# A posture, and that is the whole of why it works. Spending a share of every
+	# tick's turn on the bend instead makes the bend an integral: it deepens for
+	# as long as the key is down, and a back gives a great deal (`back_sweep` is
+	# most of a circle) before the anatomy complains — so what that gave was an
+	# animal folded double with its forehand swung out from under its own weight,
+	# on the floor inside a second. Held to a lead instead it builds as the turn
+	# starts, holds while it lasts, comes out as it ends, and costs the turn rate
+	# nothing at all: the body still comes round exactly as fast as it ever did.
+	#
+	# Suppressed while the body is being pushed, because a body going backwards
+	# is not being steered from the front — it turns as one piece.
+	#
+	# And it only ever bends the back *into* the turn, never out of one — it
+	# supplies the lead the body has not already got, and takes none away. A spine
+	# is bent by a dozen things that are not this: the arc it is travelling, its
+	# own lateral wave, a wall it was pressed by. Written as "hold the back at
+	# exactly this angle" the steer spends every tick undoing them, and that
+	# version was worse than no steer at all — a walking turn that had been a wide
+	# arc became the animal knotting itself up on the spot, because the fold was
+	# fighting the very bend the turn was producing. It is also why nothing here
+	# has to know how fast the animal is going: a body already carving an arc is
+	# bent past the lead by the arc, and the steer quietly has nothing to add.
+	# Coming out of a bend needs nobody's help either; the solve straightens a
+	# driven body on its own.
+	var bend: float = wrapf(a.fwd[a.withers_index()].angle()
+		- a.fwd[a.pelvis_index()].angle(), -PI, PI)
+	var into: float = _steer_lead(a) * (1.0 - pushed) \
+		* clampf(creature.ang_vel / maxf(rate, 0.0001), -1.0, 1.0)
+	var add: float = 0.0
+	if absf(into) > 0.0001 and (bend * into <= 0.0 or absf(bend) < absf(into)):
+		add = clampf(into - bend, -rate * delta, rate * delta)
+	var head_was: Vector2 = a.plan(a.head_index())
+	a.steer_front(add)
+	# What the steer did to the head, which the drive has to keep: the head is
+	# re-placed from `head_pos` a few lines below and would otherwise be dragged
+	# straight back off the bend the neck and shoulders have just taken, leaving
+	# the chain solving against a head that disagrees with its own body. Added to
+	# `head_pos` rather than read off the node, because the node also carries
+	# whatever `Gaze` swept the neck to last tick and a look is not a movement.
+	var swung: Vector2 = a.plan(a.head_index()) - head_was
 
 	# The body shift. The head is swung by the turn and carried by the actual
 	# velocity; at a standstill the followers are walked round too, because
@@ -192,9 +301,13 @@ func steer(delta: float, ground: float) -> void:
 	var mid: float = spec.neck_length + spec.head_offset + spec.trunk_length * 0.5
 	var pivot: Vector2 = a.station_behind_head(
 		lerpf(spec.turn_pivot, mid, stand_share))
-	creature.head_pos = pivot + (creature.head_pos - pivot).rotated(dtheta) \
-		+ impetus.velocity * delta
-	a.rotate_followers(pivot, dtheta * stand_share)
+	var carry: Vector2 = impetus.velocity * delta
+	creature.head_pos = pivot \
+		+ (creature.head_pos + swung - pivot).rotated(dtheta) + carry
+	a.rotate_followers(pivot, dtheta * maxf(stand_share, pushed))
+	# ...and going backwards the whole animal goes with it.
+	if pushed > 0.0:
+		a.shift(carry * pushed)
 
 	# ...and the lean the support will be asked to express: the true pendulum
 	# term — delivered thrust over gravity at the weight's own height — with
@@ -258,8 +371,8 @@ func collide() -> void:
 	var at: Vector2 = a.plan(deep)
 	var lever: Vector2 = at - a.centre()
 	var torque: float = lever.x * n.y - lever.y * n.x
-	creature.ang_vel += clampf(torque * impact / maxf(lever.length_squared(), 1.0),
-		-GLANCE_MAX, GLANCE_MAX)
+	spin(clampf(torque * impact / maxf(lever.length_squared(), 1.0),
+		-GLANCE_MAX, GLANCE_MAX))
 	# ...and the same press taken at the height it happened, which is the half
 	# the yaw lever above has never been able to say.
 	twist(n * impact, a.pos[deep])
@@ -293,6 +406,16 @@ func tip(delta: float) -> void:
 		_stance_hold(footwork.planted(), count) if footed else 0.0,
 		(a.fore_half + a.hind_half) * 0.5, impetus.power, a.collapsed)
 	a.roll = keel.roll
+
+
+## The most the front of this animal may be steered ahead of its own hips,
+## radians — the working range of the back, which is a share of what the joints
+## would physically allow (`STEER_BEND`) scaled by how much of its turning this
+## species does with its spine at all. A stiff-backed animal steers with its
+## feet, a supple one folds into the turn, and neither number was authored for
+## the species.
+func _steer_lead(a: Armature) -> float:
+	return maxf(a.back_sweep() * STEER_BEND * creature.body.spine_freedom, 0.0001)
 
 
 ## How much of its righting a body has with `down` of its `all` feet on the
@@ -428,11 +551,16 @@ func _jump(delta: float, a: Armature, spec: BodySpec, cmd: Creature2.Command,
 	crouch = maxf(_charge * 0.8, _absorb)
 
 
-## An external twist, arriving as the turn rate it caused — the rotational
-## half of Impetus.shove, for charges and glancing blows. The same easing that
-## serves the intent brings the rate back to the ask: recovery from a spin is
-## the loop noticing the body is turning faster than anything asked.
+## An external twist, arriving as the turn rate it caused — the rotational half
+## of Impetus.shove, for charges and glancing blows.
+##
+## Booked against `_spin` rather than against the animal's own turn, so the body
+## sheds it at the brace rate while whatever the hand is asking for goes on being
+## asked for underneath. Added to the published rate on the spot, because the
+## contact stages run after the heading has been integrated and a blow that
+## waited a tick to be felt would be a blow the body walked through.
 func spin(dw: float) -> void:
+	_spin += dw
 	creature.ang_vel += dw
 
 
@@ -486,6 +614,8 @@ func _publish(dir: Vector2) -> void:
 	creature.speed = impetus.speed()
 	creature.speed_norm = creature.speed / creature.cruise_speed()
 	if creature.armature.collapsed:
+		_asked = 0.0
+		_spin = 0.0
 		creature.ang_vel = 0.0
 		creature.speed = 0.0
 		creature.speed_norm = 0.0

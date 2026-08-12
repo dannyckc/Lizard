@@ -26,11 +26,6 @@ extends RefCounted
 ## one thing a low predator can reach on a tall one — effectively unclickable.
 const SLACK: float = 12.0
 
-## How much of its own reach a marker brought in from beyond it is placed at.
-## Just inside, so the point the player is offered is one the body then agrees
-## it can get to rather than one sitting exactly on the boundary of the test.
-const CLAMP_MARGIN: float = 0.99
-
 ## English for the four limb keys, so a readout names a leg the way a person
 ## would. Nothing branches on it.
 const SIDES := {&"FL": "front left", &"FR": "front right",
@@ -57,25 +52,22 @@ class Pick extends RefCounted:
 	## means anything.
 	var score: float = 0.0
 
-	## What the cursor was actually on, when this marker had to be brought in to
-	## the limit of the animal's reach. Null on a marker sitting on the thing
-	## itself, which is every pick that has not been through `resolve`.
+	## Whether the cursor has left the bite zone — outside the arc's sweep, past
+	## its radius, or above or below the band the mouth can be carried through.
 	##
-	## Kept rather than discarded because the two are different facts and the
-	## player needs both: *this* is as far as you get, and *that* is what you
-	## were pointing at.
-	var beyond: Pick = null
-
-	## What was selected, whether or not the marker had to stop short of it.
-	func selected() -> Pick:
-		return beyond if beyond != null else self
+	## Set by `resolve` and by nothing else, and it is the *only* thing that
+	## survives being out there: the target itself is dropped on the spot (see
+	## `_outside`), so nothing downstream is holding a body it has been told the
+	## jaws cannot get to. What is left is a position and this flag, which is
+	## exactly enough for the mark to say "not from here" and no more.
+	var outside: bool = false
 
 	## The same, for a person: "rear left leg" rather than "limb HL". Read by the
 	## on-screen readout, which is the one place this is shown to somebody who
 	## has not read the source.
 	func name_of() -> String:
 		if creature == null or contact.is_empty():
-			return kind
+			return "out of reach" if outside else kind
 		var band: StringName = contact["band"]
 		match band:
 			BodySchema.TRUNK:
@@ -132,54 +124,55 @@ static func pick(tree: SceneTree, cursor: Vector2, actor: Creature2 = null,
 	return best
 
 
-## The same pick, answered for the animal about to act on it: can these jaws be
-## got onto that, and if they cannot get that far, how far do they get?
+## The same pick, answered for the animal about to act on it: are these jaws
+## something that can be got onto that at all?
 ##
-## Only the horizontal refusal is a distance along the aim line, so only it can
-## be answered by moving along one. Something directly overhead is not nearer
-## for being approached, and the honest answer there is the marker staying on it
-## and reading as out of reach.
+## One question with one answer, and the answer is the bite zone — `Maw.window`
+## for the sweep and `Maw.plan_reach` for the radius, which is the same pair the
+## arc on screen is drawn from. Inside it the pick stands; outside it the pick is
+## stripped down to a position and a refusal.
+##
+## Dropping the target rather than keeping it is the point, and it is a reversal
+## of what this used to do. It used to bring the marker in to the edge of the
+## purse and keep what had been pointed at hanging off it on a dotted line — the
+## correct *fact* ("that is what you wanted, this is as far as you get") offered
+## as a target the player then had every reason to think was selected. It was
+## not: the strike does not go to that flesh, the highlight was tracing a body
+## the jaws could not touch, and the line between the two was the game showing a
+## relationship it had no intention of honouring. A target you cannot bite is not
+## a target. It goes.
 static func resolve(found: Pick, actor: Creature2) -> Pick:
 	if found == null or actor == null or actor.maw == null:
 		return found
 	if found.creature != null:
-		var reach: Dictionary = actor.maw.aim(found.creature, found.at)
-		if bool(reach.get("ok", false)) or String(reach.get("why", "")) != "far":
+		if bool(actor.maw.aim(found.creature, found.at).get("ok", false)):
 			return found
-		return _short_of(found, actor)
-	# Bare ground is asked the same question by the same purse — a place on the
-	# floor inside the arc is a place the mouth can be put, and one beyond it is
-	# a lunge in that direction that lands short.
-	var root: Vector2 = actor.armature.plan(actor.armature.withers_index())
-	if root.distance_to(found.at) <= actor.maw.plan_reach(found.height):
+		return _outside(found)
+	# Bare ground is asked the same question by the same zone — a place on the
+	# floor inside the arc is a place the mouth can be put.
+	var toward: Vector2 = found.at - actor.maw.purse_root()
+	if toward.length() <= actor.maw.plan_reach(found.height) \
+			and (toward.length() <= 0.5 or actor.maw.addressable(toward.angle())):
 		return found
-	return _short_of(found, actor)
+	return _outside(found)
 
 
-## The furthest place along the aim line this animal can put its mouth.
+## The same place, with the target taken off it.
 ##
-## Not a refusal and not a nudge: it is the honest answer to "you have pointed
-## past what you can reach", which is that the action happens toward the target
-## and lands short of it. The point is on the floor because that is what is out
-## there — the thing selected is somewhere else — and it carries the height of
-## whatever the ground is doing at that distance, so an animal told to strike at
-## a rise strikes at the rise rather than at the plane under it.
-##
-## The arc it is placed on is the maw's own purse, centred where the purse is
-## centred (the withers the neck pivots on) rather than at the mouth, so the
-## place the player is offered and the place the strike agrees to go are read
-## off one number.
-static func _short_of(found: Pick, actor: Creature2) -> Pick:
-	var a: Armature = actor.armature
-	var root: Vector2 = a.plan(a.withers_index())
-	var toward: Vector2 = found.at - root
-	if toward.length_squared() < 0.0001:
-		return found
-	var ground: float = actor.ground_at(found.at)
-	var limit: Pick = _ground(root + toward.normalized()
-		* (actor.maw.plan_reach(ground) * CLAMP_MARGIN), actor)
-	limit.beyond = found
-	return limit
+## Left exactly where the cursor is rather than snapped anywhere: the player is
+## pointing at a spot, and the honest thing to say about that spot is that it is
+## out of the animal's reach — said *there*, on the thing they are pointing at,
+## rather than by a marker that has wandered off somewhere else. What is gone is
+## the selection: no body, no address on it, so no highlight traced round flesh
+## that cannot be bitten and nothing for a line to be drawn to.
+static func _outside(found: Pick) -> Pick:
+	var bare := Pick.new()
+	bare.kind = found.kind
+	bare.at = found.at
+	bare.seen = found.seen
+	bare.height = found.height
+	bare.outside = true
+	return bare
 
 
 ## The floor, which is what a cursor is pointing at when it is pointing at

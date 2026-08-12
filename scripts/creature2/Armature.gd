@@ -1149,6 +1149,103 @@ func rotate_followers(pivot: Vector2, angle: float) -> void:
 		look_offset[i] = look_offset[i].rotated(angle)
 
 
+## Steers the front of the body round the back of it — what A and D ask for.
+##
+## `angle` is shared out over the joints of the back, hips first, and each one
+## swings everything ahead of itself about itself. Three things follow from that
+## and they are the whole of why the steer is written this way rather than as a
+## rotation:
+##
+##   * **it is a bend, not a spin.** The hindquarters are not turned at all. The
+##     fore girdle goes round, the sockets hanging off it go with it, and what
+##     sits between the two ends is a curved back — which is what an animal
+##     changing direction actually looks like, and what `rotate_followers` (the
+##     whole body, one angle) can never look like however it is paced.
+##   * **it costs the back its bend, and the back has a finite amount.** Each
+##     joint is held to the room it has left under its own graded limit, so the
+##     steer runs out where the anatomy runs out and the return value is what was
+##     actually delivered. Past that the hips have to come round the only way
+##     hips ever do — the feet move, which is the gait's business and takes the
+##     gait's time.
+##   * **it preserves the solve.** Rotating a sub-chain about its own joint keeps
+##     every stick length the relaxation just fixed, and `prev` goes with `pos`
+##     so nothing about it reads as velocity. A graded *rotation* would have done
+##     none of that: grade a rigid turn by station and every stick between two
+##     stations is manufactured slightly wrong, every tick, for the solver to
+##     find and argue with.
+func steer_front(angle: float) -> float:
+	if absf(angle) < 0.000001 or collapsed or _trunk == null or _neck == null:
+		return 0.0
+	var n: int = axial.size()
+	var first: int = n - _neck.nodes.size() - _trunk.nodes.size()
+	var last: int = n - _neck.nodes.size() - 1
+	if first < 1 or last <= first:
+		return 0.0
+	var demand: float = angle
+	var spent: float = 0.0
+	var left: int = last - first
+	for j in range(first, last):
+		if absf(demand) < 0.000001:
+			break
+		var incoming: Vector2 = _p2(axial[j]) - _p2(axial[j - 1])
+		var outgoing: Vector2 = _p2(axial[j + 1]) - _p2(axial[j])
+		left -= 1
+		if incoming.length_squared() < 0.000001 or outgoing.length_squared() < 0.000001:
+			continue
+		# The joint's own room: how much further it may fold given how far the
+		# solve has already folded it, in the direction being asked for.
+		var limit: float = axial_bend[j - 1]
+		var bent: float = wrapf(outgoing.angle() - incoming.angle(), -PI, PI)
+		var turn: float = clampf(demand / float(left + 1), -limit - bent, limit - bent)
+		if absf(turn) < 0.000001:
+			continue
+		_carry_after(j, turn)
+		demand -= turn
+		spent += turn
+	return spent
+
+
+## Rotates everything on the axial line ahead of vertex `j` about it — position,
+## Verlet history and any standing look together. Constraint-neutral: every
+## stick keeps its length, and because `prev` turns with `pos` the swing injects
+## no velocity for the integrator to find next tick.
+##
+## The same geometry as `_swing_after`, and deliberately not the same function:
+## that one is the *look*, and it books what it moves into `look_offset` so it
+## can be taken straight back off before the next solve. This is the body
+## genuinely moving, and it must survive.
+func _carry_after(j: int, angle: float) -> void:
+	var pivot: Vector2 = _p2(axial[j])
+	for k in range(j + 1, axial.size()):
+		var i: int = axial[k]
+		var here: Vector2 = pivot + (_p2(i) - pivot).rotated(angle)
+		var was: Vector2 = pivot + (Vector2(prev[i].x, prev[i].y) - pivot).rotated(angle)
+		_set_p2(i, here)
+		prev[i] = Vector3(was.x, was.y, prev[i].z)
+		# The standing look turns with the node it is carrying, or taking it back
+		# off next tick would take it off along the old bearing.
+		look_offset[i] = look_offset[i].rotated(angle)
+
+
+## The most the back can carry its own front end round, radians either way — the
+## sum of what the trunk's joints will give, and the exact counterpart of
+## `neck_sweep`. How far a heading may honestly run ahead of the shoulders it is
+## supposed to describe: past this the body is not turning, it is being claimed
+## to have turned.
+func back_sweep() -> float:
+	if _trunk == null or _neck == null:
+		return 0.0
+	var n: int = axial.size()
+	var first: int = n - _neck.nodes.size() - _trunk.nodes.size()
+	var last: int = n - _neck.nodes.size() - 1
+	if first < 1 or last <= first:
+		return 0.0
+	var total: float = 0.0
+	for j in range(first, last):
+		total += axial_bend[j - 1]
+	return total
+
+
 ## A point on the axial line `behind` px back from the head, measured along the
 ## chain rather than through it — a body bent into a turn has its hips somewhere
 ## off the straight line and the shortcut would report a shorter animal the harder

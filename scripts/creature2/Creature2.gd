@@ -415,10 +415,19 @@ func _update_aim() -> void:
 
 
 ## Whether the jaws could be got onto whatever this creature is pointed at.
+##
 ## True with nothing selected, because an animal with no target has not been
 ## refused anything — a bite thrown at nothing in particular is still a bite.
+## False for a pointer the world has already found to be outside the bite zone,
+## which is the one case where there is no target *because* it could not be
+## reached, and reading that as "nothing was refused" would draw the refusal as
+## a hit.
 func can_reach_aim() -> bool:
-	return aim == null or aim.creature == null or bool(aim_reach.get("ok", false))
+	if aim == null:
+		return true
+	if aim.outside:
+		return false
+	return aim.creature == null or bool(aim_reach.get("ok", false))
 
 
 # ------------------------------------------------------------------ bite ----

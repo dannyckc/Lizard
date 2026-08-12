@@ -147,8 +147,38 @@ class ChainSpec extends RefCounted:
 
 @export var move_speed: float = 88.0
 @export var sprint_multiplier: float = 1.85
-@export var turn_speed_deg: float = 210.0
-@export var turn_responsiveness: float = 14.0
+## The ceiling on how fast the body comes round, deg/s, before the stance's
+## `agility` and the pace's `turn_speed_falloff` have taken their share of it.
+##
+## A tenth of what v1 authored and a bit — v1 said 210, which on the crouched
+## carriage this animal stands in (agility 1.30) came out at **264 deg/s** on the
+## spot: three quarters of a revolution a second, from one key. Nothing about
+## that reads as an animal. It also outran the body it was describing, because
+## `heading` is an open-loop integral and the trunk can only follow it as fast as
+## the feet will walk it round: at cruise the two ended up 49° apart, so the
+## logical facing every contact, gait and aim in the game quotes was pointing
+## somewhere the drawn creature was not.
+##
+## 90 is where the second problem goes away, which is why it is 90 rather than
+## some other slower number. The body tracks its own heading through both the
+## standstill pivot (113 deg/s) and the walking arc (57 deg/s), and what lag is
+## left has the sign of the *steer* — the front of the animal ahead of the back
+## of it, which is what turning looks like — instead of the heading running away
+## from the whole body. Slow enough to be deliberate, and honest at last.
+@export var turn_speed_deg: float = 90.0
+## How quickly the turn rate answers the key, as an easing rate: the body reaches
+## its turn over about `1 / this` seconds and gives it up again as gradually.
+##
+## Weight, and the only place the controls have any. v1's 14 is a 71 ms constant,
+## which is a body with no rotational inertia at all — the turn is simply on
+## while the key is down and off when it is not, and tapping A and D alternately
+## makes the animal shudder rather than pick a way to go. At 6 the rate builds
+## over about a sixth of a second and coasts out over the same, so a stab at the
+## key is a lean rather than a jerk, a held key is a committed turn, and letting
+## go is an animal settling out of one. It cannot overshoot — the ease only ever
+## approaches the rate the key is asking for — so what this buys is entirely the
+## absence of sudden changes.
+@export var turn_responsiveness: float = 6.0
 @export var turn_speed_falloff: float = 0.50
 @export var reverse_speed_factor: float = 0.60
 ## How far behind the head the body turns about, px.

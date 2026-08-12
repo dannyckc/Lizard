@@ -15,8 +15,13 @@
 ##   * **the pattern comes out of the speed** — steps emerge from support
 ##     drift: near-continuous support strolling, diagonal company at a trot,
 ##     more air at a sprint. Nothing selects a gait by name.
-##   * **it turns** — on the move as an arc, at a standstill by stepping the
-##     body round; anatomy holds through both.
+##   * **it turns, and it turns by steering** — on the move as an arc, at a
+##     standstill by stepping the body round, and either way the front of the
+##     animal leads the back of it: A and D bend the body into the turn rather
+##     than rotating it whole. Anatomy holds through both.
+##   * **backwards is backwards** — the reverse walks the body away from what it
+##     is facing, on its feet, while it goes on facing it: no turning round to
+##     set off, and no crabbing sideways.
 ##   * **the world is anticipated** — a ledge on the path is climbed by feet
 ##     landing on the higher surface and each girdle riding its own feet, with
 ##     no ledge-case anywhere in the mover — and the body starts carrying
@@ -74,6 +79,7 @@ func _process(_delta: float) -> bool:
 	_check_no_creep(creature)
 	_check_pattern(creature)
 	_check_turns(creature)
+	_check_reverse(creature)
 	_check_ledge(creature)
 	_check_wall(creature)
 	_check_wall_shove(creature)
@@ -284,8 +290,63 @@ func _check_turns(c: Creature2) -> void:
 	_check(wander < 18.0, "the standstill turn wandered %.1f px off the spot" % wander)
 	_check(int(seen["lifts"]) >= 2,
 		"the body turned %.2f rad on planted feet — %d steps" % [swung, int(seen["lifts"])])
-	notes.append("turns: %.2f rad on the spot in 2 s, %d steps, %.1f px of wander"
-		% [swung, int(seen["lifts"]), wander])
+	# ...and it is a *steer*: the front of the animal is ahead of the back of it
+	# the whole way round. A body that turned as one rigid piece would read
+	# exactly zero here, which is what it used to read.
+	var lead: float = absf(wrapf(c.armature.fwd[c.armature.withers_index()].angle()
+		- c.armature.fwd[c.armature.pelvis_index()].angle(), -PI, PI))
+	_check(lead > deg_to_rad(8.0),
+		"the standstill turn led with %.1f° of back — the animal turned as one piece"
+			% rad_to_deg(lead))
+	_check(lead <= c.travel._steer_lead(c.armature) + 0.05,
+		"the back was bent %.1f° into the turn, past the %.1f° it steers with"
+			% [rad_to_deg(lead), rad_to_deg(c.travel._steer_lead(c.armature))])
+	notes.append("turns: %.2f rad on the spot in 2 s, %d steps, %.1f px of wander, front leading by %.0f°"
+		% [swung, int(seen["lifts"]), wander, rad_to_deg(lead)])
+
+
+## Backwards is backwards: the animal walks away from what it is facing, and it
+## keeps facing it.
+##
+## Three separate things, and the old mover failed all three at once because it
+## towed the pinned head back through its own neck: the trunk buckled sideways,
+## the body ended up pointing the way it had come, and the animal had travelled
+## a fifth of what it should have while doing it.
+func _check_reverse(c: Creature2) -> void:
+	_calm(c)
+	var faced: float = c.heading
+	var facing: Vector2 = Vector2.RIGHT.rotated(faced)
+	var start: Vector2 = c.centre()
+	c.command.throttle = -1.0
+	_tick(c, 150)
+	c.command.throttle = 0.0
+	var went: Vector2 = c.centre() - start
+	var a: Armature = c.armature
+	var back: float = (a.plan(a.withers_index()) - a.plan(a.pelvis_index())).angle()
+
+	_check(absf(wrapf(c.heading - faced, -PI, PI)) < 0.08,
+		"backing up swung the heading %.1f°" % rad_to_deg(wrapf(c.heading - faced, -PI, PI)))
+	_check(absf(wrapf(back - faced, -PI, PI)) < 0.35,
+		"the animal backed up with its body turned %.0f° off the way it set out facing"
+			% rad_to_deg(wrapf(back - faced, -PI, PI)))
+	_check(went.dot(facing) < -60.0,
+		"2.5 s of reverse carried the body %.1f px backwards" % -went.dot(facing))
+	# ...and backwards, not sideways: a jack-knifed body crabs.
+	_check(absf(went.dot(Vector2(-facing.y, facing.x))) < absf(went.dot(facing)) * 0.25,
+		"the reverse wandered %.1f px sideways over %.1f px back"
+			% [absf(went.dot(Vector2(-facing.y, facing.x))), -went.dot(facing)])
+	# The reverse is gaited, not slid: the feet carry it.
+	_calm(c)
+	c.command.throttle = -1.0
+	var seen_back: Dictionary = _observe(c, 150)
+	c.command.throttle = 0.0
+	_check(int(seen_back["lifts"]) >= 4,
+		"the animal reversed on %d steps — it was being slid, not walked"
+			% int(seen_back["lifts"]))
+	notes.append("reverse: %.0f px back and %.1f px aside in 2.5 s, heading held to %.1f°, body %.0f° off, %d steps"
+		% [-went.dot(facing), absf(went.dot(Vector2(-facing.y, facing.x))),
+			rad_to_deg(absf(wrapf(c.heading - faced, -PI, PI))),
+			rad_to_deg(absf(wrapf(back - faced, -PI, PI))), int(seen_back["lifts"])])
 
 
 func _check_ledge(c: Creature2) -> void:

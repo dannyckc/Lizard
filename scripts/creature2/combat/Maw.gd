@@ -48,10 +48,37 @@ const CHEW_TIME: float = 0.9
 ## and a grab that cannot cover that could never bite what it is touching.
 const GRAB: float = 1.8
 
-## What the support is worth as throw: px of lunge per px of the plumb line's
-## clearance inside the feet. A body already out over its edge throws short —
-## the lunge is the body moving, and a body that cannot move cannot lunge.
-const THROW_SUPPORT: float = 2.5
+## What a lunge may spend of the ground its legs can still catch it on.
+##
+## The throw is the body moving out over its own feet, so what pays for it is
+## how much ground is left to put a foot down on: `Attitude.plan_reach` is how
+## far out from a socket a leg reaches, and `Travel.review` calls the body
+## falling once its weight hangs past `Travel.FALL_SHARE` of that. A strike is
+## allowed this much of the same ground — under the review's own line, because
+## a lunge that spent the whole catch would have nothing left to stop with, and
+## the recovery is as much a part of a strike as the throw.
+##
+## Deliberately a share of a *stance* rather than of `Poise.clearance`, which is
+## what this used to read. Clearance is an instant — how far the weight is from
+## the edge of the polygon its planted toes make right now — and that polygon
+## collapses to a line every time the gait has two feet off the ground, which is
+## most of a walk. Read raw it made the throw, and every marker drawn off it,
+## swing better than two to one at the stride's own frequency while nothing about
+## the animal's ability to lunge had changed at all. What a body can throw is a
+## property of the stance it is in; where its weight happens to be inside that
+## stance this millisecond is `_hanging` below, and it is only ever a deduction.
+const THROW_CATCH: float = 0.75
+
+## Over how long the weight's hanging is worth reading, seconds.
+##
+## The deduction is real — a body already out past its feet has that much less
+## catch left to spend — but it is spent by a strike that takes THROW_TIME to
+## throw and RECOVER_TIME to come back, so what it is priced against is the
+## ground the legs have been giving up over about that long, not the pixel they
+## are short in this frame. A genuinely teetering body stays out for longer than
+## the window and throws short; a walking one passes through and does not.
+const GATHER: float = 0.45
+
 ## The most body a lunge may be, as a share of the trunk.
 const THROW_SHARE: float = 0.45
 
@@ -68,6 +95,10 @@ const TOW: float = 0.35
 
 ## The frontal cone a strike must address its target inside, radians off the
 ## heading. A mouth does not bite what is behind the animal wearing it.
+##
+## One half of the window (see `window`) and never read on its own: the other
+## half is the neck's, and which of the two binds depends on the animal and on
+## how far its heading has run ahead of its own back.
 const ADDRESS_CONE: float = 1.75
 
 
@@ -95,6 +126,11 @@ var _chew: float = 0.0
 ## What has gone down the throat, census mass units — the feeding readout.
 var belly: float = 0.0
 
+## How far past its own feet this body has been carrying its weight lately, px
+## — `Poise.overhang` over `GATHER` rather than in the instant. The only thing
+## between the stance's catch and what a strike may spend of it.
+var _hanging: float = 0.0
+
 
 func build(p_creature: Creature2) -> void:
 	creature = p_creature
@@ -103,6 +139,10 @@ func build(p_creature: Creature2) -> void:
 	state = IDLE
 	_timer = 0.0
 	belly = 0.0
+	# Seeded, not started from nothing: a body is built square on its feet and
+	# has the throw that stance pays for from its first tick, or the first half
+	# second of every life would be spent unable to lunge.
+	_hanging = _spilling()
 
 
 # ------------------------------------------------------------------- reach ----
@@ -123,14 +163,90 @@ func muzzle_width() -> float:
 	return creature.body.skull_radius * 0.8
 
 
+## Where the purse is centred: the withers, on the plan.
+##
+## Not the mouth. The neck is an arc rooted at the shoulders, so the shoulders
+## are the one point every part of the reach is measured from — the radius
+## (`plan_reach`), the bearing (`window`) and the height band all quote it, and
+## anchoring any of them at the head instead would make the zone shrink, swell
+## and swing as the animal glanced about.
+func purse_root() -> Vector2:
+	var a: Armature = creature.armature
+	return a.plan(a.withers_index())
+
+
+## The angular window a bite can be addressed inside: two absolute bearings, the
+## clockwise edge in `x` and the anticlockwise one in `y`, unwrapped so the pair
+## draws and clamps without further arithmetic.
+##
+## The **intersection** of two independent limits, and it has to be an
+## intersection because either one alone is a lie about the animal:
+##
+##   * **the neck's own field.** The jaws are on the end of a neck, and a mouth
+##     cannot be brought to bear where the neck cannot carry the head — the
+##     cervical joints' own sum, under the look's cap, which is exactly the field
+##     `Gaze` gives the cursor (`Gaze.radius`). Centred on the shoulders' own
+##     forward, because that is the joint the sweep is measured from; a
+##     short-necked animal has a narrow bite window for the same reason it has a
+##     narrow field of view, and nobody had to write down that it does.
+##   * **the frontal cone.** `ADDRESS_CONE` off the heading. A mouth does not
+##     bite what is behind the animal wearing it, however far round the neck has
+##     turned.
+##
+## Which of the two binds is not fixed. On the reference cat the neck is the
+## tighter of them by some eighteen degrees a side, so most of what this returns
+## is anatomy; but the heading is an integral that can run ahead of the back it
+## describes, and when it does the cone swings off-centre and clips one side of
+## the field while leaving the other alone. The window is asymmetric then, and
+## honestly so — the animal really can reach further round the inside of its own
+## turn than the outside of it.
+##
+## The one authority on the question. `aim` refuses on it, `strike` redirects a
+## snap thrown outside it, `Quarry` drops a target that leaves it and `AimMark`
+## draws it: a target the player is shown inside the arc is reachable because
+## the reach test and the arc are the same two numbers.
+func window() -> Vector2:
+	var a: Armature = creature.armature
+	var datum: float = a.fwd[a.withers_index()].angle()
+	var neck: float = creature.gaze.radius() if creature.gaze != null \
+		else minf(Gaze.MAX_ANGLE, a.neck_sweep())
+	# Both limits carried into the shoulders' frame, where the neck's is centred.
+	var off: float = wrapf(creature.heading - datum, -PI, PI)
+	var lo: float = maxf(-neck, off - ADDRESS_CONE)
+	var hi: float = minf(neck, off + ADDRESS_CONE)
+	if lo > hi:
+		# The two do not overlap at all — a stiff-necked body whose heading has
+		# run right round off its own back. There is no region, and the honest
+		# answer is the single bearing nearest both: the animal can bite straight
+		# where its neck will let it point, and nowhere else.
+		var only: float = clampf(off, -neck, neck)
+		lo = only
+		hi = only
+	return Vector2(datum + lo, datum + hi)
+
+
+## Whether a bearing — measured from `purse_root`, like everything else about the
+## reach — is one these jaws can be brought round onto.
+func addressable(bearing: float) -> bool:
+	var w: Vector2 = window()
+	return absf(wrapf(bearing - (w.x + w.y) * 0.5, -PI, PI)) \
+		<= (w.y - w.x) * 0.5 + 0.0001
+
+
 ## Whether a strike from here can meet flesh at `at` on `target`, and what it
 ## would meet — the preview, free of commitment, re-askable every tick.
 ##
 ## Verticals gate before horizontals: a contact the neck cannot be carried to
 ## is refused before any distance is measured, so a short animal pointed at a
-## tall back never chases it. Then the purse: the gap is measured through 3D
-## from the resting jaw, against the throw the support can deliver plus the
-## grab of the gape — one circle, so height spent is distance lost.
+## tall back never chases it. Then the bearing, against `window` — what the neck
+## can carry the head round onto, inside the cone a body can face. Then the
+## purse: the gap is measured through 3D from the withers, against the arm plus
+## the throw the support can deliver plus the grab of the gape — one circle, so
+## height spent is distance lost.
+##
+## Three refusals and one region: `window` gives the arc's two edges and
+## `plan_reach` its radius, which between them are the whole of what `AimMark`
+## draws. Nothing here is a second opinion about reach.
 func aim(target: Creature2, at: Vector2) -> Dictionary:
 	var out: Dictionary = {"ok": false, "why": "nothing"}
 	if target == null or target == creature or target.contour == null:
@@ -146,17 +262,20 @@ func aim(target: Creature2, at: Vector2) -> Dictionary:
 	# of its own arm above the withers — outside that band the flesh is simply
 	# not addressable, however close it stands on the plan.
 	var a: Armature = creature.armature
-	var withers_z: float = a.pos[a.withers_index()].z
-	var arm: float = creature.body.neck_length + creature.body.head_offset
-	var floor_z: float = a.fall.floor_height
-	if flesh.z > withers_z + arm * RISE_SHARE or flesh.z < floor_z - 1.0:
+	var withers: Vector3 = a.pos[a.withers_index()]
+	if not carriable(flesh.z):
 		out["why"] = "height"
 		return out
 
-	# The address: a strike faces what it bites.
-	var toward: Vector2 = Vector2(flesh.x - jaw.x, flesh.y - jaw.y)
-	if toward.length() > 0.5 and absf(wrapf(toward.angle() - creature.heading,
-			-PI, PI)) > ADDRESS_CONE:
+	# The address: a strike faces what it bites, and it can only face it as far
+	# round as the neck goes. Measured from the shoulders the neck is rooted on
+	# rather than from the mouth, because that is where the window is centred and
+	# where its radius is measured — so the region this refuses on and the region
+	# the mark draws are one shape, not two that have to be kept in step. From the
+	# mouth it would be neither: the head is already craned somewhere, and the
+	# bearing off a swung jaw says nothing about what the neck has left.
+	var toward: Vector2 = Vector2(flesh.x - withers.x, flesh.y - withers.y)
+	if toward.length() > 0.5 and not addressable(toward.angle()):
 		out["why"] = "behind"
 		return out
 
@@ -164,12 +283,10 @@ func aim(target: Creature2, at: Vector2) -> Dictionary:
 	# distance are one radius — the same horizontal gap that connects at
 	# mouth height is refused onto the floor, because the floor is further
 	# through 3D from the shoulder the arm pivots on.
-	var withers: Vector3 = a.pos[a.withers_index()]
 	var gap: float = withers.distance_to(flesh)
-	var reach_px: float = arm + throw_cap() + muzzle_reach() * GRAB
 	out["gap"] = gap
-	out["arm"] = arm
-	if gap > reach_px:
+	out["arm"] = arm()
+	if gap > reach():
 		out["why"] = "far"
 		return out
 
@@ -177,13 +294,34 @@ func aim(target: Creature2, at: Vector2) -> Dictionary:
 	return out
 
 
-## The most lunge the body has in it right now: the support's clearance,
-## spent as throw. Measured, never authored — a crouched, square body throws
-## far and a teetering one hardly at all.
+## The most lunge the body has in it right now: the ground its legs can still
+## catch it on, less what its weight is already hanging out over. Measured,
+## never authored — a crouched, square body throws far and a teetering one
+## hardly at all.
 func throw_cap() -> float:
+	return clampf(catch() * THROW_CATCH - _hanging, 0.0,
+		creature.body.trunk_length * THROW_SHARE)
+
+
+## How far out from its sockets this body can put a foot down, px — the stance's
+## own plan reach, and the same number `Travel.review` measures a fall against.
+## A property of the posture and the leg, so it holds still while the animal
+## walks: it is what makes the purse a shape a player can learn.
+func catch() -> float:
+	return creature.attitude.active.plan_reach(creature.body.hind_leg_length)
+
+
+## How far the weight is out past the planted feet this instant. Read once a
+## tick into `_hanging` and nowhere else, so the budget a marker is drawn from
+## and the budget a strike is granted are one number.
+##
+## A body with nothing planted at all is hanging over everything — there is no
+## catch left when there is no leg down to catch with.
+func _spilling() -> float:
 	var p: Poise = creature.poise
-	var footing: float = maxf(p.clearance, 0.0) if p.posed and p.feet > 0 else 0.0
-	return minf(footing * THROW_SUPPORT, creature.body.trunk_length * THROW_SHARE)
+	if p == null or not p.posed or creature.armature.collapsed:
+		return 0.0
+	return catch() if p.feet <= 0 else p.overhang.length()
 
 
 ## The same purse read the other way round: how far out *on the plan* this mouth
@@ -194,13 +332,48 @@ func throw_cap() -> float:
 ## because the neck is an arc rooted at the withers and this is that arc's
 ## radius with the vertical taken out of it — which is why the same gap that
 ## connects at mouth level is refused onto the floor.
+##
+## Zero outside the band the mouth can be carried through at all, so the arc a
+## player is shown does not promise ground at a height the jaws are refused for
+## being at. The two gates are separate facts about a neck — how far round it
+## goes and how far up and down — and a plan view can only draw the one, so the
+## other is folded into the radius rather than left silently out of the picture.
 func plan_reach(z: float) -> float:
 	var a: Armature = creature.armature
 	var withers: Vector3 = a.pos[a.withers_index()]
-	var arm: float = creature.body.neck_length + creature.body.head_offset
-	var radius: float = arm + throw_cap() + muzzle_reach() * GRAB
+	if not carriable(z):
+		return 0.0
 	var rise: float = z - withers.z
+	var radius: float = reach()
 	return sqrt(maxf(radius * radius - rise * rise, 0.0))
+
+
+## The neck and the head hung off it — how far this mouth reaches with no lunge
+## in it at all, and the length the vertical band is a share of.
+func arm() -> float:
+	return creature.body.neck_length + creature.body.head_offset
+
+
+## Whether the mouth can be carried to a height at all: down to the floor and up
+## a share of its own arm above the withers. The vertical half of the reach, and
+## the one part of it a plan view cannot draw.
+func carriable(z: float) -> bool:
+	var a: Armature = creature.armature
+	return z <= a.pos[a.withers_index()].z + arm() * RISE_SHARE \
+		and z >= a.fall.floor_height - 1.0
+
+
+## The purse's radius through 3D, before the height is taken out of it — the
+## whole of what a bite can span from the shoulder it pivots on.
+##
+## Three terms, and each of them is a thing the animal has rather than a number
+## somebody picked: the **arm** it already reaches with (the neck and the head
+## hung off it), the **lunge** its stance can still pay for (`throw_cap`, the
+## ground its legs can catch it on less what its weight is already hanging over),
+## and the **gape** — how far past the tooth arc flesh may sit and the closing
+## still find it.
+func reach() -> float:
+	return arm() + throw_cap() + muzzle_reach() * GRAB
 
 
 ## Whether the jaws are shut on anything at all.
@@ -254,9 +427,23 @@ func strike(target: Creature2, at: Vector2, latch: bool = false) -> bool:
 		# At air, the whole of what this body can throw itself, aimed at the
 		# point rather than past it — and floored at a twelfth of it, so even a
 		# point-blank snap reads as a strike rather than as a twitch.
+		#
+		# Unless the point is somewhere these jaws could never have been brought
+		# round onto, and then the lunge goes where the head is already pointing
+		# instead. A click outside the window is not a refusal — a body that has
+		# committed to a strike goes — but neither is it an instruction the neck
+		# can carry out, and throwing the animal sideways at something it is not
+		# facing would land the jaws somewhere the head never went. Where the mouth
+		# points is where the bite goes, which is also the one place the player can
+		# see it is going, because the head is drawn.
 		_target = null
-		_at = Vector3(at.x, at.y, jaw.z)
-		_throw = clampf(Vector2(at.x - jaw.x, at.y - jaw.y).length(), cap / 12.0, cap)
+		var toward := Vector2(at.x - jaw.x, at.y - jaw.y)
+		if toward.length() > 0.5 \
+				and not addressable((at - purse_root()).angle()):
+			toward = creature.armature.fwd[creature.armature.head_index()] \
+				* toward.length()
+		_at = Vector3(jaw.x + toward.x, jaw.y + toward.y, jaw.z)
+		_throw = clampf(toward.length(), cap / 12.0, cap)
 	_latch = latch
 	_thrown = 0.0
 	state = THROW
@@ -269,6 +456,11 @@ func strike(target: Creature2, at: Vector2, latch: bool = false) -> bool:
 ## exactly as a wall's push is, and the support drift it opens is how the legs
 ## learn the body moved.
 func tick(delta: float) -> void:
+	# The footing first, and unconditionally: what the body can throw is a
+	# property of how it has been standing, not of what its jaws happen to be
+	# doing, and a mouth that only re-read it between strikes would price the
+	# next one off the last one's stance.
+	_hanging = lerpf(_hanging, _spilling(), 1.0 - exp(-delta / GATHER))
 	if creature.armature.collapsed:
 		release()
 		state = IDLE

@@ -1,29 +1,36 @@
 ## Where the animal is looking — the cursor half of the controls, ported from
 ## v1's head look (`Creature._update_head_look` / `_head_lead`).
 ##
-## The mouse gives one bearing and it does two jobs, which is the whole of the
-## control scheme:
+## The mouse gives one bearing and it does exactly one job: the head is carried
+## round to face what the pointer is on, as long as the pointer is inside the
+## animal's own field — `radius`, the cervical joints' own sum, so a short-necked
+## animal has a narrow field and nobody had to write down that it does. Not the
+## body: the look is an articulation of the neck alone (`Armature.look`,
+## expressed in `Armature._aim_neck`), bounded by those same joints. Past the
+## radius the pointer stops reaching the head altogether and the neck simply
+## keeps the bearing it was left on — see `tick`, where that one line is the
+## aiming rule.
 ##
-##   * **the view.** The head is carried round to face what the pointer is on.
-##     Not the body: the look is an articulation of the neck alone (`Armature.
-##     look`, expressed in `Armature._aim_neck`), bounded by the cervical joints'
-##     own bend limits, so a short-necked animal cannot look behind itself and
-##     nobody had to write down that it cannot.
-##   * **the steering.** A walking animal goes where it is looking. The head
-##     reaches the bearing first because a neck is quicker than four legs, and
-##     the body comes round after it — `lead`, a proportional demand handed to
-##     the ordinary turn, so A and D still mean exactly what they meant and the
-##     hand always has the last word.
+## **The hand steers and the eye does not**, and the separation is total: nothing
+## in this file returns a demand, and `Travel` asks it for none. The mouse aims
+## the head; A and D turn the body; W and S move it. There was a `lead` here once
+## — a walking animal turning to follow its own gaze — and it was a good idea
+## about animals and a bad one about controls. Two things wanted the heading, the
+## player only had authority over one of them, and every glance across the lab to
+## look at something quietly re-aimed the walk. An animal you steer with the
+## keyboard while looking somewhere else with the mouse is one you can actually
+## drive; the cost is that a creature no longer turns to follow its eyes on its
+## own, and the player turns it, which is the point of a control.
 ##
-## What it is *not* is a second aim. The strike is thrown along this same look
-## (`Maw`), the jaws arrive where the head is pointing, and a latched mouth is
-## aimed by what it is holding rather than by the cursor — so where the head
-## points, where the teeth arrive and where the damage lands are one bearing.
+## What the look is *not* is a second aim. The strike is thrown along this same
+## look (`Maw`), the jaws arrive where the head is pointing, and a latched mouth
+## is aimed by what it is holding rather than by the cursor — so where the head
+## points, where the teeth arrive and where the damage lands are one bearing. The
+## bite *window* is this same neck's range, read by `Maw.window`.
 ##
 ## Deliberately separate from `heading`: the body direction the mover, the gait
 ## and the contacts all read is written in one place (`Travel`) and is never
-## rewritten from here. All these two have between them is the one signed demand
-## `lead` returns.
+## rewritten from here. These two share nothing at all.
 class_name Gaze
 extends RefCounted
 
@@ -32,19 +39,30 @@ extends RefCounted
 ## instead of it — the neck's own joints usually run out first.
 const MAX_ANGLE: float = deg_to_rad(82.0)
 const RESPONSE: float = 14.0
+
+## The fastest a neck sweeps a head about, rad/s.
+##
+## The ease alone is proportional, so a small correction is gentle and a large
+## one is violent: a cursor crossing from one shoulder to the other asks for the
+## whole field at once and `RESPONSE` pays it out at better than two thousand
+## degrees a second, which is a cut rather than a turn. This is the muscle's own
+## ceiling under it — quick enough that no ordinary aim ever meets it, and the
+## whole-field swing becomes a fast head turn instead of a snap.
+const SWEEP_RATE: float = deg_to_rad(480.0)
+
+## How far past the radius a pointer already being watched may stray before the
+## head lets go of it. Hysteresis on the *release* only, so the radius stays the
+## honest thing — what the neck can deliver is what the head will follow — and
+## all this buys is that a pointer wandering along the edge of the field is
+## either being watched or is not, rather than being taken up and dropped every
+## other frame. The head hardly shows it either way (it is at the limit in both
+## states); everything reading `tracking` does.
+const RELEASE: float = deg_to_rad(4.0)
+
 ## Inside this much of the neck root the pointer has no bearing worth tracking,
 ## px². A cursor resting on the animal's own shoulders would otherwise swing the
 ## head through a semicircle for a pixel of mouse movement.
 const DEADZONE_SQ: float = 36.0
-
-## How far off its own heading the head has to be carried before the body asks
-## for the whole of its turn rate to follow it.
-##
-## A proportional band rather than a switch: inside it the body eases round,
-## past it the animal is turning as hard as it can — and because the head keeps
-## tracking the cursor throughout, the two converge rather than the head
-## snapping back when the heading arrives.
-const LEAD_BAND: float = deg_to_rad(30.0)
 
 ## Below this much residual offset a head that has stopped tracking anything has
 ## arrived home, and the neck is handed back to the solver.
@@ -57,8 +75,20 @@ var creature: Creature2
 ## every tick and read by the strike, the steering and the marks.
 var angle: float = 0.0
 var dir: Vector2 = Vector2.RIGHT
-## Whether the head is currently tracking anything at all.
-var engaged: bool = false
+## Whether the cursor is saying anything at all — over the world rather than
+## over a drawer, and not on flesh the jaws already have.
+var addressed: bool = false
+## Whether the cursor is inside the animal's field and therefore driving the
+## head. False both when nothing is being pointed at and when what is being
+## pointed at is somewhere this neck cannot look; `addressed` separates those.
+var tracking: bool = false
+## Where the pointer is relative to the shoulders, radians, NAN for nothing —
+## the ask, before the neck has had its say. Kept because the *body* still
+## answers it after the head has run out (see `lead`).
+var ask: float = NAN
+## How far off its shoulders the head is actually being carried, radians. What
+## the neck delivered, which past the radius is the radius.
+var craned: float = 0.0
 
 
 func build(p_creature: Creature2) -> void:
@@ -71,9 +101,25 @@ func build(p_creature: Creature2) -> void:
 func reset() -> void:
 	angle = creature.heading if creature != null else 0.0
 	dir = Vector2.RIGHT.rotated(angle)
-	engaged = false
+	addressed = false
+	tracking = false
+	ask = NAN
+	craned = 0.0
 	if creature != null and creature.armature != null:
 		creature.armature.look = NAN
+
+
+## The aiming radius: how far off its own shoulders this animal can look, either
+## way. The cervical joints' own sum, under the cap — so a long-necked animal
+## has a wide field and a short-necked one has to turn its body, and neither
+## number was authored for the species.
+##
+## The one radius the whole control scheme is stated in: inside it the pointer
+## has the head, outside it the pointer has the body instead.
+func radius() -> float:
+	if creature == null or creature.armature == null:
+		return MAX_ANGLE
+	return minf(MAX_ANGLE, creature.armature.neck_sweep())
 
 
 ## One tick of looking.
@@ -86,7 +132,9 @@ func reset() -> void:
 func tick(delta: float) -> void:
 	var a: Armature = creature.armature
 	if a == null or a.collapsed:
-		engaged = false
+		addressed = false
+		tracking = false
+		ask = NAN
 		if a != null:
 			a.look = NAN
 		return
@@ -95,9 +143,9 @@ func tick(delta: float) -> void:
 	# genuinely hangs off the withers, so clamping against the heading would let
 	# the first cervical joint exceed the limit the solver holds it to.
 	var datum: float = a.fwd[a.withers_index()].angle()
-	var most: float = minf(MAX_ANGLE, a.neck_sweep())
-	var desired: float = datum
+	var most: float = radius()
 
+	ask = NAN
 	var at: Vector2 = _addressed()
 	if at.x < INF:
 		# Measured from the joint the head is carried on, and not from the
@@ -107,19 +155,53 @@ func tick(delta: float) -> void:
 		# off it, and a latched animal would chew its way out of its own grip.
 		var toward: Vector2 = at - a.plan(a.nape_index())
 		if toward.length_squared() > DEADZONE_SQ:
-			desired = datum + clampf(wrapf(toward.angle() - datum, -PI, PI), -most, most)
+			ask = wrapf(toward.angle() - datum, -PI, PI)
+	addressed = not is_nan(ask)
+	# The radius, and it is the whole of the aiming rule. Inside it the pointer
+	# has the head; outside it the pointer has nothing to say about the head at
+	# all, and the neck is left holding the bearing the cursor last gave it.
+	#
+	# The alternative — pinning the head at the limit and letting it go on
+	# following a cursor it cannot reach — is what a clamp does if you let it,
+	# and it is wrong in the one place it shows: a pointer crossing the line
+	# dead astern flips the sign of the ask, and the head whips from one
+	# shoulder to the other for a pixel of mouse movement. Holding is also the
+	# truthful pose, because an animal that cannot see a thing is not looking at
+	# it.
+	tracking = addressed and absf(ask) <= (most + RELEASE if tracking else most)
 
-	angle = lerp_angle(angle, desired, 1.0 - exp(-RESPONSE * delta))
-	# Clamped again after the ease, because the neck may itself have swung
-	# sharply this tick while the head angle was still coming round.
-	var off: float = clampf(wrapf(angle - datum, -PI, PI), -most, most)
-	angle = wrapf(datum + off, -PI, PI)
+	if tracking:
+		_sweep(datum + ask, delta)
+	elif not addressed:
+		# Nothing is being pointed at: the head comes home to its own shoulders.
+		_sweep(datum, delta)
+	# ...and the third case is not written, because it is the point: a head that
+	# has been left off the cursor is eased nowhere. It keeps the bearing it had,
+	# and the only thing that ever moves it again is the clamp below, carrying it
+	# round when the body turns far enough to take it out of the neck's range —
+	# which is a drag rather than a snap, because nothing is re-aimed.
+
+	# Clamped after the ease, because the neck may itself have swung sharply this
+	# tick while the head angle was still coming round.
+	craned = clampf(wrapf(angle - datum, -PI, PI), -most, most)
+	angle = wrapf(datum + craned, -PI, PI)
 	dir = Vector2.RIGHT.rotated(angle)
 	# ...and the neck is given back the moment the head has nothing to track and
 	# has come home, so a body nobody is pointing bends the way the solve bends
-	# it rather than being held straight by a look at nothing.
-	engaged = at.x < INF
-	a.look = angle if engaged or absf(off) > SETTLED else NAN
+	# it rather than being held straight by a look at nothing. A head merely
+	# holding still is very much being held: it keeps the neck.
+	a.look = angle if addressed or absf(craned) > SETTLED else NAN
+
+
+## Carries the head toward a bearing: eased, and then held to what a neck can
+## actually sweep in the time. Both, in that order — the ease is what makes an
+## aim settle instead of arriving, and the rate is what keeps the arrival from
+## being instantaneous when the ease has a whole field to pay out at once.
+func _sweep(toward: float, delta: float) -> void:
+	var eased: float = lerp_angle(angle, toward, 1.0 - exp(-RESPONSE * delta))
+	var step: float = wrapf(eased - angle, -PI, PI)
+	angle = wrapf(angle + clampf(step, -SWEEP_RATE * delta, SWEEP_RATE * delta),
+		-PI, PI)
 
 
 ## Where the head is being pointed, in the plan, or INF for nothing.
@@ -156,25 +238,3 @@ func _addressed() -> Vector2:
 		return creature.aim_contact
 	var cmd: Creature2.Command = creature.command
 	return cmd.aim_world if cmd.aim_active else Vector2.INF
-
-
-## How much of its turn the body is asking for to follow its own head, −1..1.
-##
-## Bounded three ways, and every one of them is a statement about what walking
-## after your own eyes is:
-##
-##   * only going forward. A creature backing away from something keeps looking
-##     at it, and steering by that would drive it in a circle round the thing it
-##     is retreating from.
-##   * only while it is actually being pointed. With no cursor the head settles
-##     onto the neck, the lead is nothing, and every existing caller — the
-##     probes, the carcass, whatever drives a creature next — behaves exactly as
-##     it did before there was a mouse.
-##   * scaled by the throttle, because it is a property of the walking. Half a
-##     throttle is half a commitment and turns half as hard for it.
-func lead() -> float:
-	var cmd: Creature2.Command = creature.command
-	if not engaged or cmd.throttle <= 0.0:
-		return 0.0
-	var off: float = wrapf(angle - creature.heading, -PI, PI)
-	return clampf(off / LEAD_BAND, -1.0, 1.0) * clampf(cmd.throttle, 0.0, 1.0)
