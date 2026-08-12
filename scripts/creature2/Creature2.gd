@@ -125,12 +125,24 @@ func _physics_process(delta: float) -> void:
 
 	var ground: float = _ground_under(armature.centre(), body.trunk_length * 0.25)
 
+	# The fall's floor, in the frame the carries quote: while the body is
+	# airborne the ground it is over may not be the ground it took off from,
+	# and the arc has to end on the one it is actually over. Grounded (or
+	# collapsed, where the carries say nothing) the feet are the frame and the
+	# floor is simply 0.
+	var fall_floor: float = 0.0
+	if airborne and not armature.collapsed:
+		fall_floor = ground - travel.footwork.frame_ground()
+
 	# The loop's front half: intent → velocity → the head is carried. Before the
 	# plan solve, so the chain follows this tick's motion.
 	travel.steer(delta, ground)
 	if not armature.collapsed:
 		armature.take_head(head_pos)
-	armature.advance(delta, ground, speed_norm, attitude.active.wave_gain)
+	armature.advance(delta, fall_floor, speed_norm, attitude.active.wave_gain)
+	# The world's solid half presses back: an intrusion changes the body's real
+	# position, velocity and turn rate, and everything after reacts to that.
+	travel.collide()
 	# The sockets have moved; now the feet answer — the legs support and
 	# rebalance, and the carries become a measurement of the planted feet.
 	travel.support(delta, ground)
@@ -206,6 +218,12 @@ func drop(height: float) -> void:
 ## the state changes here, and the loop recovers from it or fails to.
 func shove(dv: Vector2) -> void:
 	travel.impetus.shove(dv)
+
+
+## The rotational half of the same seam: an external twist, as the turn rate
+## it caused. A glancing charge is a shove and a spin together.
+func spin(dw: float) -> void:
+	travel.spin(dw)
 
 
 func pick_node(world: Vector2, radius: float) -> int:

@@ -434,16 +434,21 @@ func reset() -> void:
 ## the limbs be solved. Anything with no gait — a probe, a carcass — calls this and
 ## gets the whole tick in one line.
 func step(delta: float, surface: float = 0.0) -> void:
-	advance(delta, surface)
+	advance(delta)
 	carry(surface)
 	settle(surface)
 
 
 ## The plan solve: inertia, the wave, relaxation, rest, frames. Everything that
-## happens in the two horizontal dimensions and nothing that happens in the third.
-func advance(delta: float, _surface: float = 0.0, speed_norm: float = 0.0,
+## happens in the two horizontal dimensions — plus the one vertical integration,
+## because the fall is advanced with the plan it is falling over. `floor` is the
+## fall's floor *in the carried frame*: how much higher (or lower) the ground now
+## under the body stands than the ground its feet took off from, so a leap comes
+## down on the surface it is actually over. Grounded it is simply 0 — the feet
+## are the frame, and the carries already quote them.
+func advance(delta: float, fall_floor: float = 0.0, speed_norm: float = 0.0,
 		wave_gain: float = 0.0) -> void:
-	fall.advance(delta, 0.0)
+	fall.advance(delta, fall_floor)
 	var live: bool = not collapsed
 	_integrate_plan(live)
 	if live and wave_gain > 0.0:
@@ -928,6 +933,23 @@ func bunch(share: float) -> void:
 	bunched = wanted
 	for s in _trunk.sticks:
 		stick_plan[s] = stick_plan_rest[s] * (1.0 - bunched)
+
+
+## Translates the whole axial body — position and Verlet history together, the
+## pinned head included — by a plan offset. The contact seam: a solid pressing
+## the body out *moves* the body rather than re-solving it, so the shift is
+## constraint-neutral and injects no velocity. The feet are deliberately not
+## moved (a planted foot is a world-fixed anchor whatever happens to the body
+## over it): the support drift that opens up is how the legs learn about the
+## wall, and the limbs are re-placed from their sockets later the same tick.
+func shift(offset: Vector2) -> void:
+	if offset == Vector2.ZERO:
+		return
+	var off := Vector3(offset.x, offset.y, 0.0)
+	for k in axial.size():
+		var i: int = axial[k]
+		pos[i] = pos[i] + off
+		prev[i] = prev[i] + off
 
 
 ## Moves one node without giving it velocity — the positional tether every

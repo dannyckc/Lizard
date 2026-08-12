@@ -214,6 +214,16 @@ class Fall extends RefCounted:
 		rate = 0.0
 		resting = true
 
+	## A landing whose remainder something else absorbs: comes to rest exactly as
+	## `rest_on` does, but the tick's own landing record (`landed`, `impact`) is
+	## left standing for whoever reads it after — the landing happened, the body
+	## that caught itself on its legs is simply declining the bounce.
+	func absorb_landing(surface: float) -> void:
+		floor_height = surface
+		height = surface
+		rate = 0.0
+		resting = true
+
 	## Puts a body down wherever it is, immediately. What happens when whatever was
 	## holding it up stops holding it and there is nothing to fall through — a
 	## collapse rather than a landing.

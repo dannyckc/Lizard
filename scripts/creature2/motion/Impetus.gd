@@ -123,6 +123,20 @@ func shove(dv: Vector2) -> void:
 	velocity += dv
 
 
+## A solid refusing part of the motion: the component of the velocity going
+## *into* the surface (`normal` points out of the solid) is taken away, and
+## what was taken is returned — the impact the body actually felt. Meat, not
+## rubber: nothing bounces, the tangent keeps, which is what sliding along a
+## wall is. Recovery from a hard stop is the same loop noticing the state no
+## longer matches the ask — a wall and a shove are one mechanism.
+func deflect(normal: Vector2) -> float:
+	var into: float = velocity.dot(normal)
+	if into >= 0.0:
+		return 0.0
+	velocity -= normal * into
+	return -into
+
+
 func speed() -> float:
 	return velocity.length()
 

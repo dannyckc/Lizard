@@ -15,13 +15,16 @@
 ## because the feet had press to spend, and the feet moved because the body's
 ## own motion used up the support they were giving. A shove enters as what it
 ## is — a velocity the body did not ask for — and the same loop that walks
-## recovers from it, or fails to and falls.
+## recovers from it, or fails to and falls. A wall enters the same way: the
+## contact stage (`collide`) measures the trunk into the solid and changes the
+## real state — position, velocity, turn rate — and the loop reacts to that.
 ##
 ## This file owns what is left over when the stages are taken out: reading
 ## the command into an ask, the turn, the jump's charge-and-spend, the crouch,
-## the balance review, and writing the seam Creature2 publishes (`speed`,
-## `speed_norm`, `ang_vel`, `head_pos`, `move_dir`). It is deliberately the
-## only file that touches the creature's fields — the loop has one scribe.
+## the contact, the balance review, and writing the seam Creature2 publishes
+## (`speed`, `speed_norm`, `ang_vel`, `head_pos`, `move_dir`). It is
+## deliberately the only file that touches the creature's fields — the loop
+## has one scribe.
 class_name Travel
 extends RefCounted
 
@@ -50,6 +53,10 @@ const ABSORB_RATE: float = 3.0
 ## can reach before the body is falling rather than stumbling.
 const FALL_SHARE: float = 0.9
 const FALL_PATIENCE: float = 0.35
+
+## The most turn rate a glancing contact may put into the body in one tick,
+## rad/s — a cap on the lever arithmetic, not a second physics.
+const GLANCE_MAX: float = 2.0
 
 ## What the review calls a real deficit: a walking body is out over its own
 ## edge several times a second (Poise's old law), so rescue asks for the line
@@ -121,13 +128,25 @@ func steer(delta: float, ground: float) -> void:
 
 	# The intent: what is being asked, throttled by what the path ahead
 	# permits — a wall is approached the way an obstacle is, not driven into.
+	# The watched strip is the coming travel, but never shorter than half the
+	# body: an animal does not stop watching the ground because it slowed
+	# down, and it is this floor that lets it stand *at* a brink instead of
+	# creeping over one it can no longer see.
 	var throttle: float = clampf(cmd.throttle, -1.0, 1.0)
 	var request: float = spec.move_speed \
 		* (spec.sprint_multiplier if cmd.sprint else 1.0)
 	var ask: float = throttle * request \
 		* (spec.reverse_speed_factor if throttle < 0.0 else 1.0)
 	var motion: Vector2 = impetus.velocity * Outlook.HORIZON
-	ask *= outlook.headroom(a.centre(), motion, ground, spec.hind_leg_length)
+	var least: float = spec.trunk_length * 0.5
+	if absf(ask) >= 1.0 and motion.length() < least:
+		motion = Vector2.RIGHT.rotated(creature.heading) * least * signf(throttle)
+	# ...watched from the girdle that will arrive first, because the standoff a
+	# hazard deserves is measured to the body's leading feet, not to its middle:
+	# a body that watched from its centre would hang its whole fore quarter
+	# over a brink before the ask died.
+	var lead: int = a.withers_index() if throttle >= 0.0 else a.pelvis_index()
+	ask *= outlook.headroom(a.plan(lead), motion, ground, spec.hind_leg_length)
 
 	# The turn: a rate the anatomy and the pace gate, eased at the body's own
 	# responsiveness. Airborne there is nothing to turn against.
@@ -171,6 +190,57 @@ func steer(delta: float, ground: float) -> void:
 	_publish(dir)
 
 
+## The world's solid half pressing back — the contact stage of the loop. Runs
+## after the plan solve has placed the body and before the feet answer, so a
+## correction shows up as support drift the same tick. Nothing here is a rule
+## about walls: the trunk is measured into whatever solid it occupies, at the
+## body's own height band (so a leap clears what a walk is refused by, and an
+## overhang above the back is walked under), and what an intrusion changes is
+## the *state* —
+##
+##   * the body is pressed out positionally: the armature is shifted, never
+##     re-solved, and the planted feet stay where they are, so the drift the
+##     shift opens is how the legs learn about the wall;
+##   * the velocity into the face is taken away and the slide along it keeps,
+##     which is what bracing against a wall and skirting along one both are;
+##   * a hard stop sinks the body by its impact — the same absorb a landing
+##     spends — and a press at one end swings the body about its own middle,
+##     eased back out by the same easing that serves the intent.
+##
+## Everything after that is the ordinary loop reacting to the new state.
+func collide() -> void:
+	var a: Armature = creature.armature
+	if a.collapsed:
+		return
+	var pel: Vector2 = a.plan(a.pelvis_index())
+	var wit: Vector2 = a.plan(a.withers_index())
+	var trunk: Armature.Chain = a.chain(BodySchema.TRUNK)
+	var r: float = 2.0
+	for i in trunk.nodes:
+		r = maxf(r, a.flesh_r[i])
+	var clearance: float = a.fall.height
+	var band := Vector2(
+		clearance + minf(a.fore_carry, a.hind_carry) - r,
+		clearance + maxf(a.fore_carry, a.hind_carry) + r)
+	var push: Vector2 = outlook.intrusion(pel, wit, r, band)
+	if push == Vector2.ZERO:
+		return
+	a.shift(push)
+	creature.head_pos += push
+	var n: Vector2 = push.normalized()
+	var impact: float = impetus.deflect(n)
+	if impact <= 0.0:
+		return
+	_absorb = maxf(_absorb, clampf(impact / ABSORB_SCALE, 0.0, 0.6))
+	var wd: Vector2 = outlook.intrusion_at(wit, r, band)
+	var pd: Vector2 = outlook.intrusion_at(pel, r, band)
+	var at: Vector2 = wit if wd.length_squared() >= pd.length_squared() else pel
+	var lever: Vector2 = at - a.centre()
+	var torque: float = lever.x * n.y - lever.y * n.x
+	creature.ang_vel += clampf(torque * impact / maxf(lever.length_squared(), 1.0),
+		-GLANCE_MAX, GLANCE_MAX)
+
+
 ## The support: after the plan solve has moved the sockets, the feet answer.
 func support(delta: float, _ground: float) -> void:
 	var a: Armature = creature.armature
@@ -179,6 +249,11 @@ func support(delta: float, _ground: float) -> void:
 	if a.fall.landed:
 		footwork.touchdown()
 		_absorb = maxf(_absorb, clampf(a.fall.impact / ABSORB_SCALE, 0.0, 0.8))
+		# The feet have the body again: from here the carries quote them, so
+		# the fall's frame is spent — the arc is over, whatever ground it ended
+		# on, and the legs absorb the rest. Also why a body never bounces: it
+		# is meat with knees, not rubber.
+		a.fall.absorb_landing(0.0)
 	footwork.tick(delta, creature, impetus.velocity, lean, crouch,
 		creature.speed_norm, a.fall.is_airborne())
 
@@ -201,6 +276,17 @@ func review(delta: float) -> void:
 		_wobble = 0.0
 		return
 	var p: Poise = creature.poise
+	# A grounded body with no planted feet at all is not "free of deficit" —
+	# it is a body whose every foot has been torn off its footing (a cliff
+	# edge, a floor that vanished), and it gets the fall's own patience, not
+	# the wobble's benefit of the doubt.
+	if p.posed and p.feet == 0:
+		_debt += delta
+		if _debt > FALL_PATIENCE:
+			a.collapse()
+			creature.alive = false
+			impetus.halt()
+		return
 	var deficit: bool = p.posed and p.feet > 0 \
 		and p.clearance < -WOBBLE_SHARE * maxf(p.span, 1.0)
 	if deficit:
@@ -248,6 +334,14 @@ func _jump(delta: float, a: Armature, spec: BodySpec, cmd: Creature2.Command,
 		_charge = 0.0
 	_absorb = maxf(_absorb - ABSORB_RATE * delta, 0.0)
 	crouch = maxf(_charge * 0.8, _absorb)
+
+
+## An external twist, arriving as the turn rate it caused — the rotational
+## half of Impetus.shove, for charges and glancing blows. The same easing that
+## serves the intent brings the rate back to the ask: recovery from a spin is
+## the loop noticing the body is turning faster than anything asked.
+func spin(dw: float) -> void:
+	creature.ang_vel += dw
 
 
 ## The seam, written in one place: what the rest of the game reads of the

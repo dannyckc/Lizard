@@ -70,6 +70,21 @@ const RESCUE_REACH: float = 0.9
 const SEED_PHASE: Array[float] = [0.25, 0.75, 0.0, 0.5]
 const SEED_SHARE: float = 0.35
 
+## How far the surface under a planted anchor may move from what the foot
+## stood down on before the foot must re-find its footing — the world changing
+## under a foot is an emergency the gait may not deny, because the support the
+## body is counting on is no longer the support that is there.
+const GROUND_SHIFT: float = 2.0
+
+## The anticipation: how much of a measured rise on the strip a girdle is about
+## to cross its carry pre-lifts by, and the most it may pre-lift — the body
+## starts carrying itself higher *before* the feet get there, so a step is
+## approached on a smooth trajectory rather than hit as a jolt. Capped well
+## inside the legs' extension margin: an anticipating body must still reach
+## the ground it is actually standing on.
+const ANTICIPATE: float = 0.45
+const ANTICIPATE_CAP: float = 4.0
+
 
 ## One foot: the world anchor, the swing, and the measurements between.
 class Foot extends RefCounted:
@@ -79,6 +94,9 @@ class Foot extends RefCounted:
 	## World plan point the foot is standing on; meaningless while swinging.
 	var anchor: Vector2 = Vector2.ZERO
 	var anchor_z: float = 0.0
+	## The surface height the foot stood down onto — what `anchor_z` is checked
+	## against so a world moving under a planted foot is noticed.
+	var stood_z: float = 0.0
 	var swinging: bool = false
 	## Seconds into the current swing, against its length.
 	var swing: float = 0.0
@@ -144,6 +162,7 @@ func build(creature: Creature2, outlook: Outlook, rhythm: Rhythm) -> void:
 		f.anchor = Vector2(toe.x, toe.y) \
 			+ dir * ((phase - 0.5) * SEED_SHARE * reach.excursion)
 		f.anchor_z = _outlook.surface(f.anchor)
+		f.stood_z = f.anchor_z
 		f.swinging = false
 		f.since = 10.0
 		feet.append(f)
@@ -151,6 +170,11 @@ func build(creature: Creature2, outlook: Outlook, rhythm: Rhythm) -> void:
 	_fore_ground = 0.0
 	_hind_ground = 0.0
 	_write(creature)
+	# The carries are a measurement of the feet from the moment the feet are
+	# adopted — a body standing on a table is standing on the table on its
+	# first tick, not after one, or the contact stage would find its trunk
+	# inside the solid it is standing on and press it off.
+	_carry(creature, 0.0, Vector2.ZERO, false)
 
 
 ## One tick of support: measure every drift, ask Rhythm who may step, swing
@@ -173,7 +197,7 @@ func tick(delta: float, creature: Creature2, velocity: Vector2, lean: Vector2,
 		_float_feet(creature, velocity)
 		grip = 0.0
 		_write(creature)
-		_carry(creature, crouch)
+		_carry(creature, crouch, velocity, true)
 		return
 
 	# The measurements: where each planted foot stands against where its body
@@ -185,10 +209,22 @@ func tick(delta: float, creature: Creature2, velocity: Vector2, lean: Vector2,
 		if velocity.length_squared() > 4.0 else Vector2.ZERO
 	for f in feet:
 		var reach: Span = _fore if f.fore else _hind
+		if not f.swinging:
+			f.anchor_z = _outlook.surface(f.anchor)
+			# Torn off: a body dragged past what the limb can span from socket
+			# to anchor has pulled the foot off its footing — the anchor is no
+			# longer support, whatever the foot would prefer, and saying so is
+			# what lets the review see a body going over an edge as one losing
+			# its feet rather than as one mysteriously still standing.
+			var span: Vector2 = f.anchor - _socket(a, f)
+			var rise: float = a.pos[f.limb.parent_node].z - f.anchor_z
+			var held: float = sqrt(span.length_squared() + rise * rise)
+			if held > creature.body.limb_length(f.fore) * 1.05:
+				f.urgency = Rhythm.DESPERATE
+				_lift(a, f, velocity, lean, pace)
 		if f.swinging:
 			f.urgency = 0.0
 		else:
-			f.anchor_z = _outlook.surface(f.anchor)
 			var drift: Vector2 = _home(a, f, lean) - f.anchor
 			# Support is only being used up where the home is leaving the anchor
 			# behind — along the travel, or sideways out of the disc. A foot
@@ -200,6 +236,10 @@ func tick(delta: float, creature: Creature2, velocity: Vector2, lean: Vector2,
 				var lat: float = drift.dot(Vector2(-travel_dir.y, travel_dir.x))
 				need = Vector2(along, lat).length()
 			f.urgency = need / maxf(TRIGGER * reach.excursion, 0.001)
+			if absf(f.anchor_z - f.stood_z) > GROUND_SHIFT:
+				# The world moved under the anchor — the ground gone from under a
+				# foot (or risen through it) is a step nothing may deny.
+				f.urgency = maxf(f.urgency, Rhythm.DESPERATE)
 			if f.rescue_at.x < INF:
 				f.urgency = maxf(f.urgency, Rhythm.DESPERATE)
 		urgency.append(f.urgency)
@@ -225,7 +265,7 @@ func tick(delta: float, creature: Creature2, velocity: Vector2, lean: Vector2,
 
 	_press(creature)
 	_write(creature)
-	_carry(creature, crouch)
+	_carry(creature, crouch, velocity, false)
 
 
 ## The armature has just been carried — copy each socket's solved height onto
@@ -347,6 +387,7 @@ func _plant(f: Foot) -> void:
 	f.swinging = false
 	f.anchor = Vector2(f.land.x, f.land.y)
 	f.anchor_z = _outlook.surface(f.anchor)
+	f.stood_z = f.anchor_z
 	f.since = 0.0
 	f.rescue_at = Vector2.INF
 
@@ -458,10 +499,14 @@ func _write(creature: Creature2) -> void:
 
 
 ## The carries: each girdle rides at its own feet's ground plus the stance
-## clearance, sunk by the crouch. A pair entirely in the air keeps the last
-## ground it stood on — the body does not guess at a floor its feet have not
-## touched.
-func _carry(creature: Creature2, crouch: float) -> void:
+## clearance, sunk by the crouch and pre-lifted toward whatever rise its own
+## strip of path is about to cross — the body's trajectory anticipates the
+## step instead of being jolted by it, and the feet then land on ground the
+## body is already carrying itself toward. A pair entirely in the air keeps
+## the last ground it stood on — the body does not guess at a floor its feet
+## have not touched.
+func _carry(creature: Creature2, crouch: float, velocity: Vector2,
+		airborne: bool) -> void:
 	var a: Armature = creature.armature
 	for fore in [true, false]:
 		var reach: Span = _fore if fore else _hind
@@ -481,7 +526,23 @@ func _carry(creature: Creature2, crouch: float) -> void:
 		else:
 			ground = _fore_ground if fore else _hind_ground
 		var carry: float = ground + reach.clearance * (1.0 - 0.4 * clampf(crouch, 0.0, 1.0))
+		if not airborne:
+			# The anticipation, measured from the girdle itself: what rises on
+			# the strip *this* end of the body is about to cross, so the fore
+			# quarters lift for a step the hind quarters have not reached yet.
+			var girdle: Vector2 = a.plan(a.withers_index() if fore else a.pelvis_index())
+			var coming: float = _outlook.rise_ahead(girdle,
+				velocity * Outlook.HORIZON, ground)
+			carry += clampf(coming * ANTICIPATE, 0.0, ANTICIPATE_CAP)
 		if fore:
 			a.fore_carry = carry
 		else:
 			a.hind_carry = carry
+
+
+## The ground frame the carries are quoting: what the planted (or last
+## planted) feet are standing on, averaged over the girdles. The fall's floor
+## is measured against this while the body is airborne — the difference
+## between the ground now under the body and the ground it took off from.
+func frame_ground() -> float:
+	return (_fore_ground + _hind_ground) * 0.5
