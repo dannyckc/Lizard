@@ -99,6 +99,18 @@ var _compartments: Dictionary = {}
 ## the only honest source for it: the same cells the compartments are summed
 ## from, before hp is spent on them.
 var _chain_muscle: Dictionary = {}
+## Per-layer volume standing and volume built, indexed by BodySchema.Layer, and
+## what each layer currently weighs. Two different questions about one tissue and
+## they come apart — a limb chewed off takes muscle and skin with it and leaves
+## the body a larger fraction bone than it started — so both are counted, in the
+## one walk, rather than a reader inferring either from the other.
+var _layer_live: PackedFloat32Array = PackedFloat32Array()
+var _layer_built: PackedFloat32Array = PackedFloat32Array()
+var _layer_mass: PackedFloat32Array = PackedFloat32Array()
+## What the animal would weigh with every cell whole — the denominator of
+## `integrity`, and the only thing in the census that remembers a body that has
+## since been bitten.
+var _built_mass: float = 0.0
 
 ## Body length the `along` fraction is quoted against: the trunk between its
 ## girdles, because "are the legs under the weight" is the question the
@@ -380,6 +392,41 @@ func along() -> float:
 	return _com.x / maxf(trunk_length, 0.001)
 
 
+## What the animal would weigh whole. Only the readouts want this — nothing in
+## the body may be sized against a body that no longer exists.
+func built_mass() -> float:
+	_derive()
+	return _built_mass
+
+
+## How much of its own tissue the creature still has, by weight — exactly 1.0
+## on an intact animal. The whole-body counterpart of `soundness`, and it is a
+## reading rather than a state: nothing is stored anywhere saying a creature is
+## wounded, so this cannot disagree with the cells.
+func integrity() -> float:
+	_derive()
+	return clampf(_mass / maxf(_built_mass, MIN_MASS), 0.0, 1.0)
+
+
+## What share of the body's weight one layer of tissue currently is. The shares
+## add up to the animal rather than to the four toggles of a peel, because a
+## bone core is bone whether or not the skeleton is being shown.
+func layer_mass_share(layer: int) -> float:
+	_derive()
+	return _layer_mass[layer] / maxf(_mass, MIN_MASS)
+
+
+## ...and how much of that layer is still standing, by volume: built against
+## left. The other question, and it comes apart from the first — a torn-off
+## limb takes skin and muscle and leaves the rest of the body proportionally
+## bonier.
+func layer_standing(layer: int) -> float:
+	_derive()
+	if _layer_built[layer] <= MIN_MASS:
+		return 1.0
+	return clampf(_layer_live[layer] / _layer_built[layer], 0.0, 1.0)
+
+
 ## The five muscle compartments (§7.3 B): summed effective muscle volume of
 ## each compartment's stations. Girdle-share, drive, bite force and spine
 ## power all derive from these — Locomotion ports onto them with a renamed
@@ -542,6 +589,13 @@ func _derive() -> void:
 	var jaw_m: float = 0.0
 
 	_chain_muscle.clear()
+	_layer_live.resize(4)
+	_layer_built.resize(4)
+	_layer_mass.resize(4)
+	_layer_live.fill(0.0)
+	_layer_built.fill(0.0)
+	_layer_mass.fill(0.0)
+	_built_mass = 0.0
 	for chain in chains:
 		var half: float = PI / float(chain.sectors)
 		var shape: float = sin(half) / half
@@ -563,6 +617,10 @@ func _derive() -> void:
 				* density[BodySchema.Layer.BONE]
 			st_mass += core_mass
 			moment += centre * core_mass
+			# The core is bone that is not a cell — it cannot be bitten, so it
+			# stands in both the built body and the standing one.
+			_layer_mass[BodySchema.Layer.BONE] += core_mass
+			_built_mass += core_mass
 
 			for sec in chain.sectors:
 				var theta: float = (float(sec) + 0.5) / float(chain.sectors) * TAU
@@ -580,7 +638,20 @@ func _derive() -> void:
 					var under: float = core + thickness[col + BodySchema.Layer.BONE]
 					muscle.y += half * ((under + raw) * (under + raw)
 						- under * under) * chain.seg
+				# The shell each layer was *built* on, walked beside the shell it
+				# actually stands on: a chewed inner layer pulls everything
+				# outside it inward, so the two radii part company the moment
+				# anything is bitten and the built one is the only honest
+				# denominator for "how much of this tissue is left".
+				var b0: float = core
 				for layer in 4:
+					var raw_t: float = thickness[col + layer]
+					var b1: float = b0 + raw_t
+					if raw_t > 0.00001:
+						var built_vol: float = half * (b1 * b1 - b0 * b0) * chain.seg
+						_layer_built[layer] += built_vol
+						_built_mass += built_vol * density[layer]
+					b0 = b1
 					var eff: float = thickness[col + layer] * hp[col + layer]
 					if eff <= 0.00001:
 						continue
@@ -593,6 +664,8 @@ func _derive() -> void:
 					var at: Vector3 = centre + dir * rbar
 					moment += at * m
 					st_mass += m
+					_layer_live[layer] += vol
+					_layer_mass[layer] += m
 					st_rise += (at.z - centre.z) * m
 					st_side += (at.y - centre.y) * m
 					if layer == BodySchema.Layer.MUSCLE:
