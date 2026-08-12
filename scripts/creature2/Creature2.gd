@@ -60,6 +60,10 @@ class Command extends RefCounted:
 @export var body: BodySpec
 ## Draws the skeleton over the flesh — the state, rather than the animal.
 @export var debug: bool = false
+## Where this body is built, and facing where. Read once, at `_ready`, and kept
+## by the armature as the spawn a reset returns to.
+@export var spawn_position: Vector2 = Vector2.ZERO
+@export var spawn_heading: float = 0.0
 
 var armature: Armature = Armature.new()
 var corpus: Corpus = Corpus.new()
@@ -90,8 +94,12 @@ var terrain: Terrain
 func _ready() -> void:
 	if body == null:
 		body = load("res://scripts/creature2/CatBody.tres")
+	# Over the terrain, which draws at 1: an animal standing behind a boulder is
+	# behind it because of where its feet are, never because the rock was painted
+	# afterwards. v1's CreatureView holds the same band for the same reason.
+	z_index = 10
 	terrain = get_tree().get_first_node_in_group("terrain") as Terrain
-	build(Vector2.ZERO, 0.0)
+	build(spawn_position, spawn_heading)
 
 
 ## Builds every structure in the one order they may be built in: the stance first
@@ -211,6 +219,16 @@ func toggle_collapsed() -> void:
 
 func drop(height: float) -> void:
 	armature.drop(height)
+
+
+## Runs the body forward on its own, off the frame clock — the same tick, taken
+## by hand. What a carcass needs to be *already* dead when the scene opens rather
+## than dying through its first second of it, and what a probe needs to advance a
+## creature it is not displaying.
+func simulate(seconds: float) -> void:
+	var step: float = 1.0 / maxf(float(Engine.physics_ticks_per_second), 1.0)
+	for _i in int(maxf(seconds, 0.0) / step):
+		_physics_process(step)
 
 
 ## An external force, arriving as the plan velocity it imparted — the seam a

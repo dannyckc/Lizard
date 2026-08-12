@@ -1,15 +1,19 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/creature2/V2Lab.gd" id="1_lab"]
 [ext_resource type="Script" path="res://scripts/world/Terrain.gd" id="2_terrain"]
 [ext_resource type="Script" path="res://scripts/creature2/Creature2.gd" id="3_creature2"]
 [ext_resource type="Script" path="res://scripts/creature2/Likeness.gd" id="4_likeness"]
+[ext_resource type="Script" path="res://scripts/creature2/Proving.gd" id="5_proving"]
 
 [node name="V2Lab" type="Node2D"]
 script = ExtResource("1_lab")
 
 [node name="Terrain" type="Node2D" parent="."]
 script = ExtResource("2_terrain")
+
+[node name="Proving" type="Node2D" parent="."]
+script = ExtResource("5_proving")
 
 [node name="Creature2" type="Node2D" parent="."]
 script = ExtResource("3_creature2")

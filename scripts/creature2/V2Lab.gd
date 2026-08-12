@@ -8,6 +8,12 @@
 ## display — the HUD is built, hidden and idle in that case, and costs a probe
 ## nothing but its construction.
 ##
+## The floor is bare except in one marked-off corner south of the spawn: the
+## **proving ground** (`Proving`), which holds the steps, the solids, the
+## overhang and two other animals — one alive and standing about, one dead. Walk
+## south to it. Everything else out here is plain ground on purpose, because a
+## gait is read against an empty floor.
+##
 ## The input pump is deliberately tiny and lives entirely in this file — what the
 ## lab offers is the handling a probe cannot: walk the animal about, drag a node to
 ## feel the constraints answer, drop the body, knock it over, open it up.
