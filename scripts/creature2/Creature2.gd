@@ -72,6 +72,11 @@ var poise: Poise = Poise.new()
 var attitude: Attitude = Attitude.new()
 var command: Command = Command.new()
 var travel: Travel = Travel.new()
+## What keeps it alive, and the jaws it defends that with. The vitals are the
+## consequences of wounds (blood, the heart — death is a stopped heart); the
+## maw is the whole strike pipeline.
+var vitals: Vitals = Vitals.new()
+var maw: Maw = Maw.new()
 
 ## Where the head is being led, and on what bearing. The body follows it: the head
 ## is the one point on the chain that is placed rather than solved. With no mover
@@ -98,6 +103,9 @@ func _ready() -> void:
 	# behind it because of where its feet are, never because the rock was painted
 	# afterwards. v1's CreatureView holds the same band for the same reason.
 	z_index = 10
+	# Every living body in the lab presses on every other — the group is the
+	# contact stage's roster (Clash).
+	add_to_group("creatures2")
 	terrain = get_tree().get_first_node_in_group("terrain") as Terrain
 	build(spawn_position, spawn_heading)
 
@@ -121,9 +129,19 @@ func build(at: Vector2, p_heading: float) -> void:
 	ang_vel = 0.0
 	armature.take_head(head_pos)
 	travel.build(self)
+	vitals = Vitals.new()
+	maw.build(self)
 
 
 func _physics_process(delta: float) -> void:
+	# The consequences first: open vessels drain whether or not anything else
+	# happens this tick, and a heart that stops stops the animal — however it
+	# stopped, and whoever noticed first.
+	vitals.tick(delta)
+	if vitals.arrested and not armature.collapsed:
+		armature.collapse()
+		maw.release()
+	alive = not armature.collapsed and not vitals.arrested
 	# The bake is revision-keyed: an ordinary tick bakes nothing, a wound re-bakes
 	# once and the weight genuinely moves.
 	poise.bake(corpus, armature)
@@ -151,6 +169,11 @@ func _physics_process(delta: float) -> void:
 	# The world's solid half presses back: an intrusion changes the body's real
 	# position, velocity and turn rate, and everything after reacts to that.
 	travel.collide()
+	# ...and the world's living half, through the same seams: other bodies
+	# press this one out, and this one's jaws do whatever they are doing —
+	# both positional changes the support has not answered yet.
+	Clash.press(self)
+	maw.tick(delta)
 	# The sockets have moved; now the feet answer — the legs support and
 	# rebalance, and the carries become a measurement of the planted feet.
 	travel.support(delta, ground)
@@ -193,6 +216,12 @@ func centre() -> Vector2:
 
 
 func reset() -> void:
+	# The reset is the lab's do-over: whatever killed the body on the last
+	# run — a fall the review gave up on, a stopped heart — is undone with
+	# the pose, or the next tick would knock the restored body straight
+	# back down.
+	vitals.revive()
+	maw.release()
 	armature.reset()
 	head_pos = armature.plan(armature.head_index())
 	heading = armature.spawn_heading
@@ -208,13 +237,21 @@ func reset() -> void:
 
 func toggle_collapsed() -> void:
 	if armature.collapsed:
+		# The lab's revival restarts the heart as well as the legs — a body
+		# stood back up around a stopped heart would fall inside a second.
+		vitals.revive()
 		armature.revive()
 		head_pos = armature.plan(armature.head_index())
 		armature.take_head(head_pos)
 		travel.reset()
 	else:
+		# The same collapse a death is: the K key stops the heart, because a
+		# body on the floor with nothing wrong with it is not what the
+		# carcass bay is for.
+		vitals.arrested = true
 		armature.collapse()
-	alive = not armature.collapsed
+		maw.release()
+	alive = not armature.collapsed and not vitals.arrested
 
 
 func drop(height: float) -> void:
@@ -242,6 +279,18 @@ func shove(dv: Vector2) -> void:
 ## it caused. A glancing charge is a shove and a spin together.
 func spin(dw: float) -> void:
 	travel.spin(dw)
+
+
+## Asks the jaws whether flesh at `at` on `target` is takeable from here —
+## the hover's preview, commitment-free.
+func aim_bite(target: Creature2, at: Vector2) -> Dictionary:
+	return maw.aim(target, at)
+
+
+## Commits the strike: the lunge is the body moving, the jaws close on where
+## the flesh actually is, and `latch` keeps the hold for towing and feeding.
+func bite(target: Creature2, at: Vector2, latch: bool = false) -> bool:
+	return maw.strike(target, at, latch)
 
 
 func pick_node(world: Vector2, radius: float) -> int:

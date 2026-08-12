@@ -406,6 +406,88 @@ func radius_at(name: StringName, t: float, sector: int, layers: int = 4) -> floa
 		corpus.layer_radius(name, hi, sector, layers), f)
 
 
+## Converts a world point to a body address — the §5.1 sentence made a
+## function: nearest point on the posed chain (a capsule walk over the same
+## rings every view draws), then two dot products and an atan2. Because the
+## rings *are* the drawn body, whatever this returns is a place on the animal
+## as displayed — "what is hit is what is displayed" is this function reading
+## the same arrays as the painter, not a discipline anyone keeps.
+##
+## Fully 3D: the point carries its height, the rings carry theirs, and the
+## depth that comes back is signed against the surface radius in the exact
+## direction of approach — positive is inside the flesh, negative is air. A
+## point over the animal's back misses flesh a point at flank height meets,
+## because the nearest ring is genuinely further from one than the other.
+##
+## Returns { band, t, theta, station, sector, depth, at, centre } — `at` the
+## nearest point on the drawn surface, `centre` the point on the chain axis.
+func locate(world: Vector3) -> Dictionary:
+	var best_d2: float = INF
+	var best_r: int = -1
+	var best_u: float = 0.0
+	for band in bands:
+		var last: int = band.first + band.count - 1
+		for r in range(band.first, last):
+			var a: Vector3 = ring_centre[r]
+			var b: Vector3 = ring_centre[r + 1]
+			var axis: Vector3 = b - a
+			var len2: float = axis.length_squared()
+			var u: float = 0.0
+			if len2 > MIN_TANGENT:
+				u = clampf((world - a).dot(axis) / len2, 0.0, 1.0)
+			var near: Vector3 = a + axis * u
+			# Ranked by distance past the local surface, not to the axis, so a
+			# fat trunk outbids a thin tail it happens to lie closer to the
+			# middle of.
+			var d: float = world.distance_to(near) \
+				- (mean_radius(r) + mean_radius(r + 1)) * 0.5
+			if best_r < 0 or d < best_d2:
+				best_d2 = d
+				best_r = r
+				best_u = u
+	if best_r < 0:
+		return {}
+
+	var hit: Band = bands[ring_band[best_r]]
+	var centre: Vector3 = ring_centre[best_r].lerp(ring_centre[best_r + 1], best_u)
+	var up: Vector3 = ring_up[best_r].lerp(ring_up[best_r + 1], best_u).normalized()
+	var lat: Vector3 = ring_lat[best_r].lerp(ring_lat[best_r + 1], best_u).normalized()
+	var t: float = lerpf(ring_t[best_r], ring_t[best_r + 1], best_u)
+	var offset: Vector3 = world - centre
+	var theta: float = wrapf(atan2(offset.dot(lat), offset.dot(up)), 0.0, TAU)
+	var sector: int = corpus.sector_of(hit.name, theta)
+	var station: int = corpus.station_of(hit.name, t)
+	var surface_r: float = radius_at(hit.name, t, sector)
+	var out: float = offset.length()
+	var dir: Vector3 = offset / out if out > 0.001 else up
+	return {
+		"band": hit.name, "t": t, "theta": theta,
+		"station": station, "sector": sector,
+		"depth": surface_r - out,
+		"at": centre + dir * surface_r,
+		"centre": centre,
+	}
+
+
+## The inverse: where a body address currently is in the world, on the drawn
+## surface. What a latched hold reads to follow the flesh it is holding
+## through every pose — the address never moves, the frames do.
+func place(name: StringName, t: float, theta: float) -> Vector3:
+	var b: Band = _by_name[name]
+	var want: float = clampf(t, 0.0, 1.0)
+	# Rings are arc-spaced, so the bracketing pair is found by t, not by index.
+	var r: int = b.first
+	while r < b.first + b.count - 2 and ring_t[r + 1] < want:
+		r += 1
+	var u: float = clampf((want - ring_t[r])
+		/ maxf(ring_t[r + 1] - ring_t[r], 0.00001), 0.0, 1.0)
+	var centre: Vector3 = ring_centre[r].lerp(ring_centre[r + 1], u)
+	var up: Vector3 = ring_up[r].lerp(ring_up[r + 1], u).normalized()
+	var lat: Vector3 = ring_lat[r].lerp(ring_lat[r + 1], u).normalized()
+	var dir: Vector3 = up * cos(theta) + lat * sin(theta)
+	return centre + dir * radius_at(name, t, corpus.sector_of(name, theta))
+
+
 ## Mean radius around a ring — its girth as drawn.
 func mean_radius(ring: int) -> float:
 	var b: Band = bands[ring_band[ring]]

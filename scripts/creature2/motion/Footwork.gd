@@ -463,7 +463,11 @@ func _press(creature: Creature2) -> void:
 			continue
 		var reach: Span = _fore if f.fore else _hind
 		var left: float = clampf(1.0 - maxf(f.urgency, 0.0) * TRIGGER, 0.0, 1.0)
-		sum += reach.press * left * corpus.soundness(f.limb.name)
+		# Soundness is the muscle still answering; numbness is the nerve still
+		# asking. A leg with either gone presses with that much less — a cut
+		# sciatic takes its leg out of the engine without touching the flesh.
+		sum += reach.press * left * corpus.soundness(f.limb.name) \
+			* creature.vitals.numbness(f.limb.name)
 	# Standing square and fresh, the four feet sum to two pair-shares — that
 	# is the datum grip 1.0 is quoted against.
 	grip = clampf(sum / 2.0, 0.0, 1.0)

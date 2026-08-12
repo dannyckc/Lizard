@@ -75,6 +75,12 @@ class CensusChain extends RefCounted:
 
 var spec: BodySpec
 
+## This creature's own organs, vessels and nerves — the spec's table, copied at
+## build so a wound to one animal's heart is a wound to *its* heart and not to
+## the species'. Feature hp and breach state live on these dictionaries; the
+## spec stays rest anatomy, authored once and never written back.
+var features: Array[Dictionary] = []
+
 ## The cells. Flat arrays indexed `column * 4 + layer`; `columns` is
 ## BodySchema.column_count() and the two can never drift because the chains
 ## are allocated off the same constants.
@@ -220,6 +226,12 @@ func build(p_spec: BodySpec) -> void:
 	thickness.resize(columns * 4)
 	hp.resize(columns * 4)
 	hp.fill(1.0)
+
+	# The features become this animal's: deep-copied so organ hp and vessel
+	# breaches are per-creature state, exactly as cell hp is.
+	features.clear()
+	for f: Dictionary in spec.features:
+		features.append(f.duplicate(true))
 
 	# The compile proper: evaluate the knots per station, quantize per sector.
 	for chain in chains:
@@ -542,6 +554,105 @@ func gouge(name: StringName, station: int, sector: int, depth_px: float) -> floa
 	return taken
 
 
+## The whole of §6's wound resolution: the tissue depth-walk above, then the
+## surviving depth intersected with the features standing in that (t, θ)
+## neighbourhood. `depth_px` is what the tooth (or the test) is worth; what
+## comes back is everything the wound did — flesh taken, organs damaged,
+## vessels breached, nerves cut — for whoever keeps the consequences (Vitals).
+##
+## The wound *front* is measured as a fraction of the column's built flesh
+## depth, outside-in, which is the coordinate the feature table quotes its
+## depth bands in (0 the skin, 1 the bone core). Measured after the walk and
+## against the built column rather than the standing one, so a second bite
+## into the same wedge starts where the first left off and reaches features
+## the first could not — the ribs protect the heart until the ribs are gone,
+## and nothing anywhere says so.
+func wound(name: StringName, station: int, sector: int,
+		depth_px: float) -> Dictionary:
+	var taken: float = gouge(name, station, sector, depth_px)
+	var report: Dictionary = {
+		"chain": name, "station": station, "sector": sector,
+		"taken": taken, "organs": [], "breached": [], "severed": [],
+	}
+	# Where the front now stands, 0 at the built surface, 1 at the bone core.
+	var col: int = column(name, station, sector) * 4
+	var built: float = 0.0
+	var left: float = 0.0
+	for layer in 4:
+		built += thickness[col + layer]
+		left += thickness[col + layer] * hp[col + layer]
+	if built <= MIN_MASS:
+		return report
+	var front: float = clampf((built - left) / built, 0.0, 1.0)
+	if front <= 0.0:
+		return report
+
+	var c: CensusChain = _by_name[name]
+	var t: float = (float(station) + 0.5) / float(c.stations)
+	var theta: float = (float(sector) + 0.5) / float(c.sectors) * TAU
+	var half_t: float = 0.5 / float(c.stations)
+	var half_th: float = PI / float(c.sectors)
+
+	for f: Dictionary in features:
+		if f.get("chain", &"") != name:
+			continue
+		match f.get("feature", ""):
+			"organ":
+				var r: Vector2 = f["t_range"]
+				if t < r.x - half_t or t > r.y + half_t:
+					continue
+				if _angle_gap(theta, f["theta"]) > float(f["spread"]) + half_th:
+					continue
+				var band: Vector2 = f["depth"]
+				if front < band.x:
+					continue
+				# How much of the organ's own band the front has driven
+				# through is what one wound costs it: a nick nicks, a bite
+				# through the whole band destroys.
+				var through: float = clampf((front - band.x)
+					/ maxf(band.y - band.x, 0.01), 0.0, 1.0)
+				if through <= 0.0:
+					continue
+				var was: float = float(f.get("hp", 1.0))
+				f["hp"] = maxf(was - through, 0.0)
+				if was > 0.0:
+					(report["organs"] as Array).append(f)
+			"vessel":
+				if _path_reached(f, t, theta, front, half_t, half_th):
+					(report["breached"] as Array).append(f)
+			"nerve":
+				if _path_reached(f, t, theta, front, half_t, half_th) \
+						and not bool(f.get("cut", false)):
+					f["cut"] = true
+					(report["severed"] as Array).append(f)
+	return report
+
+
+## Whether a wound front at (t, θ, front) reaches a polyline feature: the
+## wounded wedge has to stand over some span of the path, at its angle, and
+## the front has to have passed its depth. One rule for vessels and nerves.
+func _path_reached(f: Dictionary, t: float, theta: float, front: float,
+		half_t: float, half_th: float) -> bool:
+	var path: Array = f.get("path", [])
+	for k in range(maxi(path.size() - 1, 1)):
+		var a: Array = path[k]
+		var b: Array = path[mini(k + 1, path.size() - 1)]
+		var lo: float = minf(a[0], b[0]) - half_t
+		var hi: float = maxf(a[0], b[0]) + half_t
+		if t < lo or t > hi:
+			continue
+		var s: float = clampf((t - a[0]) / maxf(b[0] - a[0], 0.00001), 0.0, 1.0)
+		if _angle_gap(theta, lerpf(a[1], b[1], s)) > half_th * 1.5:
+			continue
+		if front >= lerpf(a[2], b[2], s):
+			return true
+	return false
+
+
+static func _angle_gap(a: float, b: float) -> float:
+	return absf(wrapf(a - b, -PI, PI))
+
+
 # --------------------------------------------------------------- features ----
 
 ## Every feature whose body coordinates fall inside a chain's t range —
@@ -550,7 +661,7 @@ func gouge(name: StringName, station: int, sector: int, depth_px: float) -> floa
 ## them; neither re-derives a thing.
 func features_in(name: StringName, t_range: Vector2) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
-	for f: Dictionary in spec.features:
+	for f: Dictionary in features:
 		if f.get("chain", &"") != name:
 			continue
 		match f.get("feature", ""):

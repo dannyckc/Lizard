@@ -194,6 +194,15 @@ var driven: bool = false
 var fore_carry: float = 0.0
 var hind_carry: float = 0.0
 
+## Where the mouth is being carried this tick, world height — NAN when nothing
+## is reaching and the neck rides its rest carry line. Written by the strike
+## (a bite at the floor carries the head down to it, one at a tall flank
+## carries it up), read by the Z channel as the neck's carry slope: the head
+## moving to the flesh moves the drawn head, the jaw frame and the mouth's hit
+## band, because they are all the same nodes. The droop still sags below
+## whatever line this asks for — muscle carries the reach, tissue still hangs.
+var head_reach_z: float = NAN
+
 ## Phase of the travelling lateral wave, and how far it has already displaced each
 ## node. The wave is kinematic: it moves the body, it never pushes it, so only the
 ## *difference* is applied and it is applied to the Verlet history as well — shift
@@ -391,6 +400,7 @@ func _layout(at: Vector2, heading: float) -> void:
 	pinned.fill(0)
 	fore_carry = fore_stance
 	hind_carry = hind_stance
+	head_reach_z = NAN
 	wave_clock = 0.0
 	wave_offset.fill(Vector2.ZERO)
 	bunched = 0.0
@@ -690,7 +700,7 @@ func _solve_heights(surface: float) -> void:
 		pos[i] = Vector3(pos[i].x, pos[i].y, z)
 		prev[i] = Vector3(prev[i].x, prev[i].y, z)
 	var tone: float = 1.0 - CARRIAGE
-	_droop_chain(_neck, withers_z, surface, tone)
+	_droop_chain(_neck, withers_z, surface, tone, head_reach_z)
 	_droop_chain(_tail, pelvis_z, surface, tone)
 
 
@@ -700,7 +710,8 @@ func _solve_heights(surface: float) -> void:
 ## the animal; what it is under is the weight still to come. The slope starts
 ## on the carry line and only ever falls away from it, and no station may
 ## push itself back up through the floor.
-func _droop_chain(chain: Chain, start_z: float, floor_z: float, tone: float) -> void:
+func _droop_chain(chain: Chain, start_z: float, floor_z: float, tone: float,
+		tip_z: float = NAN) -> void:
 	var count: int = chain.nodes.size()
 	# Weight still to come at each station, tip-backward, the node's own
 	# weight included — it hangs off the stick that leads into it.
@@ -712,6 +723,14 @@ func _droop_chain(chain: Chain, start_z: float, floor_z: float, tone: float) -> 
 		beyond[j] = running
 
 	var carry: float = tan(chain.carry_rad)
+	# A reach re-aims the carry line at where the tip is being taken — clamped
+	# to a slope a neck can actually be held at, so an illegal ask degrades to
+	# the nearest legal carry rather than folding the chain through itself.
+	if not is_nan(tip_z):
+		var length: float = 0.0
+		for s in chain.sticks:
+			length += stick_bone[s]
+		carry = clampf((tip_z - start_z) / maxf(length, 0.001), -1.5, 1.5)
 	var slope: float = carry
 	var z: float = start_z
 	var line: float = start_z
@@ -834,6 +853,7 @@ func collapse() -> void:
 		return
 	collapsed = true
 	release_head()
+	head_reach_z = NAN
 	var datum: float = maxf(
 		(pos[_trunk.nodes[0]].z + pos[_trunk.nodes[_trunk.nodes.size() - 1]].z) * 0.5, 0.0)
 	fall.start(datum)

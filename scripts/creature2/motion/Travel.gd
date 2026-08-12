@@ -284,6 +284,7 @@ func review(delta: float) -> void:
 		_debt += delta
 		if _debt > FALL_PATIENCE:
 			a.collapse()
+			creature.vitals.arrested = true
 			creature.alive = false
 			impetus.halt()
 		return
@@ -302,6 +303,7 @@ func review(delta: float) -> void:
 			_debt += delta
 			if _debt > FALL_PATIENCE:
 				a.collapse()
+				creature.vitals.arrested = true
 				creature.alive = false
 				impetus.halt()
 			return

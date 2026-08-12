@@ -196,7 +196,7 @@ func _draw() -> void:
 	draw_string(_font, at + Vector2(-HALF.x, -HALF.y - 18.0),
 		"PROVING GROUND", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 13, LABEL)
 	draw_string(_font, at + Vector2(-HALF.x, -HALF.y - 6.0),
-		"v2 locomotion · contact · carriage", HORIZONTAL_ALIGNMENT_LEFT,
+		"v2 locomotion · contact · carriage · combat", HORIZONTAL_ALIGNMENT_LEFT,
 		-1.0, 9, CAPTION)
 	for caption in _captions:
 		var spot: Vector2 = caption["at"]

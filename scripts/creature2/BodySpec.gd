@@ -181,6 +181,24 @@ class ChainSpec extends RefCounted:
 ## claim about a cat's back and stands whatever the threshold turns out to be.
 @export var spine_freedom: float = 0.79
 
+# ------------------------------------------------------------- dentition ----
+# The teeth, by the v1 law: four numbers authored, everything else derived.
+# Count, length, keenness and how wide the mouth opens; type, contact patch and
+# penetration all fall out of them (Fangs). No bite-damage number anywhere —
+# what one closing of these jaws is worth derives from the jaw compartment's
+# muscle over the reference build's, times the dentition's own pressure.
+
+## Teeth per arch. The mouth carries two arches, nested.
+@export var tooth_count: int = 9
+## Crown length of a canine, as a fraction of the mouth's own arc scale.
+@export var tooth_size: float = 0.22
+## 0 a mouth of blunt cusps, 1 a mouth of needles.
+@export var tooth_sharpness: float = 0.72
+## Half-angle of the tooth arc, degrees.
+@export var jaw_gape_deg: float = 70.0
+## How unevenly the individual crowns come up.
+@export var tooth_variation: float = 0.18
+
 # ---------------------------------------------------------------- solver ----
 
 @export var spine_damping: float = 0.64

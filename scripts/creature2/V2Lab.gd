@@ -28,6 +28,8 @@
 ##   K            collapse / revive (ragdoll mode toggle)
 ##   F            drop the body from a height
 ##   V            skeleton over the flesh — the state rather than the animal
+##   B / G        bite at the mouse (G latches: the hold tows, and feeds on a
+##                carcass; either key again lets go)
 ##   drag         haul the nearest body node with the mouse
 class_name V2Lab
 extends Node2D
@@ -161,6 +163,36 @@ func _pump_key(event: InputEventKey) -> void:
 		KEY_V:
 			creature.debug = not creature.debug
 			creature.queue_redraw()
+		KEY_B:
+			_bite(false)
+		KEY_G:
+			_bite(true)
+
+
+## The lab's strike: bite at the mouse, on whichever other body is nearest to
+## it. B is one closing, G latches — a hold that tows and, on a carcass,
+## feeds. The lab offers the ask; whether the flesh is reachable is the maw's
+## own answer, exactly as it will be a player's.
+func _bite(latch: bool) -> void:
+	var me := creature as Creature2
+	if me == null:
+		return
+	var at: Vector2 = _world_mouse()
+	if not me.maw.holding.is_empty():
+		me.maw.release()
+		return
+	var best: Creature2 = null
+	var best_d: float = INF
+	for node in get_tree().get_nodes_in_group("creatures2"):
+		var other := node as Creature2
+		if other == null or other == me:
+			continue
+		var d: float = other.centre().distance_squared_to(at)
+		if d < best_d:
+			best_d = d
+			best = other
+	if best != null:
+		me.bite(best, at, latch)
 
 
 func _zoom(factor: float) -> void:
