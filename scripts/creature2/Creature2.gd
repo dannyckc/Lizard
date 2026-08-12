@@ -55,6 +55,13 @@ class Command extends RefCounted:
 	var turn: float = 0.0
 	var sprint: bool = false
 	var jump: bool = false
+	## Where the cursor is, and whether it is saying anything. Purely aim: the
+	## head tracks it and — through `Gaze.lead` — the walk follows the head, but
+	## nothing device-specific reaches the body and no other axis is touched, so
+	## an animal crossing the paddock while the pointer is over a slider keeps
+	## going exactly where it was pointed.
+	var aim_world: Vector2 = Vector2.ZERO
+	var aim_active: bool = false
 
 
 @export var body: BodySpec
@@ -77,6 +84,30 @@ var travel: Travel = Travel.new()
 ## maw is the whole strike pipeline.
 var vitals: Vitals = Vitals.new()
 var maw: Maw = Maw.new()
+## Where the animal is looking. The cursor's half of the controls: it carries
+## the head round, it leads the walk, and the strike is thrown along it.
+var gaze: Gaze = Gaze.new()
+
+# ------------------------------------------------------------------- aim ----
+# What this creature has been pointed at, and what its jaws make of it. Written
+# from outside — the world resolves a cursor into one target and hands it over —
+# because which of the several things under a pointer was meant is a question
+# about the world rather than about any one animal in it.
+
+## The selected target: which flesh of which body, or bare ground. Null when
+## nothing has been pointed at, which is the state every line downstream falls
+## back to and behaves exactly as it did before aiming existed.
+var aim: Quarry.Pick = null
+## Whether the jaws can be got onto it and, when they cannot, why not — `Maw.
+## aim`'s answer, re-asked every tick because both halves of it move.
+var aim_reach: Dictionary = {}
+## Where the aimed flesh is, on the plan: the point the mouth is sent to and the
+## point the head is pointed at, so where the animal looks, where the teeth
+## arrive and where the damage lands are one place.
+var aim_contact: Vector2 = Vector2.ZERO
+## Whether the button is down. A held button is a grip, and letting go is
+## letting go — see `Maw.hold`.
+var bite_held: bool = false
 
 ## Where the head is being led, and on what bearing. The body follows it: the head
 ## is the one point on the chain that is placed rather than solved. With no mover
@@ -132,6 +163,11 @@ func build(at: Vector2, p_heading: float) -> void:
 	_measure()
 	vitals = Vitals.new()
 	maw.build(self)
+	gaze.build(self)
+	aim = null
+	aim_reach = {}
+	aim_contact = Vector2.ZERO
+	bite_held = false
 
 
 ## The weight, against the feet, right now. Every tick ends with this (below),
@@ -160,6 +196,13 @@ func _physics_process(delta: float) -> void:
 
 	var airborne: bool = armature.fall.is_airborne()
 	attitude.tick(delta, speed_norm, command.sprint, airborne)
+
+	# Where the animal is looking, before the mover reads it: the bearing the
+	# steering leads on and the bearing the neck is swept to have to be the same
+	# one, or the head would be chasing a turn it caused. What it measures itself
+	# against is last tick's solved shoulders — the neck being clamped is part of
+	# the pose being solved, and there is no ordering that avoids that.
+	gaze.tick(delta)
 
 	var ground: float = _ground_under(armature.centre(), body.trunk_length * 0.25)
 
@@ -209,6 +252,12 @@ func _physics_process(delta: float) -> void:
 	# reads back from it, which is why it can be last: the flesh is a consequence
 	# of the tick, never a term in it.
 	contour.pose()
+	# The aim, re-read off the skin that has just been posed: the flesh under the
+	# cursor moved with the body it belongs to, so the point the head is tracking
+	# and the reach it is priced at are both a tick old the moment they are not
+	# re-asked. Held as an address rather than a place, exactly as a latched
+	# mouth is, which is why a walking target stays selected.
+	_update_aim()
 	queue_redraw()
 
 
@@ -239,6 +288,10 @@ func reset() -> void:
 	# back down.
 	vitals.revive()
 	maw.release()
+	bite_held = false
+	aim = null
+	aim_reach = {}
+	gaze.reset()
 	armature.reset()
 	head_pos = armature.plan(armature.head_index())
 	heading = armature.spawn_heading
@@ -318,6 +371,94 @@ func bite(target: Creature2, at: Vector2, latch: bool = false) -> bool:
 	return maw.strike(target, at, latch)
 
 
+# ------------------------------------------------------------------- aim ----
+
+## Points this creature at something. The world resolves a cursor into one
+## target — which flesh of which body, or bare ground — and hands it over; what
+## the animal makes of it is everything below.
+##
+## Null clears it, which is what happens when nothing is being pointed and what
+## every line downstream treats as "no target", behaving exactly as this file did
+## before it could be aimed.
+func aim_at(target: Quarry.Pick) -> void:
+	aim = target
+	_update_aim()
+
+
+## One tick of being pointed at something.
+##
+## The reach is re-solved every tick, because both the animal and its target are
+## moving and an answer from last tick is an answer about somewhere neither of
+## them is. That much is unconditional, and it is *all* that happens while the
+## player is merely pointing: a hover asks a question about the world and the
+## answer is drawn, not performed. An animal that lowered itself toward every
+## pixel the cursor passed over would be reading the mouse rather than hunting,
+## and a body that had already crept into position before the button went down
+## takes the drama out of pressing it. The click is what commits — and what the
+## body then spends is the maw's throw and its carry, both of them measured.
+func _update_aim() -> void:
+	if aim == null:
+		aim_reach = {}
+		return
+	if aim.creature != null and aim.creature.contour != null \
+			and not aim.contact.is_empty():
+		# The flesh, not the pixel: the address the cursor landed on is followed
+		# through the target's own pose, so a selected shin stays the same shin
+		# while its owner walks.
+		var flesh: Vector3 = aim.creature.contour.place(aim.contact["band"],
+			aim.contact["t"], aim.contact["theta"])
+		aim.at = Vector2(flesh.x, flesh.y)
+		aim.height = flesh.z
+		aim.seen = Contour.seen(flesh)
+	aim_contact = aim.at
+	aim_reach = maw.aim(aim.creature, aim.at) if aim.creature != null else {}
+
+
+## Whether the jaws could be got onto whatever this creature is pointed at.
+## True with nothing selected, because an animal with no target has not been
+## refused anything — a bite thrown at nothing in particular is still a bite.
+func can_reach_aim() -> bool:
+	return aim == null or aim.creature == null or bool(aim_reach.get("ok", false))
+
+
+# ------------------------------------------------------------------ bite ----
+
+## One click: a strike thrown at whatever the cursor is on.
+##
+## Thrown at the selected target when there is one and at the bare point when
+## there is not, and thrown either way — the reach decides how it *goes*, never
+## whether it goes. Presses during a strike or its recovery are discarded rather
+## than buffered, so one click is always at most one attack.
+func request_bite(at: Vector2) -> bool:
+	if not alive:
+		return false
+	var target: Creature2 = aim.creature if aim != null else null
+	var point: Vector2 = aim_contact if target != null else at
+	return maw.strike(target, point, bite_held)
+
+
+## Tracks the button. Held is a grip: jaws that close while it is down keep what
+## they closed on, and go on working — a latched mouth chews. Letting go is
+## letting go, at once, whether the mouth is on flesh or still on its way.
+func set_bite_held(held: bool) -> void:
+	# A carcass's jaws are as limp as the rest of it. It can be bitten and held;
+	# it cannot bite or hold.
+	if not alive and held:
+		return
+	bite_held = held
+	maw.hold(held)
+
+
+## Whether these jaws are shut on something.
+func is_bite_latched() -> bool:
+	return maw.latched()
+
+
+## True while a strike is playing, at any phase.
+func is_lunging() -> bool:
+	return maw.lunging()
+
+
 func pick_node(world: Vector2, radius: float) -> int:
 	return armature.pick_node(to_local(world), radius)
 
@@ -327,6 +468,12 @@ func haul_node(i: int, world: Vector2) -> void:
 
 
 # ---------------------------------------------------------------- the ground ----
+
+## What is under a point — the one ground read anything outside the body takes
+## of the world this creature is standing in.
+func ground_at(at: Vector2) -> float:
+	return _ground_under(at, 0.0)
+
 
 func _ground_under(at: Vector2, radius: float) -> float:
 	if terrain == null:

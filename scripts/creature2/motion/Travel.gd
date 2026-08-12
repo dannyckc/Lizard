@@ -157,11 +157,20 @@ func steer(delta: float, ground: float) -> void:
 
 	# The turn: a rate the anatomy and the pace gate, eased at the body's own
 	# responsiveness. Airborne there is nothing to turn against.
+	#
+	# Two inputs, and the hand has the last word: the head is asked for only as
+	# much of the turn as the player is not already taking by hand, so A and D
+	# still mean exactly what they meant and an animal walking forward with
+	# nothing held goes where it is looking. See `Gaze.lead`, which is where the
+	# whole of that is decided and bounded.
 	var falloff: float = lerpf(1.0, spec.turn_speed_falloff,
 		clampf(creature.speed_norm, 0.0, 1.0))
+	var by_hand: float = clampf(cmd.turn, -1.0, 1.0)
+	var demand: float = clampf(by_hand
+		+ creature.gaze.lead() * (1.0 - absf(by_hand)), -1.0, 1.0)
 	var want: float = 0.0
 	if not airborne:
-		want = clampf(cmd.turn, -1.0, 1.0) * deg_to_rad(spec.turn_speed_deg) \
+		want = demand * deg_to_rad(spec.turn_speed_deg) \
 			* creature.attitude.active.agility * falloff
 	creature.ang_vel = lerpf(creature.ang_vel, want,
 		1.0 - exp(-spec.turn_responsiveness * delta))

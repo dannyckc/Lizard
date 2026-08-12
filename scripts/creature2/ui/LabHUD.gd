@@ -35,7 +35,7 @@ const VIEWS: Array[String] = [VIEW_FIELD, VIEW_ANATOMY]
 ## cannot and every one of those is a key.
 const LEGEND: Array[Array] = [
 	[[["W", "A", "S", "D"], "MOVE"], [["⇧"], "SPRINT"], [["SPACE"], "JUMP"],
-		[["LMB"], "DRAG NODE"]],
+		[["LMB"], "BITE / HOLD"], [["RMB"], "DRAG NODE"]],
 	[[["F3"], "ANATOMY"], [["V"], "SKELETON"], [["K"], "COLLAPSE"],
 		[["F"], "DROP"], [["R"], "RESET"]],
 ]
@@ -195,6 +195,13 @@ func _fit_drawers() -> void:
 func _state_word() -> String:
 	if subject.armature.collapsed:
 		return "collapsed"
+	# Jaws outrank legs: a body holding onto something is doing that, whatever
+	# its feet are up to, and a strike in flight is the thing it has committed
+	# its weight to.
+	if subject.is_bite_latched():
+		return "gripping"
+	if subject.is_lunging():
+		return "biting"
 	if subject.armature.fall.is_airborne():
 		return "airborne"
 	if subject.speed_norm > 0.05:

@@ -484,6 +484,85 @@ func locate(world: Vector3) -> Dictionary:
 	}
 
 
+## The same question asked of the *picture*: what the cursor is on.
+##
+## A mouse gives two numbers and the world has three, so a pixel is ambiguous
+## before something resolves it — the point under the pointer is on the floor,
+## on the shoulder of the animal standing there, and on the belly of the taller
+## one behind it, all at once. The choice cannot be made on the ground plane,
+## because that is precisely the axis the view collapsed. So it is made where
+## the ambiguity was created: everything is drawn through one projection (a
+## point at height z is drawn `z · Carriage.PERSPECTIVE` up the screen), and the
+## thing the cursor is pointing at is whichever drawn ring it lands on. Pick
+## there and the height comes back for free — it is the height of whatever was
+## hit.
+##
+## Two passes, because they answer two different questions. Which ring is *how
+## far along which chain*, and it is ranked exactly as `locate` ranks — by
+## distance past the local surface, so a fat trunk outbids a thin tail the
+## cursor happens to lie nearer the middle of. Which sector is *which way round
+## the body*, and that one is answered by walking the ring's own drawn wedges,
+## so what comes back is the wedge the player can see under the pointer.
+##
+## Returns `locate`'s dictionary, plus `seen` — where the answer is in the
+## picture, which is where a mark on it has to be drawn.
+func locate_seen(cursor: Vector2) -> Dictionary:
+	if not _posed:
+		return {}
+	var best_r: int = -1
+	var best_u: float = 0.0
+	var best_d: float = INF
+	for band in bands:
+		var last: int = band.first + band.count - 1
+		for r in range(band.first, last):
+			var a: Vector2 = seen(ring_centre[r])
+			var b: Vector2 = seen(ring_centre[r + 1])
+			var axis: Vector2 = b - a
+			var len2: float = axis.length_squared()
+			var u: float = 0.0
+			if len2 > MIN_TANGENT:
+				u = clampf((cursor - a).dot(axis) / len2, 0.0, 1.0)
+			var d: float = cursor.distance_to(a + axis * u) \
+				- (mean_radius(r) + mean_radius(r + 1)) * 0.5
+			if best_r < 0 or d < best_d:
+				best_d = d
+				best_r = r
+				best_u = u
+	if best_r < 0:
+		return {}
+
+	# The nearer of the two rings owns the answer: rings are laid down several to
+	# a stick, so the station between them is the same station either way, and
+	# taking one of them keeps the address on a wedge that actually exists.
+	var ring: int = best_r if best_u < 0.5 else best_r + 1
+	var hit: Band = bands[ring_band[ring]]
+	var base: int = ring_base[ring]
+	var sector: int = 0
+	var closest: float = INF
+	for s in hit.sectors:
+		var d2: float = cursor.distance_squared_to(seen(surface[base + s]))
+		if d2 < closest:
+			closest = d2
+			sector = s
+	var theta: float = wrapf(atan2(hit.sines[sector], hit.cosines[sector]), 0.0, TAU)
+	var t: float = ring_t[ring]
+	return {
+		"band": hit.name, "t": t, "theta": theta,
+		"station": corpus.station_of(hit.name, t), "sector": sector,
+		"depth": -best_d,
+		"at": surface[base + sector], "centre": ring_centre[ring],
+		"seen": seen(surface[base + sector]),
+	}
+
+
+## Where a point in the world is in the picture. One line, and it is the same
+## line `Likeness` draws every vertex with — the view is tilted in exactly one
+## place (`Carriage.PERSPECTIVE`), so what is picked and what is displayed
+## cannot come apart.
+static func seen(p: Vector3) -> Vector2:
+	return Vector2(p.x, p.y - p.z * Carriage.PERSPECTIVE)
+
+
 ## The inverse: where a body address currently is in the world, on the drawn
 ## surface. What a latched hold reads to follow the flesh it is holding
 ## through every pose — the address never moves, the frames do.

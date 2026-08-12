@@ -18,6 +18,9 @@
 ## lab offers is the handling a probe cannot: walk the animal about, drag a node to
 ## feel the constraints answer, drop the body, knock it over, open it up.
 ##
+##   mouse        look: the head tracks the cursor and the walk follows the head
+##   LMB          bite at whatever the cursor is on — held, the jaws keep it
+##                (the hold tows, and feeds on a carcass); released, they let go
 ##   W / S        throttle forward and back
 ##   A / D        turn
 ##   shift        sprint
@@ -28,9 +31,7 @@
 ##   K            collapse / revive (ragdoll mode toggle)
 ##   F            drop the body from a height
 ##   V            skeleton over the flesh — the state rather than the animal
-##   B / G        bite at the mouse (G latches: the hold tows, and feeds on a
-##                carcass; either key again lets go)
-##   drag         haul the nearest body node with the mouse
+##   RMB drag     haul the nearest body node with the mouse
 class_name V2Lab
 extends Node2D
 
@@ -50,6 +51,10 @@ const FOLLOW_RATE: float = 3.2
 
 var creature: Node2D = null
 var hud: LabHUD = null
+## The mark on whatever the cursor has hold of. Its own node above the world
+## rather than a few more strokes in this file, because it has to be drawn over
+## the animal it has selected — see AimMark.
+var mark: AimMark = null
 ## Node index the mouse currently holds, -1 for none.
 var _held: int = -1
 
@@ -57,6 +62,9 @@ var _held: int = -1
 func _ready() -> void:
 	creature = get_node_or_null("Creature2")
 	camera.make_current()
+	mark = AimMark.new()
+	mark.name = "AimMark"
+	add_child(mark)
 	_build_ui()
 	camera.position = _camera_focus()
 
@@ -88,7 +96,12 @@ func _build_ui() -> void:
 func _camera_focus() -> Vector2:
 	if creature == null:
 		return camera.position
-	var look: Vector2 = creature.centre()
+	# The head, as v1's habitat frames it: the animal is being worn rather than
+	# watched, so the picture is centred on the end of it that is doing the
+	# looking and the body trails behind. Deliberately `head_pos` — the mover's
+	# own anchor — and not the drawn head, or the camera would sway with every
+	# glance the cursor took.
+	var look: Vector2 = creature.head_pos
 	if hud == null:
 		return look
 	return look + Vector2(hud.field_shift() / camera.zoom.x, 0.0)
@@ -111,6 +124,39 @@ func _process(delta: float) -> void:
 		- (1.0 if Input.is_physical_key_pressed(KEY_A) else 0.0)
 	command.sprint = Input.is_physical_key_pressed(KEY_SHIFT)
 	command.jump = Input.is_physical_key_pressed(KEY_SPACE)
+	# The head settles forward while the cursor is over the HUD. Mouse look is
+	# purely aim and never touches the axes above, so an animal crossing the lab
+	# while a drawer is being read keeps going exactly where it was pointed.
+	command.aim_active = get_viewport().gui_get_hovered_control() == null
+	command.aim_world = _world_mouse()
+	_aim_cursor()
+	if mark != null:
+		mark.show_aim(creature as Creature2, camera.zoom.x)
+
+
+## Resolves the cursor into one target and hands it to the creature.
+##
+## Every tick rather than on the click, and that is what makes it a *target*
+## rather than a mouse coordinate: the animal is looking at whatever the pointer
+## is on before any button is pressed, the reach to it is priced, and the mark
+## says whether the jaws can be got onto it — so the strike, when it comes, is
+## thrown at something the player has already been told about.
+##
+## Owned here rather than by the creature because which of the several things
+## under one pixel was meant is a question about the world, and only the world
+## can see all of them. Which is exactly why it takes two calls: `pick` is that
+## question and is answered without reference to anybody, and `resolve` is the
+## other one — which surface *this* animal's jaws would meet, and whether the
+## marker has to stop short because it cannot get that far.
+func _aim_cursor() -> void:
+	var me := creature as Creature2
+	if me == null:
+		return
+	if not me.command.aim_active:
+		me.aim_at(null)
+		return
+	me.aim_at(Quarry.resolve(Quarry.pick(get_tree(), _world_mouse(),
+		me, Quarry.SLACK), me))
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -131,6 +177,19 @@ func _pump_button(event: InputEventMouseButton) -> void:
 			if event.pressed:
 				_zoom(1.0 / ZOOM_STEP)
 		MOUSE_BUTTON_LEFT:
+			# The button is two things at once and both are told to the body:
+			# the press is one strike, and the state of the button is whether
+			# the jaws keep what they close on. A press while already holding is
+			# neither — the mouth is busy, and it goes on chewing.
+			if creature == null:
+				return
+			creature.set_bite_held(event.pressed)
+			if event.pressed:
+				creature.request_bite(_world_mouse())
+		MOUSE_BUTTON_RIGHT:
+			# The lab's own handling, moved off the left button now that the
+			# left button is the animal's: hauling a node about is a thing done
+			# *to* a specimen, not by it.
 			if not event.pressed:
 				_held = -1
 			elif creature != null:
@@ -141,6 +200,23 @@ func _pump_drag(_event: InputEventMouseMotion) -> void:
 	if creature == null or _held < 0:
 		return
 	creature.haul_node(_held, _world_mouse())
+
+
+## A bite may begin only from unhandled world input, but its release must be
+## observed even if the cursor moves over the HUD while the jaws are clamped.
+## `_input` runs before GUI dispatch, so handling only the release here
+## preserves both rules.
+func _input(event: InputEvent) -> void:
+	if creature != null and event is InputEventMouseButton \
+			and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		creature.set_bite_held(false)
+
+
+## A window that loses focus with the button down has not asked the animal to
+## hold on forever.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and is_instance_valid(creature):
+		creature.set_bite_held(false)
 
 
 func _pump_key(event: InputEventKey) -> void:
@@ -163,36 +239,6 @@ func _pump_key(event: InputEventKey) -> void:
 		KEY_V:
 			creature.debug = not creature.debug
 			creature.queue_redraw()
-		KEY_B:
-			_bite(false)
-		KEY_G:
-			_bite(true)
-
-
-## The lab's strike: bite at the mouse, on whichever other body is nearest to
-## it. B is one closing, G latches — a hold that tows and, on a carcass,
-## feeds. The lab offers the ask; whether the flesh is reachable is the maw's
-## own answer, exactly as it will be a player's.
-func _bite(latch: bool) -> void:
-	var me := creature as Creature2
-	if me == null:
-		return
-	var at: Vector2 = _world_mouse()
-	if not me.maw.holding.is_empty():
-		me.maw.release()
-		return
-	var best: Creature2 = null
-	var best_d: float = INF
-	for node in get_tree().get_nodes_in_group("creatures2"):
-		var other := node as Creature2
-		if other == null or other == me:
-			continue
-		var d: float = other.centre().distance_squared_to(at)
-		if d < best_d:
-			best_d = d
-			best = other
-	if best != null:
-		me.bite(best, at, latch)
 
 
 func _zoom(factor: float) -> void:

@@ -186,23 +186,78 @@ func throw_cap() -> float:
 	return minf(footing * THROW_SUPPORT, creature.body.trunk_length * THROW_SHARE)
 
 
+## The same purse read the other way round: how far out *on the plan* this mouth
+## can be brought to bear on something standing at height `z`.
+##
+## One number and one arithmetic, so a marker drawn at this distance is a
+## marker the strike then agrees to go to. Height spent is distance lost,
+## because the neck is an arc rooted at the withers and this is that arc's
+## radius with the vertical taken out of it — which is why the same gap that
+## connects at mouth level is refused onto the floor.
+func plan_reach(z: float) -> float:
+	var a: Armature = creature.armature
+	var withers: Vector3 = a.pos[a.withers_index()]
+	var arm: float = creature.body.neck_length + creature.body.head_offset
+	var radius: float = arm + throw_cap() + muzzle_reach() * GRAB
+	var rise: float = z - withers.z
+	return sqrt(maxf(radius * radius - rise * rise, 0.0))
+
+
+## Whether the jaws are shut on anything at all.
+func latched() -> bool:
+	return not holding.is_empty()
+
+
+## Whether a strike is playing, at any phase — the lunge in flight or the
+## recovery after it.
+func lunging() -> bool:
+	return state != IDLE
+
+
 # ------------------------------------------------------------------ commit ----
 
 ## Commits a strike: the aim's answer, taken. Returns whether the body goes.
+##
+## Never refused for being out of reach, and that is v1's deliberate reversal.
+## The body used to decline the strike outright when the target was above it,
+## below it or too far — the correct *fact* delivered as the wrong *behaviour*,
+## because a click that does nothing at all is indistinguishable from a click
+## the game did not receive, and an animal that has misjudged a lunge is a thing
+## that happens. So the strike is always thrown, and what it then meets is
+## decided where it has always been decided: in the world, by the jaws arriving
+## somewhere and there being something in them or not.
+##
+## `target` may be null, and then this is a snap at whatever is at `at` — the
+## floor, the air, or a body that walks into it before the jaws shut. The
+## refusals `aim` gives are not wasted for that: they are what the mark draws
+## hollow and what the readout says, so "you cannot get to that" is said before
+## the button rather than by swallowing it.
 func strike(target: Creature2, at: Vector2, latch: bool = false) -> bool:
 	if state != IDLE or creature.armature.collapsed or not holding.is_empty():
 		return false
+	var jaw: Vector3 = jaw_point()
 	var seen: Dictionary = aim(target, at)
-	if not bool(seen["ok"]):
-		return false
-	var contact: Dictionary = seen["contact"]
-	_target = target
-	_at = contact["at"]
+	var cap: float = throw_cap()
+	var reached: bool = target != null and bool(seen.get("ok", false))
+	if reached:
+		var contact: Dictionary = seen["contact"]
+		_target = target
+		_at = contact["at"]
+		# The body covers what the arm cannot: gap from the withers, less the
+		# neck-and-head already reaching along it. A contact inside the arm asks
+		# for almost no body at all — the carry alone takes the mouth there — but
+		# never for none: floored at a twelfth of what this animal could throw,
+		# so even a bite taken point-blank reads as a strike rather than as the
+		# jaws opening and shutting where they already were.
+		_throw = clampf(float(seen["gap"]) - float(seen["arm"]), cap / 12.0, cap)
+	else:
+		# At air, the whole of what this body can throw itself, aimed at the
+		# point rather than past it — and floored at a twelfth of it, so even a
+		# point-blank snap reads as a strike rather than as a twitch.
+		_target = null
+		_at = Vector3(at.x, at.y, jaw.z)
+		_throw = clampf(Vector2(at.x - jaw.x, at.y - jaw.y).length(), cap / 12.0, cap)
 	_latch = latch
-	# The body covers what the arm cannot: gap from the withers, less the
-	# neck-and-head already reaching along it. A contact inside the arm asks
-	# for no body at all — the carry alone takes the mouth there.
-	_throw = clampf(float(seen["gap"]) - float(seen["arm"]), 0.0, throw_cap())
 	_thrown = 0.0
 	state = THROW
 	_timer = 0.0
@@ -282,13 +337,24 @@ func _tick_throw(delta: float) -> void:
 func _close() -> void:
 	var target: Creature2 = _target
 	_target = null
-	if target == null or target.contour == null:
-		return
 	var jaw: Vector3 = jaw_point()
-	var mouth: Dictionary = target.contour.locate(jaw)
-	if mouth.is_empty() \
-			or float(mouth["depth"]) < -muzzle_reach() * GRAB:
-		return
+	var mouth: Dictionary = {}
+	if target != null and target.contour != null:
+		mouth = target.contour.locate(jaw)
+		if mouth.is_empty() or float(mouth["depth"]) < -muzzle_reach() * GRAB:
+			target = null
+			mouth = {}
+	if target == null:
+		# Nothing was committed to, or the strike arrived somewhere other than
+		# where it was thrown. Either way the jaws take what is in them — the
+		# world decides a bite, not the aim that started it, which is how a snap
+		# at the air catches the animal that walked into it and how a lunge that
+		# overshot a leg closes on the belly behind it.
+		var caught: Dictionary = _in_the_jaws(jaw)
+		if caught.is_empty():
+			return
+		target = caught["who"]
+		mouth = caught["mouth"]
 	var a: Armature = creature.armature
 	var fwd: Vector2 = a.fwd[a.head_index()]
 	var depth: float = fangs.close_depth(creature.corpus)
@@ -390,6 +456,43 @@ func _tick_hold(delta: float) -> void:
 			holding["band"] = seat["band"]
 			holding["t"] = seat["t"]
 			holding["theta"] = seat["theta"]
+
+
+## Whichever body these jaws are deepest into, and where — or nothing at all.
+## Scored in the one currency the whole hit test is scored in, so a mouth
+## covering two animals closes on the one it is further inside.
+func _in_the_jaws(jaw: Vector3) -> Dictionary:
+	if creature == null or not creature.is_inside_tree():
+		return {}
+	var floor_depth: float = -muzzle_reach() * GRAB
+	var best: Dictionary = {}
+	var deepest: float = floor_depth
+	for node in creature.get_tree().get_nodes_in_group("creatures2"):
+		var other := node as Creature2
+		if other == null or other == creature or other.contour == null:
+			continue
+		var found: Dictionary = other.contour.locate(jaw)
+		if found.is_empty():
+			continue
+		var depth: float = float(found["depth"])
+		if depth < deepest:
+			continue
+		deepest = depth
+		best = {"who": other, "mouth": found}
+	return best
+
+
+## The button, tracked. Held is a grip — jaws that close while it is down keep
+## what they closed on — and letting go is letting go, immediately, whether the
+## mouth is on flesh or still on its way to it.
+## A strike already in flight is left to land: the button coming up costs it its
+## latch, never its throw, because a lunge is a movement the animal has already
+## committed its weight to and stopping one in mid-air is not something a body
+## can do.
+func hold(held: bool) -> void:
+	_latch = held
+	if not held and not holding.is_empty():
+		release()
 
 
 func release() -> void:

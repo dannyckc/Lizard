@@ -219,6 +219,25 @@ var _rolled: float = 0.0
 ## whatever line this asks for — muscle carries the reach, tissue still hangs.
 var head_reach_z: float = NAN
 
+## Which way the head is being pointed, as a world bearing — NAN when nothing is
+## looking and the neck keeps whatever shape the solve left it in.
+##
+## Assigned, never integrated, on exactly the terms `roll` and `head_reach_z`
+## are: `Gaze` is the one place a look is decided and this is the one place the
+## body expresses it. What it costs the chain is `_aim_neck`, and what it does
+## *not* touch is the head's plan drive — the mover still carries the body where
+## it is going, and the cursor only turns the neck on top of that.
+var look: float = NAN
+## How far the look has already carried each node off the chain the solver
+## settled. Held for the same reason `wave_offset` is, and spent the other way
+## round: the wave is a displacement the body genuinely has and the constraints
+## are solved around it, where a look is a displacement of the *neck only* that
+## the constraints must never see — a chain solved head-first follows whatever
+## the head does, so a sweep left in front of the solver tows the whole animal
+## after its own gaze. So it is taken back off before the solve and put back on
+## after it, and the body underneath never moved.
+var look_offset: PackedVector2Array = PackedVector2Array()
+
 ## Phase of the travelling lateral wave, and how far it has already displaced each
 ## node. The wave is kinematic: it moves the body, it never pushes it, so only the
 ## *difference* is applied and it is applied to the Verlet history as well — shift
@@ -344,6 +363,8 @@ func build(p_spec: BodySpec, at: Vector2, heading: float) -> void:
 	hind_carry = hind_stance
 	wave_offset.resize(total_nodes)
 	wave_offset.fill(Vector2.ZERO)
+	look_offset.resize(total_nodes)
+	look_offset.fill(Vector2.ZERO)
 	body_length = 0.0
 	for k in axial_stick.size():
 		body_length += stick_bone[axial_stick[k]]
@@ -431,6 +452,8 @@ func _layout(at: Vector2, heading: float) -> void:
 	fore_carry = fore_stance
 	hind_carry = hind_stance
 	head_reach_z = NAN
+	look = NAN
+	look_offset.fill(Vector2.ZERO)
 	wave_clock = 0.0
 	wave_offset.fill(Vector2.ZERO)
 	bunched = 0.0
@@ -490,6 +513,10 @@ func advance(delta: float, fall_floor: float = 0.0, speed_norm: float = 0.0,
 		wave_gain: float = 0.0) -> void:
 	fall.advance(delta, fall_floor)
 	var live: bool = not collapsed
+	# Last tick's look comes off first, so what is integrated and relaxed below
+	# is the chain the body actually has rather than the chain it was looking
+	# with — see `look_offset`.
+	_unaim_neck()
 	_integrate_plan(live)
 	if live and wave_gain > 0.0:
 		_wave(delta, speed_norm, wave_gain)
@@ -498,7 +525,111 @@ func advance(delta: float, fall_floor: float = 0.0, speed_norm: float = 0.0,
 	else:
 		_relax_plan(live)
 	_rest_plan()
+	# ...and then the look, on the settled chain and before the frames are read
+	# off it, so everything downstream sees one neck rather than a neck and a
+	# correction to it.
+	_aim_neck()
 	_compute_frames()
+
+
+## The cursor look, expressed: the neck swept until the head points along `look`.
+##
+## v1 articulated a single head node off the last neck joint (`Spine.pose_head`)
+## because that is all the chain it had above the shoulders. v2 has a real
+## cervical run, so the demand is shared out along it: each joint takes what it
+## can under its own graded bend limit, root-first, and the head arrives wherever
+## the neck runs out. A long neck therefore looks further round than a short one
+## and nobody authored either number — and a pose the solver would have refused
+## is exactly the pose this cannot reach, because it is the same limit.
+##
+## Three properties make it a *look* rather than a second drive, and all three
+## are in the arithmetic rather than in a rule:
+##
+##   * it preserves the solve. Rotating a sub-chain about its own joint keeps
+##     every stick length the relaxation just fixed, so the anatomy invariants
+##     hold through any look at all.
+##   * it stops at the neck. The joint at the withers is deliberately not swept,
+##     which leaves the girdle's own frame — and the fore sockets hanging off it
+##     — untouched, so an animal turning its head does not swing its shoulders.
+##     v1 made the same exclusion in `Spine._compute_frames`, for the same reason.
+##   * it is kinematic, and it is invisible. The displacement goes into `prev`
+##     as well as `pos`, so the integrator takes none of it for real motion; and
+##     it is taken back off at the top of the next tick (`_unaim_neck`), so the
+##     solver only ever sees the body. Leave it in front of a head-first solve
+##     and the animal is towed along behind its own gaze, because a driven chain
+##     follows the head by construction.
+func _aim_neck() -> void:
+	if is_nan(look) or collapsed or _neck == null:
+		return
+	var n: int = axial.size()
+	var m: int = _neck.nodes.size()
+	if n < 3 or m < 2:
+		return
+	var head_dir: Vector2 = _p2(axial[n - 1]) - _p2(axial[n - 2])
+	if head_dir.length_squared() < 0.000001:
+		return
+	# What is left to turn, and it is measured against where the head is actually
+	# pointing rather than accumulated: the solve pulls the neck back toward the
+	# drive every tick and this puts it back, so the bearing converges on the ask
+	# instead of drifting past it.
+	var demand: float = wrapf(look - head_dir.angle(), -PI, PI)
+	for j in range(n - m, n - 1):
+		if absf(demand) < 0.00001:
+			return
+		var incoming: Vector2 = _p2(axial[j]) - _p2(axial[j - 1])
+		var outgoing: Vector2 = _p2(axial[j + 1]) - _p2(axial[j])
+		if incoming.length_squared() < 0.000001 or outgoing.length_squared() < 0.000001:
+			continue
+		# The joint's own room: how much further it may fold given how far the
+		# solve has already folded it, in the direction being asked for.
+		var limit: float = axial_bend[j - 1]
+		var bent: float = wrapf(outgoing.angle() - incoming.angle(), -PI, PI)
+		var turn: float = clampf(demand / float(n - 1 - j), -limit - bent, limit - bent)
+		if absf(turn) < 0.000001:
+			continue
+		_swing_after(j, turn)
+		demand -= turn
+
+
+## Rotates everything past axial vertex `j` about it — history and the standing
+## displacement included, because both have to come back off next tick.
+func _swing_after(j: int, angle: float) -> void:
+	var pivot: Vector2 = _p2(axial[j])
+	for k in range(j + 1, axial.size()):
+		var i: int = axial[k]
+		var moved: Vector2 = pivot + (_p2(i) - pivot).rotated(angle)
+		var shift: Vector2 = moved - _p2(i)
+		_set_p2(i, moved)
+		prev[i] = Vector3(prev[i].x + shift.x, prev[i].y + shift.y, prev[i].z)
+		look_offset[i] += shift
+
+
+## Takes the standing look back off, leaving the chain the solver settled into.
+## Position and history together, so nothing about the body's own motion is
+## disturbed by having looked somewhere.
+func _unaim_neck() -> void:
+	for k in range(axial.size()):
+		var i: int = axial[k]
+		var off: Vector2 = look_offset[i]
+		if off == Vector2.ZERO:
+			continue
+		_set_p2(i, _p2(i) - off)
+		prev[i] = Vector3(prev[i].x - off.x, prev[i].y - off.y, prev[i].z)
+		look_offset[i] = Vector2.ZERO
+
+
+## The most the neck can sweep the head off its own shoulders, radians either
+## way — the sum of what the cervical joints will give. What `Gaze` clamps its
+## ask to, so the look asked for and the look delivered are one number.
+func neck_sweep() -> float:
+	var n: int = axial.size()
+	var m: int = _neck.nodes.size() if _neck != null else 0
+	if n < 3 or m < 2:
+		return 0.0
+	var total: float = 0.0
+	for j in range(n - m, n - 1):
+		total += axial_bend[j - 1]
+	return total
 
 
 ## The Z channel — see `_solve_heights`.
@@ -944,6 +1075,8 @@ func collapse() -> void:
 	collapsed = true
 	release_head()
 	head_reach_z = NAN
+	look = NAN
+	look_offset.fill(Vector2.ZERO)
 	var datum: float = maxf(
 		(pos[_trunk.nodes[0]].z + pos[_trunk.nodes[_trunk.nodes.size() - 1]].z) * 0.5, 0.0)
 	fall.start(datum)
@@ -981,6 +1114,9 @@ func take_head(plan: Vector2) -> void:
 	pinned[head] = 1
 	pos[head] = Vector3(plan.x, plan.y, pos[head].z)
 	prev[head] = pos[head]
+	# Placed, so whatever the look had done with it is spent: the drive is the
+	# unswept head, and the sweep is re-derived off the solve below.
+	look_offset[head] = Vector2.ZERO
 
 
 ## ...and gives it back, which is what a collapse does.
@@ -1008,6 +1144,9 @@ func rotate_followers(pivot: Vector2, angle: float) -> void:
 		var was: Vector2 = pivot + (Vector2(prev[i].x, prev[i].y) - pivot).rotated(angle)
 		pos[i] = Vector3(here.x, here.y, pos[i].z)
 		prev[i] = Vector3(was.x, was.y, prev[i].z)
+		# The standing look turns with the node it is carrying, or taking it
+		# back off next tick would take it off along the old bearing.
+		look_offset[i] = look_offset[i].rotated(angle)
 
 
 ## A point on the axial line `behind` px back from the head, measured along the
@@ -1086,6 +1225,14 @@ func node_count() -> int:
 
 func stick_count() -> int:
 	return stick_a.size()
+
+
+## The node the head hangs off — the last cervical station. What a bearing to
+## something the mouth is being pointed at has to be measured from, because it
+## is the joint the head is carried on: measure from anywhere further back and a
+## target at the mouth reads as a demand to turn the head off it.
+func nape_index() -> int:
+	return axial[axial.size() - 2] if axial.size() >= 2 else head_index()
 
 
 func head_index() -> int:
