@@ -12,8 +12,10 @@
 ##   * **a wound is a dent** — flesh taken off a wedge is flesh gone off the
 ##     drawn ring, to the last decimal, on the tick it is taken and with no
 ##     rebuild of anything: what is hit is what is displayed;
-##   * **posing never carves** — a walked animal moves no cell and re-reads no
-##     radius, and every ring stays on the bone it was hung from;
+##   * **posing never carves** — a posed animal moves no cell and re-reads no
+##     radius, and every ring stays on the bone it was hung from. Weaker than it
+##     was while the movers are out for rewrite: the body is standing through
+##     those ticks rather than travelling — see `_tick`;
 ##   * **the peel is one sum** — bone, +muscle, +fat, +skin are four evaluations
 ##     of the same radius, in radial order, the last of them the surface;
 ##   * **the silhouette is the animal's** — the stance the legs deliver and the
@@ -175,15 +177,15 @@ func _check_the_peel_is_one_sum(c: Creature2) -> void:
 
 func _check_posing_never_carves(c: Creature2) -> void:
 	var skin: Contour = c.contour
-	_walk(c, 0.0, false, 60)
+	_tick(c, 0.0, false, 60)
 	var revision: int = c.corpus.revision
 	var read: int = skin._radius_rev
 	var facets: int = skin.facet_count()
-	_walk(c, 1.0, true, 300)
+	_tick(c, 1.0, true, 300)
 	_check(c.corpus.revision == revision,
-		"walking moved the census %d times" % (c.corpus.revision - revision))
-	_check(skin._radius_rev == read, "walking made the skin re-read the census")
-	_check(skin.facet_count() == facets, "walking changed the mesh")
+		"300 ticks moved the census %d times" % (c.corpus.revision - revision))
+	_check(skin._radius_rev == read, "300 ticks made the skin re-read the census")
+	_check(skin.facet_count() == facets, "300 ticks changed the mesh")
 
 	# Every ring is still on the bone it was hung from, and none of it is NaN.
 	var adrift: float = 0.0
@@ -201,14 +203,14 @@ func _check_posing_never_carves(c: Creature2) -> void:
 	# stand off the straight line between two nodes — by the sagitta of the bend
 	# it is smoothing, and not by more.
 	_check(adrift < 2.0, "a ring hangs %.2f px off its own stick" % adrift)
-	notes.append("300 walked ticks: census untouched, no ring more than %.2f px off its stick"
+	notes.append("300 standing ticks: census untouched, no ring more than %.2f px off its stick"
 		% adrift)
 
 
 # ------------------------------------------------------------- the silhouette ----
 
 func _check_the_silhouette(c: Creature2) -> void:
-	_walk(c, 0.0, false, 120)
+	_tick(c, 0.0, false, 120)
 	var skin: Contour = c.contour
 	var trunk: Contour.Band = skin.band(BodySchema.TRUNK)
 	var neck: Contour.Band = skin.band(BodySchema.NECK)
@@ -226,8 +228,8 @@ func _check_the_silhouette(c: Creature2) -> void:
 		+ skin.radius[skin.ring_base[mid] + trunk.left]
 	var head: float = 2.0 * skin.mean_radius(neck.first + neck.count - 1)
 	var measured := {
-		"shoulder": c.tread.shoulder_height / gap,
-		"hip": c.tread.hip_height / gap,
+		"shoulder": c.armature.fore_carry / gap,
+		"hip": c.armature.hind_carry / gap,
 		"depth": depth / gap,
 		"head": head / gap,
 	}
@@ -327,7 +329,14 @@ func _check_cost_is_rings(c: Creature2) -> void:
 
 # ------------------------------------------------------------------ helpers ----
 
-func _walk(c: Creature2, throttle: float, sprint: bool, ticks: int) -> void:
+## Runs the body for `ticks` with that much being asked of it.
+##
+## The ask is recorded and, with the movers taken out to be rewritten, read by
+## nothing — so these are *standing* ticks, and the claims below are weaker than
+## they were by exactly that much: they still prove a posed tick carves nothing and
+## leaves every ring on its bone, but they no longer prove it over a body that is
+## travelling. Re-strengthened when the locomotion lands.
+func _tick(c: Creature2, throttle: float, sprint: bool, ticks: int) -> void:
 	c.command.throttle = throttle
 	c.command.sprint = sprint
 	c.command.jump = false

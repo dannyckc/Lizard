@@ -8,17 +8,18 @@
 ## words came out of half a dozen subsystems Main was already holding; the v2 body
 ## answers for itself, so this asks it.
 ##
-## Three views of one creature rather than three screens, so the switch is a tab
-## and not a mode: the field is the animal in its habitat, the anatomy is the same
-## animal opened up, the gait is the same animal's walk measured while it happens.
-## Two of the three open a drawer in the dock, and the field pays for whichever is
-## open in one place — `field_shift`, which the lab's camera reads and eases onto.
+## Two views of one creature rather than two screens, so the switch is a tab and
+## not a mode: the field is the animal in its habitat, and the anatomy is the same
+## animal opened up. The anatomy opens a drawer in the dock, and the field pays for
+## whatever is open in one place — `field_shift`, which the lab's camera reads and
+## eases onto.
 ##
 ## What is not here is anything v1's HUD had that the v2 body cannot yet answer
-## for. There is no creation menu (the authoring layer is a resource for now) and
-## no stamina track (blood and the aerobic engine arrive with Phase 5). Both were
-## left out rather than mocked: a HUD that prints a number nothing measures is the
-## one thing worse than a HUD that does not print it.
+## for. There is no creation menu (the authoring layer is a resource for now), no
+## stamina track (blood and the aerobic engine arrive with Phase 5), and no gait
+## view — the movers were taken out to be rewritten, so there is no walk to
+## measure. All three were left out rather than mocked: a HUD that prints a number
+## nothing measures is the one thing worse than a HUD that does not print it.
 class_name LabHUD
 extends Control
 
@@ -27,8 +28,7 @@ const INK := Color("14140f")
 
 const VIEW_FIELD: String = "Field"
 const VIEW_ANATOMY: String = "Anatomy"
-const VIEW_GAIT: String = "Gait"
-const VIEWS: Array[String] = [VIEW_FIELD, VIEW_ANATOMY, VIEW_GAIT]
+const VIEWS: Array[String] = [VIEW_FIELD, VIEW_ANATOMY]
 
 ## The keys the lab actually answers to — see V2Lab, which is where they are
 ## pumped. Two rows rather than v1's one, because the lab has the handling a probe
@@ -36,13 +36,12 @@ const VIEWS: Array[String] = [VIEW_FIELD, VIEW_ANATOMY, VIEW_GAIT]
 const LEGEND: Array[Array] = [
 	[[["W", "A", "S", "D"], "MOVE"], [["⇧"], "SPRINT"], [["SPACE"], "JUMP"],
 		[["LMB"], "DRAG NODE"]],
-	[[["F3"], "ANATOMY / GAIT"], [["V"], "SKELETON"], [["K"], "COLLAPSE"],
+	[[["F3"], "ANATOMY"], [["V"], "SKELETON"], [["K"], "COLLAPSE"],
 		[["F"], "DROP"], [["R"], "RESET"]],
 ]
 
 var subject: Creature2
 var anatomy: SpecimenDrawer
-var gait: GaitDrawer
 
 var _sans_base: SystemFont
 var _mono_base: Font
@@ -83,7 +82,6 @@ func _ready() -> void:
 	_build_condition_and_legend()
 	_build_move_hint()
 	_build_anatomy()
-	_build_gait()
 	set_view(_active_view)
 	resized.connect(_fit_drawers)
 	_fit_drawers()
@@ -104,15 +102,12 @@ func _process(delta: float) -> void:
 ##
 ## The drawers are re-fitted afterwards, and that is not housekeeping: a drawer's
 ## fixed chrome depends on the animal — the anatomy drawer offers a chip per chain
-## of the census and the gait drawer a chart row per bearing limb — so how much
-## height is left for the specimen and the figure cannot be worked out before the
-## body is known.
+## of the census — so how much height is left for the specimen cannot be worked out
+## before the body is known.
 func set_subject(each: Creature2) -> void:
 	subject = each
 	if anatomy != null:
 		anatomy.set_subject(each)
-	if gait != null:
-		gait.set_subject(each)
 	_fit_drawers()
 
 
@@ -134,7 +129,7 @@ func set_view(view_name: String) -> void:
 		button.add_theme_stylebox_override("normal", _tab_style(selected))
 
 
-## Steps to the next view, round the loop: field, anatomy, gait, field.
+## Steps to the next view, round the loop: field, anatomy, field.
 func toggle_view() -> void:
 	set_view(VIEWS[(VIEWS.find(_active_view) + 1) % VIEWS.size()])
 
@@ -177,15 +172,12 @@ func _apply_chrome() -> void:
 		anatomy.visible = _active_view == VIEW_ANATOMY
 		if anatomy.visible:
 			anatomy.refresh()
-	if gait != null:
-		gait.visible = _active_view == VIEW_GAIT
 
 
 ## Every drawer is sized to the window rather than to a fixed rect: they all stand
 ## in the same dock and are all as tall as it, and what each does with that height
-## is its own business — the anatomy drawer spends it on the specimen and the gait
-## drawer on the figure, and both have their own thing to give up when the window
-## is short.
+## is its own business — the anatomy drawer spends it on the specimen, and has its
+## own thing to give up when the window is short.
 func _fit_drawers() -> void:
 	var tall: float = HudDock.height(size.y)
 	for drawer in _drawers:
@@ -205,10 +197,6 @@ func _state_word() -> String:
 		return "collapsed"
 	if subject.armature.fall.is_airborne():
 		return "airborne"
-	if subject.bound.phase == Bound.GATHER or subject.bound.phase == Bound.CHARGE:
-		return "charging"
-	if subject.bound.phase == Bound.THRUST:
-		return "springing"
 	if subject.speed_norm > 0.05:
 		if subject.command.sprint and subject.speed_norm > 0.7:
 			return "running"
@@ -234,16 +222,22 @@ func _read_subject() -> void:
 	# it is not.
 	_stats["HEIGHT"].text = "%03d PX" % int(round(
 		maxf(a.fall.height - a.fall.floor_height, 0.0)))
-	var aloft: int = 0
-	for foot in subject.tread.feet:
-		if foot.stepping:
-			aloft += 1
-	_stats["FEET"].text = "%d/%d UP" % [aloft, subject.tread.feet.size()]
+	# How many toes are on the ground. Poise's own plant test rather than a count
+	# kept by a gait, so it stays a measurement of the body while there is no gait
+	# to ask — and it is the same count the support hull below is built from.
+	_stats["FEET"].text = "%d/%d DOWN" % [subject.poise.feet, a.limbs.size()]
 	_stats["NODES"].text = "%d / %d" % [a.node_count(), a.stick_count()]
 	_stats["STANCE"].text = subject.attitude.describe().to_upper()
 
 	var health: float = subject.corpus.integrity()
-	var hold: float = clampf(subject.footing.hold, 0.0, 1.0)
+	# Footing without a balance system to ask: how far inside its own support the
+	# plumb line is sitting, against the margin a stance is expected to keep
+	# (`Poise.KEEP`). Full is a body squarely over its feet, zero is one out past
+	# them — the same fact the balance system reduced to a hold, one step earlier.
+	var hold: float = 0.0
+	if subject.poise.posed and subject.poise.feet > 0:
+		hold = clampf(subject.poise.clearance
+			/ maxf(subject.poise.span * Poise.KEEP, 0.001), 0.0, 1.0)
 	_health_value.text = "%03d%%" % int(round(health * 100.0))
 	_footing_value.text = "%03d%%" % int(round(hold * 100.0))
 	_health_meter.progress = health
@@ -521,17 +515,6 @@ func _build_anatomy() -> void:
 	_anatomy_note.offset_bottom = -30.0
 	_anatomy_note.add_theme_constant_override("line_spacing", 6)
 	add_child(_anatomy_note)
-
-
-## The Gait view: the walk as an instrument panel, in the same dock the anatomy
-## drawer stands in — the field stays visible beside it, so the walk being
-## measured can be watched happening.
-func _build_gait() -> void:
-	gait = GaitDrawer.new()
-	gait.set_ui_fonts(_sans, _sans_tracked, _mono, _mono_tracked)
-	gait.set_subject(subject)
-	add_child(gait)
-	_drawers.append(gait)
 
 
 func _build_move_hint() -> void:

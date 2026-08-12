@@ -28,8 +28,10 @@
 ## never creates.
 ##
 ## The table is a table rather than four code paths, and nothing in it names a
-## gait, a species or a behaviour. In what order the feet come down is Cadence's
-## question, not this one; the same erect build walks, trots and gallops.
+## gait, a species or a behaviour. In what order the feet come down is the gait's
+## question, not this one; the same erect build walks, trots and gallops. That is
+## also why this file survived the locomotion being taken out to be rewritten: it
+## is a statement about a skeleton, and the census and the skin both read it.
 class_name Carriage
 extends RefCounted
 
@@ -256,7 +258,7 @@ var joint_fold: float = 0.0
 var depth_ratio: float = 0.92
 var wave_gain: float = 0.30
 ## How many feet this stance prefers to keep on the floor. A leaning and not a
-## limit — how many may be off the ground is Cadence's answer — but it is what
+## limit — how many may be off the ground is the gait's answer — but it is what
 ## sets the base of the duty factor, which is where weight leans on it.
 var feet_down: int = 2
 var coupling_gain: float = 1.0

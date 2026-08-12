@@ -1,7 +1,10 @@
-## Saves pictures of the v2 lab's HUD while the animal is actually walked — the
-## eyeball half of the troubleshooting-UI port. Must run windowed: headless
-## renders nothing, and reports the viewport as square whatever `--resolution`
-## says, so layout measured there is wrong.
+## Saves pictures of the v2 lab's HUD — the eyeball half of the troubleshooting-UI
+## port. Must run windowed: headless renders nothing, and reports the viewport as
+## square whatever `--resolution` says, so layout measured there is wrong.
+##
+## The animal stands through all of it. The throttle below is still written, and
+## still read by nothing, while the movers are out for rewrite — so what these
+## shots check is the chrome and the drawn body, not a walk.
 ##
 ##   /Applications/Godot.app/Contents/MacOS/Godot --path . \
 ##       --resolution 1440x810 --script tests/LabShot.gd
@@ -43,7 +46,7 @@ func _process(_delta: float) -> bool:
 		WARM - 20:
 			_shoot("field-idle")
 		WARM * 2:
-			_shoot("field-walk")
+			_shoot("field-asked")
 		WARM * 2 + 5:
 			hud.set_view(LabHUD.VIEW_ANATOMY)
 		WARM * 3:
@@ -85,17 +88,12 @@ func _process(_delta: float) -> bool:
 			hud.anatomy._on_row_input(_right_click(), SpecimenDrawer.ROWS.size() - 3)
 			hud.anatomy._on_focus_pressed(&"HL")
 			hud.anatomy._sync_toggles()
-			hud.set_view(LabHUD.VIEW_GAIT)
-		WARM * 5:
-			_shoot("gait-walk")
-		WARM * 5 + 5:
-			creature.command.sprint = true
-		WARM * 6 + 30:
-			_shoot("gait-sprint")
-		WARM * 6 + 35:
-			hud.gait._on_foot_pressed(&"HL")
-		WARM * 6 + 70:
-			_shoot("gait-limb")
+		WARM * 4:
+			_shoot("anatomy-focused")
+		WARM * 4 + 5:
+			hud.set_view(LabHUD.VIEW_FIELD)
+		WARM * 4 + 40:
+			_shoot("field-again")
 			print("lab shots: " + " · ".join(saved))
 			print("  in " + ProjectSettings.globalize_path(OUT))
 			quit(0)

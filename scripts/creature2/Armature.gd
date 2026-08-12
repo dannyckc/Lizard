@@ -105,9 +105,11 @@ class Chain extends RefCounted:
 	## does not lose the plane it was being solved in.
 	var plane: Vector2 = Vector2.RIGHT
 	## Where the gait has put this foot, in three dimensions, and how high it is
-	## holding its own corner of the body. Written by Tread and read by the
-	## placement; `foot_driven` is false until something owns the feet, and then
-	## the limb stands in the rest stance the build was laid out in.
+	## holding its own corner of the body. Written by whatever owns the feet and
+	## read by the placement; `foot_driven` is false until something does, and then
+	## the limb stands in the rest stance the build was laid out in. Nothing owns
+	## them at present — the movers are out for rewrite — so this is the whole of
+	## what a v2 body does with its legs today.
 	var foot_target: Vector3 = Vector3.ZERO
 	var socket_rise: float = 0.0
 	var foot_driven: bool = false
@@ -472,8 +474,8 @@ func settle(surface: float = 0.0) -> void:
 ## how fast the animal is going, the envelope is zero at both free ends, and the
 ## amplitude dies out at rest. What it is *for* is not the look — it is that a
 ## socket carried sideways by the body's own undulation has that much less of its
-## disc left to stride with, which the gait measures off the socket rather than
-## predicting (see Tread.Foot.track).
+## disc left to stride with, which the gait is expected to measure off the socket
+## rather than predict.
 func _wave(delta: float, speed_norm: float, gain: float) -> void:
 	wave_clock += delta * spec.wave_speed * (0.35 + 0.65 * clampf(speed_norm, 0.0, 1.0))
 	var n: int = axial.size()

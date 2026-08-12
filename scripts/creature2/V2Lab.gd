@@ -17,7 +17,7 @@
 ##   shift        sprint
 ##   space        jump (held to charge, released to spring)
 ##   wheel        zoom
-##   F3           step the view round: field → anatomy → gait → field
+##   F3           step the view round: field → anatomy → field
 ##   R            reset the creature to its spawn
 ##   K            collapse / revive (ragdoll mode toggle)
 ##   F            drop the body from a height
@@ -93,7 +93,9 @@ func _process(delta: float) -> void:
 		1.0 - exp(-FOLLOW_RATE * delta))
 	# Polled rather than evented, because a throttle is a state rather than a
 	# keystroke: the animal is being asked for something for as long as the key is
-	# down, and the gait reads the ask every tick.
+	# down, and the gait is meant to read the ask every tick. Nothing reads it while
+	# the movers are out for rewrite, so W/A/S/D move nothing — the drag, the drop,
+	# the collapse and the views all still work.
 	var command: Creature2.Command = creature.command
 	command.throttle = (1.0 if Input.is_physical_key_pressed(KEY_W) else 0.0) \
 		- (1.0 if Input.is_physical_key_pressed(KEY_S) else 0.0)

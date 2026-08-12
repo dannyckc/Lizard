@@ -174,9 +174,11 @@ class ChainSpec extends RefCounted:
 ## curl right round. Authored rather than counted off the chain's bend limits,
 ## because the chain is a controller with functional stations rather than a
 ## vertebral census — the total turn a real cat's twelve-odd vertebrae make is
-## not the total eight nodes make at the same per-joint limit. One notch under
-## Cadence.ROTARY_SPINE: a cat's gallop is transverse, and the dorsomobile
-## specialist a step further on is what reverses its leads.
+## not the total eight nodes make at the same per-joint limit. One notch under the
+## rotary-gallop threshold, which the first locomotion put at **0.85** and the
+## rewrite has to place again: a cat's gallop is transverse, and the dorsomobile
+## specialist a step further on is what reverses its leads. The 0.79 here is a
+## claim about a cat's back and stands whatever the threshold turns out to be.
 @export var spine_freedom: float = 0.79
 
 # ---------------------------------------------------------------- solver ----
