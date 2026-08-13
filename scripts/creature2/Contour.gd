@@ -434,13 +434,22 @@ func radius_at(name: StringName, t: float, sector: int, layers: int = 4) -> floa
 ## point over the animal's back misses flesh a point at flank height meets,
 ## because the nearest ring is genuinely further from one than the other.
 ##
+## `only` narrows the question to one chain — "where on *this* part is that", for
+## a caller that already knows which part it is dealing with and would be misled
+## by an answer about another. A mouth working into a flank is the case: its jaws
+## are inside the trunk, so a thin thing lying nearby (a tumbled paw, the tail)
+## can be geometrically nearer to a point that is already under the skin, and the
+## grip would walk off the flesh it is actually in.
+##
 ## Returns { band, t, theta, station, sector, depth, at, centre } — `at` the
 ## nearest point on the drawn surface, `centre` the point on the chain axis.
-func locate(world: Vector3) -> Dictionary:
+func locate(world: Vector3, only: StringName = &"") -> Dictionary:
 	var best_d2: float = INF
 	var best_r: int = -1
 	var best_u: float = 0.0
 	for band in bands:
+		if only != &"" and band.name != only:
+			continue
 		var last: int = band.first + band.count - 1
 		for r in range(band.first, last):
 			var a: Vector3 = ring_centre[r]
@@ -566,7 +575,14 @@ static func seen(p: Vector3) -> Vector2:
 ## The inverse: where a body address currently is in the world, on the drawn
 ## surface. What a latched hold reads to follow the flesh it is holding
 ## through every pose — the address never moves, the frames do.
-func place(name: StringName, t: float, theta: float) -> Vector3:
+##
+## `inset` takes the answer in from the surface along the same normal it was
+## placed on, which is how anything that is *in* the flesh rather than on it asks
+## for its own position: a mouthful is held by teeth that went through the skin,
+## and the point those teeth are at is this one. Never past the chain itself — a
+## bite is in the meat, not out the other side.
+func place(name: StringName, t: float, theta: float,
+		inset: float = 0.0) -> Vector3:
 	var b: Band = _by_name[name]
 	var want: float = clampf(t, 0.0, 1.0)
 	# Rings are arc-spaced, so the bracketing pair is found by t, not by index.
@@ -579,7 +595,60 @@ func place(name: StringName, t: float, theta: float) -> Vector3:
 	var up: Vector3 = ring_up[r].lerp(ring_up[r + 1], u).normalized()
 	var lat: Vector3 = ring_lat[r].lerp(ring_lat[r + 1], u).normalized()
 	var dir: Vector3 = up * cos(theta) + lat * sin(theta)
-	return centre + dir * radius_at(name, t, corpus.sector_of(name, theta))
+	var out: float = radius_at(name, t, corpus.sector_of(name, theta))
+	return centre + dir * maxf(out - inset, 0.0)
+
+
+## Where a chain's own line is at `t` — the axis a body address is measured out
+## from, and what a seat is pulled in toward. `place` with the whole of the flesh
+## taken off it, and the same walk of rings, so the two cannot disagree.
+func axis(name: StringName, t: float) -> Vector3:
+	var b: Band = _by_name[name]
+	var want: float = clampf(t, 0.0, 1.0)
+	var r: int = b.first
+	while r < b.first + b.count - 2 and ring_t[r + 1] < want:
+		r += 1
+	var u: float = clampf((want - ring_t[r])
+		/ maxf(ring_t[r + 1] - ring_t[r], 0.00001), 0.0, 1.0)
+	return ring_centre[r].lerp(ring_centre[r + 1], u)
+
+
+## Which way round the body something approaching from `from` will arrive, at
+## station `t` of a chain — the θ a body address takes from an approach.
+##
+## The half of an address a plan view cannot be asked for. Drawn from almost
+## overhead, a back and the belly under it land on the same pixels — they differ
+## only in height, which is the axis the picture collapsed — so a pointer can say
+## *where along* the animal it means and never *which way round*. This can, from
+## wherever the question is really being asked from: something level with a flank
+## arrives at the flank, and the same thing carried over the spine arrives on the
+## back, and that is the whole difference between the two kinds of bite.
+##
+## The sideways half is taken at the *body's* own scale rather than at the range
+## the question happens to be asked from, and that is what makes it an arrival
+## rather than a sight-line. A mouth crossing the ground toward a body ends up a
+## body-radius from its axis however far off it started — the approach is
+## horizontal, the height it is carried at is not — so a raw bearing from forty
+## pixels away says "from the side" about everything, including a cat standing
+## directly over a carcass. Clamped, the two terms compete honestly: the height
+## difference is real and the forty pixels of closing are not.
+func bearing(name: StringName, t: float, from: Vector3) -> float:
+	var b: Band = _by_name[name]
+	var want: float = clampf(t, 0.0, 1.0)
+	var r: int = b.first
+	while r < b.first + b.count - 2 and ring_t[r + 1] < want:
+		r += 1
+	var u: float = clampf((want - ring_t[r])
+		/ maxf(ring_t[r + 1] - ring_t[r], 0.00001), 0.0, 1.0)
+	var centre: Vector3 = ring_centre[r].lerp(ring_centre[r + 1], u)
+	var up: Vector3 = ring_up[r].lerp(ring_up[r + 1], u).normalized()
+	var lat: Vector3 = ring_lat[r].lerp(ring_lat[r + 1], u).normalized()
+	var off: Vector3 = from - centre
+	if off.length_squared() < MIN_TANGENT:
+		return 0.0
+	var side: float = lerpf(mean_radius(r), mean_radius(r + 1), u)
+	var across: float = clampf(off.dot(lat), -side, side)
+	return wrapf(atan2(across, off.dot(up)), 0.0, TAU)
 
 
 ## Mean radius around a ring — its girth as drawn.

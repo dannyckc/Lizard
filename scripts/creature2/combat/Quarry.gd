@@ -145,7 +145,11 @@ static func resolve(found: Pick, actor: Creature2) -> Pick:
 	if found == null or actor == null or actor.maw == null:
 		return found
 	if found.creature != null:
-		if bool(actor.maw.aim(found.creature, found.at).get("ok", false)):
+		# Asked of the flesh that was picked, address and all — the same question
+		# the click will ask, so the mark cannot promise a surface the strike then
+		# declines to address.
+		if bool(actor.maw.aim(found.creature, found.at, found.contact)
+				.get("ok", false)):
 			return found
 		return _outside(found)
 	# Bare ground is asked the same question by the same zone — a place on the

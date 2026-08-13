@@ -86,12 +86,29 @@ static func _press_pair(me: Creature2, other: Creature2) -> void:
 	var at := Vector3.ZERO
 	var a: Armature = me.armature
 	var b: Armature = other.armature
+	# Jaws through skin are not an intrusion. An animal biting another has its
+	# mouth inside it on purpose, and the neck carrying that mouth is lying across
+	# it — so for as long as the grip lasts those sticks are out of the
+	# measurement, and everything behind them goes on being pressed apart exactly
+	# as before: the chest still cannot walk into the flank, which is what holds
+	# the two bodies at a bite's own distance. Both ways round, because a bitten
+	# animal does not press its attacker's head back out of itself either, and
+	# pressing it out is precisely what left every bite hovering a skull's width
+	# off the flesh it had supposedly closed on.
+	var my_jaw: PackedInt32Array = _jaw_sticks(a) if me.maw != null \
+		and me.maw.biting(other) else PackedInt32Array()
+	var their_jaw: PackedInt32Array = _jaw_sticks(b) if other.maw != null \
+		and other.maw.biting(me) else PackedInt32Array()
 	for s in a.stick_count():
+		if s in my_jaw:
+			continue
 		var p0: Vector3 = a.pos[a.stick_a[s]]
 		var p1: Vector3 = a.pos[a.stick_b[s]]
 		var ra: float = maxf((a.flesh_r[a.stick_a[s]] + a.flesh_r[a.stick_b[s]])
 			* 0.5, a.stick_radius[s])
 		for z in b.stick_count():
+			if z in their_jaw:
+				continue
 			var q0: Vector3 = b.pos[b.stick_a[z]]
 			var q1: Vector3 = b.pos[b.stick_b[z]]
 			var rb: float = maxf((b.flesh_r[b.stick_a[z]] + b.flesh_r[b.stick_b[z]])
@@ -128,9 +145,8 @@ static func _press_pair(me: Creature2, other: Creature2) -> void:
 			touched["station"], touched["sector"]))
 
 	var push: Vector2 = dir * (deepest * share * give)
-	a.shift(push)
+	me.press_out(push)
 	if not a.collapsed:
-		me.head_pos += push
 		# The velocity into the other body dies; the slide keeps; and what
 		# died arrives in the other body as the shove it physically was.
 		var impact: float = me.travel.impetus.deflect(dir)
@@ -146,6 +162,13 @@ static func _press_pair(me: Creature2, other: Creature2) -> void:
 			# ...and the same press about the other axis: the velocity that
 			# died in me died at a height, and that is what rolls an animal.
 			me.travel.twist(dir * impact, at)
+
+
+## The sticks a bite is taken with: the cervical run and the head stick hung off
+## it, which is one chain in the graph and needs no list of its own.
+static func _jaw_sticks(a: Armature) -> PackedInt32Array:
+	var neck: Armature.Chain = a.chain(BodySchema.NECK)
+	return neck.sticks if neck != null else PackedInt32Array()
 
 
 ## Closest approach of two 3D segments: [distance, point on a, point on b].

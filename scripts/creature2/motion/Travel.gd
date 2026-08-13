@@ -44,13 +44,24 @@ const STANDSTILL: float = 0.30
 ## after. That lead is what makes the input read as a body changing direction
 ## rather than as a sprite being rotated, and it is the whole of the difference.
 ##
-## A *share* of what the back will physically give, and a fifth of it, because
+## A *share* of what the back will physically give, and a small one, because
 ## those are two different numbers: `Armature.back_sweep` is what the joints
-## allow before the anatomy is violated — a carcass folding double — and this is
-## the working range a muscle steers inside. Asked for the whole of it, the
-## animal whips its own forehand out from under its weight and falls over, which
-## is exactly what it did.
-const STEER_BEND: float = 0.20
+## allow before the anatomy is violated — a carcass folding double, most of a
+## circle on this build — and this is the working range a muscle steers inside.
+## Asked for the whole of it, the animal whips its own forehand out from under
+## its weight and falls over, which is exactly what it did.
+##
+## A fifth of it was still too much, and what it looked like was the diagnosis:
+## 37° of the animal's own back held folded for as long as a key was down is a
+## trunk doing the turning, and a trunk that turns is a snake. A cat's back is
+## dorsomobile — it flexes and extends far more freely than it bends sideways —
+## so the lateral lead a real one carries into a turn is a fraction of what its
+## joints would physically permit. At 0.09 the lead comes out near 17°: plainly
+## visible as the front of the animal going first, well short of the fold that
+## made the picture serpentine, and it costs the turn rate nothing at all (see
+## `steer_front`) — what actually brings the hindquarters round is the hind feet
+## stepping, which is where a cat's turn has always come from.
+const STEER_BEND: float = 0.09
 
 ## How much of the true pendulum lean (thrust over gravity, at the weight's
 ## own height) the support is asked to express. Under one because the legs
@@ -357,8 +368,7 @@ func collide() -> void:
 	var push: Vector2 = outlook.intrusion(pel, wit, r, band)
 	if push == Vector2.ZERO:
 		return
-	a.shift(push)
-	creature.head_pos += push
+	creature.press_out(push)
 	var n: Vector2 = push.normalized()
 	var impact: float = impetus.deflect(n)
 	if impact <= 0.0:

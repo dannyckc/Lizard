@@ -110,12 +110,18 @@ const TABLE: Array[Dictionary] = [
 		# joint comes up out of its crouch with the limb, but only halfway: this
 		# is the stance that keeps a bend in reserve everywhere, which is where
 		# its leap comes from and why it is the springiest row in the table.
+		#
+		# The undulation is nearly gone here and that is the point of the row: an
+		# animal whose limbs swing fore-and-aft under its body walks with its legs,
+		# and a back that went on wagging behind them would be a lizard's mechanism
+		# left running under a cat. What is left is the little the trunk really does
+		# sway when the weight crosses from one diagonal to the other.
 		"tilt_deg": 50.0,
 		"joint_deg": 132.0,
 		"joint_lock_deg": 158.0,
 		"joint_fold_deg": 38.0,
 		"depth_ratio": 0.92,
-		"wave_gain": 0.30,
+		"wave_gain": 0.12,
 		"feet_down": 2,
 		"coupling_gain": 1.15,
 		"step_height_gain": 1.35,

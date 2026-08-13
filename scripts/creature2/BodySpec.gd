@@ -145,7 +145,20 @@ class ChainSpec extends RefCounted:
 # What the animal asks for. Requests, not promises: the legs answer with a
 # speed of their own and the lower of the two is what the body travels at.
 
-@export var move_speed: float = 88.0
+## What the animal asks for at a walk, px/s. The scale is v2's own ruler — this
+## cat is 1.59 px per cm — so 54 is about 34 cm a second, which is a cat walking
+## somewhere rather than a cat hurrying.
+##
+## 88 was a third faster and it was the cadence that gave it away rather than the
+## ground covered. A step is the foot's own excursion plus whatever drift the gait
+## let it spend before asking (`Footwork.TRIGGER`), and the plan view foreshortens
+## both — this animal's hind foot travels about 36 px a stride whatever it is
+## asked for. Ground over stride is stride frequency and nothing else decides it,
+## so at 88 the legs cycled at very nearly 3 Hz: a cat's *trot* tempo under a body
+## strolling, which reads as an animal skittering rather than walking. At 54 the
+## same stride comes out near 1.5 Hz, the swing has time to be a swing, and the
+## pacing is the walk it always claimed to be.
+@export var move_speed: float = 54.0
 @export var sprint_multiplier: float = 1.85
 ## The ceiling on how fast the body comes round, deg/s, before the stance's
 ## `agility` and the pace's `turn_speed_falloff` have taken their share of it.
@@ -159,26 +172,30 @@ class ChainSpec extends RefCounted:
 ## logical facing every contact, gait and aim in the game quotes was pointing
 ## somewhere the drawn creature was not.
 ##
-## 90 is where the second problem goes away, which is why it is 90 rather than
-## some other slower number. The body tracks its own heading through both the
-## standstill pivot (113 deg/s) and the walking arc (57 deg/s), and what lag is
-## left has the sign of the *steer* — the front of the animal ahead of the back
-## of it, which is what turning looks like — instead of the heading running away
-## from the whole body. Slow enough to be deliberate, and honest at last.
-@export var turn_speed_deg: float = 90.0
+## 90 was where the second problem went away — the body tracked its own heading
+## through both the standstill pivot and the walking arc, and what lag was left
+## had the sign of the *steer* rather than of a heading running away from the
+## body. 58 is the same number asked of a cat rather than of a mechanism: on the
+## crouched carriage this animal stands in it comes out at 75 deg/s on the spot
+## and delivers about 48, so a full turn takes the better part of three seconds
+## and every degree of it is a body being walked round by its feet. The gap
+## between 90 and 58 is entirely what made the turn read as a pivot rather than
+## as an animal changing its mind about where it was going.
+@export var turn_speed_deg: float = 58.0
 ## How quickly the turn rate answers the key, as an easing rate: the body reaches
 ## its turn over about `1 / this` seconds and gives it up again as gradually.
 ##
 ## Weight, and the only place the controls have any. v1's 14 is a 71 ms constant,
 ## which is a body with no rotational inertia at all — the turn is simply on
 ## while the key is down and off when it is not, and tapping A and D alternately
-## makes the animal shudder rather than pick a way to go. At 6 the rate builds
-## over about a sixth of a second and coasts out over the same, so a stab at the
-## key is a lean rather than a jerk, a held key is a committed turn, and letting
-## go is an animal settling out of one. It cannot overshoot — the ease only ever
+## makes the animal shudder rather than pick a way to go. At 4 the rate builds
+## over a quarter of a second and coasts out over the same, so a stab at the key
+## is a lean rather than a jerk, a held key is a committed turn, and letting go is
+## an animal settling out of one. It cannot overshoot — the ease only ever
 ## approaches the rate the key is asking for — so what this buys is entirely the
-## absence of sudden changes.
-@export var turn_responsiveness: float = 6.0
+## absence of sudden changes, which is the whole of what a heavy animal has and a
+## sprite has not.
+@export var turn_responsiveness: float = 4.0
 @export var turn_speed_falloff: float = 0.50
 @export var reverse_speed_factor: float = 0.60
 ## How far behind the head the body turns about, px.

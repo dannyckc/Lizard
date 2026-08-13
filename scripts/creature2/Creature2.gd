@@ -36,6 +36,11 @@
 class_name Creature2
 extends Node2D
 
+## Where a body is drawn against the others. One band for everything alive, and
+## one above it for an animal with its jaws in something — see `_physics_process`.
+const BAND: int = 10
+const BAND_BITING: int = 11
+
 const INK := Color(0.16, 0.15, 0.13)
 const LIMB_INK := Color(0.35, 0.33, 0.30)
 const SHADOW := Color(0.0, 0.0, 0.0, 0.10)
@@ -133,7 +138,7 @@ func _ready() -> void:
 	# Over the terrain, which draws at 1: an animal standing behind a boulder is
 	# behind it because of where its feet are, never because the rock was painted
 	# afterwards. v1's CreatureView holds the same band for the same reason.
-	z_index = 10
+	z_index = BAND
 	# Every living body in the lab presses on every other — the group is the
 	# contact stage's roster (Clash).
 	add_to_group("creatures2")
@@ -252,6 +257,16 @@ func _physics_process(delta: float) -> void:
 	# reads back from it, which is why it can be last: the flesh is a consequence
 	# of the tick, never a term in it.
 	contour.pose()
+	# ...and where this body is painted against the others. An animal with its
+	# jaws in another one is in front of it, because that is where its head
+	# actually is: over the back for a bite from above, inside the flank for one
+	# from the side. Two bodies alive on the same floor are otherwise the same
+	# band and the picture settles them by nothing better than which was added to
+	# the scene first, so a bite painted the other way round hides the mouth
+	# behind the mouthful — the one thing the player has to be able to see.
+	var band: int = BAND_BITING if maw.lunging() or maw.latched() else BAND
+	if z_index != band:
+		z_index = band
 	# The aim, re-read off the skin that has just been posed: the flesh under the
 	# cursor moved with the body it belongs to, so the point the head is tracking
 	# and the reach it is priced at are both a tick old the moment they are not
@@ -359,6 +374,23 @@ func spin(dw: float) -> void:
 	travel.spin(dw)
 
 
+## The body pressed bodily out of something solid — a wall, another animal. The
+## armature moves and the mover's own anchor goes with it, so the head is carried
+## along by the body it sits on.
+##
+## Unless the teeth are in something, and then the head stays exactly where they
+## are and the neck bends instead. A grip is held on by flesh, not by posture: the
+## chest being pressed off the animal the mouth has hold of is the ordinary case,
+## and it is what a neck is *for*. Without this a bite taken from above cannot
+## exist at all — the head has to be over the target at a moment when the body
+## certainly cannot be, and the very contact that keeps the body out would drag
+## the mouth out along with it.
+func press_out(push: Vector2) -> void:
+	armature.shift(push)
+	if not maw.latched():
+		head_pos += push
+
+
 ## Asks the jaws whether flesh at `at` on `target` is takeable from here —
 ## the hover's preview, commitment-free.
 func aim_bite(target: Creature2, at: Vector2) -> Dictionary:
@@ -411,7 +443,13 @@ func _update_aim() -> void:
 		aim.height = flesh.z
 		aim.seen = Contour.seen(flesh)
 	aim_contact = aim.at
-	aim_reach = maw.aim(aim.creature, aim.at) if aim.creature != null else {}
+	# The address goes with the point. Which *surface* of the target was pointed
+	# at is a fact only the picture could supply, and dropping it here is what
+	# made a bite at a back and a bite at the flank under it the same bite: the
+	# jaws would re-derive their own address from the plan coordinate at mouth
+	# height and always land between the two.
+	aim_reach = maw.aim(aim.creature, aim.at, aim.contact) \
+		if aim.creature != null else {}
 
 
 ## Whether the jaws could be got onto whatever this creature is pointed at.
@@ -443,7 +481,10 @@ func request_bite(at: Vector2) -> bool:
 		return false
 	var target: Creature2 = aim.creature if aim != null else null
 	var point: Vector2 = aim_contact if target != null else at
-	return maw.strike(target, point, bite_held)
+	# ...and the flesh, as an address, so the strike goes to the surface that was
+	# clicked rather than to the nearest one to it — see `_update_aim`.
+	return maw.strike(target, point, bite_held,
+		aim.contact if target != null else {})
 
 
 ## Tracks the button. Held is a grip: jaws that close while it is down keep what

@@ -209,31 +209,41 @@ func _sweep(toward: float, delta: float) -> void:
 ## Two answers, in this order, because the animal's own business outranks the
 ## player's:
 ##
-##   * **jaws shut on flesh are not looking at it — they have it.** A hold is
-##     already a geometry, and the tether owns it: the mouth is kept within its
-##     own slack of the flesh it closed on and the carry keeps it at its height,
-##     so the head is on its dinner without anything aiming it there. Pointing
-##     the same head at the same flesh is a second mechanism on one bone, and
-##     the two spend the hold arguing over a pixel — which is the pixel that
-##     parts a grip a chew has just made shallower. So a latched mouth looks at
-##     nothing, and the cursor does not get a say either: a mouse that could
-##     swing the head off a mouthful would be undoing the grip the player is
+##   * **the bite, whenever there is one.** A mouth on its way into flesh, or
+##     already shut on it, is pointed at the *seat* — the place inside the animal
+##     where the teeth are, `Maw.bite_point` — and this is where the orientation
+##     of a bite comes from. A grip on a flank has its seat out to the side, so
+##     the head turns and goes in sideways; a grip on a back has its seat over
+##     the spine, so the head comes round and down onto it. Nobody decides which
+##     kind of bite it is: the address the teeth closed on says where the seat
+##     is, and the neck carries the head at it as far as its own joints allow.
+##
+##     It has to be the seat and not the surface, and that is the difference
+##     between this and what stood here before. Aimed at the surface, the look
+##     and the hold were two mechanisms chasing one point and spent the grip
+##     arguing over the pixel between them — so the head was left alone and a
+##     latched mouth simply held whatever bearing it had, which is how a bite
+##     from above ended up looking exactly like a bite from the side. The seat is
+##     somewhere neither of them is trying to *be*: the hold puts the mouth's
+##     anchor on it and the look points the head down the line to it, and those
+##     agree by construction. The cursor still gets no say, because a mouse that
+##     could swing the head off a mouthful would undo the grip the player is
 ##     asking for by holding the button.
 ##   * **otherwise the cursor.** The selected target's own contact point where
 ##     the pointer has hold of something — which is where the jaws can actually
 ##     meet it, see `Creature2.aim_contact` — and the bare pointer where it has
 ##     not.
 ##
-## What is deliberately *not* here is the strike. A committed lunge does not
-## take the head anywhere the look was not already taking it: the throw is the
-## body moving (`Maw`), and a neck swept sideways to help it arrive would be the
-## reach a body-moving lunge exists to refuse — the jaws would land somewhere
-## the animal never went and let go of it again as the sweep came home. So a
-## strike is thrown along whatever the head was already doing, which for an
-## aimed bite is the flesh itself.
+## What is still deliberately *not* here is the lunge's direction. The throw is
+## the body moving (`Maw`), never a neck swept sideways to help it arrive: the
+## head is turned to face what is about to be bitten and the animal's own weight
+## is what carries it there, so the jaws cannot land somewhere the body never
+## went and let go again as the sweep comes home.
 func _addressed() -> Vector2:
-	if creature.maw != null and creature.maw.latched():
-		return Vector2.INF
+	if creature.maw != null:
+		var bite: Vector3 = creature.maw.bite_point()
+		if bite.x < INF:
+			return Vector2(bite.x, bite.y)
 	if creature.aim != null and creature.aim.creature != null:
 		return creature.aim_contact
 	var cmd: Creature2.Command = creature.command

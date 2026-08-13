@@ -102,6 +102,12 @@ var span: float = 1.22
 ## Summed contact area, normalized arc units — what penetration is priced off.
 var contact_area: float = 0.0
 var mean_crown: float = 0.0
+## Where the contact patches sit along the muzzle, averaged over the mouth — a
+## share of the muzzle's own reach, so it is the same number for a lion and a
+## shrew. What a mouth *closing on* something rather than reaching for it has to
+## know: the patches are this far ahead of the head node, so a bite that buries
+## them buries the head to within the difference (Maw.standoff).
+var patch_reach: float = 1.0
 ## The species' own keenness, kept for the bearing share.
 var keenness: float = 0.5
 
@@ -191,10 +197,17 @@ func _shape(tooth: Tooth, per_arch: int, keen: float,
 func _measure() -> void:
 	contact_area = 0.0
 	mean_crown = 0.0
+	patch_reach = 0.0
 	for tooth in teeth:
 		contact_area += PI * tooth.half_along * tooth.half_across
 		mean_crown += tooth.crown
-	mean_crown /= float(maxi(teeth.size(), 1))
+		# The same cosine `tooth_point` places the patch with, so this is the
+		# mouth's mean forward reach rather than its mean seat: a tooth out at
+		# the corner of the gape stands much less far ahead than one at the front.
+		patch_reach += cos(tooth.angle) * tooth.patch_seat
+	var count: float = float(maxi(teeth.size(), 1))
+	mean_crown /= count
+	patch_reach = maxf(patch_reach / count, 0.0)
 
 
 ## Force over area — where count, size and keenness turn into depth, and why

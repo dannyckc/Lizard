@@ -209,7 +209,11 @@ func _check_no_creep(c: Creature2) -> void:
 	var fw: Footwork = c.travel.footwork
 	var anchors: Array[Vector2] = []
 	for f in fw.feet:
-		anchors.append(f.anchor)
+		# A foot already in the air is seeded as no anchor at all. Its `anchor` is
+		# last stride's and means nothing until it lands, so comparing the landing
+		# against it reports a whole stride of "creep" — which is what this used to
+		# do whenever a swing happened to end on the first observed tick.
+		anchors.append(Vector2.INF if f.swinging else f.anchor)
 	var worst: float = 0.0
 	for i in 120:
 		c._physics_process(TICK)
@@ -552,13 +556,17 @@ func _check_leap(c: Creature2) -> void:
 ## carried on it afterwards.
 func _check_vault(c: Creature2) -> void:
 	_calm(c)
-	var dir: Vector2 = c.move_dir
-	var table: Vector2 = c.centre() + dir * 260.0
-	main.terrain.add(table, 120.0, 12.0)
 	c.command.throttle = 1.0
 	_tick(c, 60)
 	c.command.jump = true
 	_tick(c, 22)
+	# The table is laid down where *this* animal's leap is about to cross, not at
+	# a distance in pixels: the claim is about the surface under the arc, and a
+	# table pinned to one body's cruise is scaffolding that goes red when the
+	# body's pace is retuned. Its near edge is just ahead of the take-off, so the
+	# leap genuinely crosses onto it from the plane.
+	var table: Vector2 = c.centre() + c.move_dir * 140.0
+	main.terrain.add(table, 120.0, 12.0)
 	c.command.jump = false
 	var flew: int = 0
 	var landed_on: float = -1.0

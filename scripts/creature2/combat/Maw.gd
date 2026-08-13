@@ -20,12 +20,30 @@
 ## the neck is an arc, so height and distance are one purse — the same gap is
 ## reachable at the mouth's own level and refused onto the floor.
 ##
+## Teeth go *in*. Every point this file carries the mouth to is a **seat** — the
+## flesh's own surface taken back in along its normal by `standoff`, which is
+## what is left over once the tooth patches stand where `Fangs` puts them and a
+## closing has driven them their own depth past the skin. So the jaws are never
+## parked off a silhouette waiting to touch it: a bite from the side buries the
+## muzzle in the flank, a bite from above puts the head down onto the back, and
+## both are one arithmetic asked at a different `theta`. The head is carried to
+## the seat in all three dimensions (`head_reach_z`) and pointed at it (`Gaze`
+## reads `bite_point`), so where the head is and which way it faces are both
+## consequences of where the teeth went — there is no bite pose anywhere.
+##
+## Two things outside this file are part of that and would undo it on their own.
+## `Clash` takes the biter's neck and head out of the contact for as long as the
+## grip lasts — jaws through skin are not an intrusion, and pressing them back
+## out is precisely the hovering this used to draw. And `Creature2` puts the
+## animal with the mouthful in front, because a mouth painted behind the flesh it
+## is holding is a mouth nobody can see.
+##
 ## The hold is possession with the v1 grip's teeth: a latched mouth keeps a
 ## *body address*, not a world point, so the flesh it follows through every
-## pose of the target is the flesh it closed on. The tether tows the lighter
-## body, tears free past what flesh holds, and a chew re-closes the same jaws
-## on the same wedge — which lands deeper every time, because the census got
-## thinner, and nobody wrote "work in".
+## pose of the target is the flesh it closed on. It tows the lighter body, tears
+## free past what flesh holds, and a chew re-closes the same jaws on the same
+## wedge — which lands deeper every time, because the census got thinner, and
+## nobody wrote "work in".
 class_name Maw
 extends RefCounted
 
@@ -86,12 +104,48 @@ const THROW_SHARE: float = 0.45
 ## length above the withers. Down is the floor; up is this.
 const RISE_SHARE: float = 0.85
 
-## The tether: slack the hold allows before it tows, and the stretch past
-## which the flesh gives out and the mouth comes away with what it holds.
-const SLACK_SHARE: float = 0.6
-const TEAR_SHARE: float = 2.2
-## How much of the tether's overshoot is corrected per tick — meat, not rope.
-const TOW: float = 0.35
+## The stretch past which the flesh gives out and the mouth comes away with what
+## it holds — as a multiple of how deep the teeth went, which is the change.
+##
+## It used to be quoted against the muzzle, which said nothing about the grip:
+## a mouth is not held on by being a certain width. **A mouth holds as much flesh
+## as its teeth are buried in**, so what it can be pulled off is that same depth,
+## and a little over. Which makes the whole thing derived — a keen deep-fanged
+## bite hangs on where a mouthful of blunt cusps slips out, and nobody had to say
+## so — and it makes it read as tension rather than as slippage: the grip below
+## closes at `GRIP` per second, so a steady haul settles at exactly the gap that
+## rate cannot keep up with, and that residual is how hard the mouthful is being
+## pulled on. Walking away from a mouthful stays inside it and holds; sprinting
+## away opens half again as much and the flesh gives.
+const TEAR_SHARE: float = 1.1
+
+## How long the grip may be overstretched before the flesh actually gives,
+## seconds.
+##
+## A moment rather than an instant, and a long enough one to tell a haul from
+## everything else that momentarily stretches a grip.
+##
+## Two things do, and neither is a body pulling away. A chew *retreats its own
+## seat* — the mouth has eaten the flesh it was holding, so the next place to hold
+## is further in, or round on the wedge beside it — and for the frames it takes
+## the grip to follow its own bite the gap is arithmetically identical to being
+## hauled on. And an animal with its jaws in another is in contact with it
+## everywhere else too: its legs are pressed off the body it is standing over, the
+## grip tows the pair back together, and the two argue at a few tenths of a pixel
+## a tick for as long as the hold lasts. Both of those come and go inside a third
+## of a second. A body actually walking away does not stop, and that is the whole
+## of the distinction.
+const STRAIN_PATIENCE: float = 0.30
+
+## How quickly a grip closes what is between the mouth and its seat, per second.
+##
+## There is no slack any more and that is the change: the hold used to allow the
+## mouth half a muzzle of play before it corrected anything, which is a mouth
+## resting *near* flesh, and at the sizes involved it was most of the gap the
+## bite was supposed to have closed. A grip has no play — what it has is a rate,
+## and 16 puts the last pixel away over about four frames, quick enough to read
+## as jaws shutting and slow enough that nothing snaps.
+const GRIP: float = 16.0
 
 ## The frontal cone a strike must address its target inside, radians off the
 ## heading. A mouth does not bite what is behind the animal wearing it.
@@ -107,12 +161,23 @@ var fangs: Fangs
 
 var state: int = IDLE
 var _timer: float = 0.0
-## The committed strike: who, and the point the jaws are being taken to —
-## re-aimed at the target's actual flesh every tick of the throw, because a
-## moving target is met where it is, not where it was when the strike was
-## asked for. What is fixed at the commit is the *budget*: `_throw` px of
-## body, of which `_thrown` is already spent.
+## The committed strike: who, the flesh it was thrown at, and where that flesh
+## is right now.
+##
+## `_aimed` is a body address — band, t, theta — exactly as a hold is, and for
+## exactly the same reason: it is re-read through the target's live pose every
+## tick, so a target that walks, turns, or is shoved along by the arriving body
+## itself is met *at the same place on its body*. Following the nearest flesh
+## instead is what this used to do and it was a different thing pretending to be
+## the same one — a foreleg sprawled between the jaws and the flank it was aimed
+## at is nearer than the flank, so a strike at a haunch quietly became a strike
+## at a shin and the player was never told. It is empty for a snap at the air,
+## and then `_at` is a place rather than an address, which is all a snap ever had.
+##
+## What is fixed at the commit is the *budget*: `_throw` px of body, of which
+## `_thrown` is already spent.
 var _target: Creature2 = null
+var _aimed: Dictionary = {}
 var _at: Vector3 = Vector3.ZERO
 var _throw: float = 0.0
 var _thrown: float = 0.0
@@ -122,6 +187,9 @@ var _latch: bool = false
 ## the target's pose is what carries it about the world.
 var holding: Dictionary = {}
 var _chew: float = 0.0
+## How long the grip has been stretched past what the flesh bears — see
+## `STRAIN_PATIENCE`.
+var _strain: float = 0.0
 
 ## What has gone down the throat, census mass units — the feeding readout.
 var belly: float = 0.0
@@ -161,6 +229,112 @@ func muzzle_reach() -> float:
 
 func muzzle_width() -> float:
 	return creature.body.skull_radius * 0.8
+
+
+## How far short of the flesh the jaw point rides once these teeth are seated in
+## it, px — the one number that turns "the mouth touched the surface" into "the
+## mouth is in the flesh", and the whole of how deep a bite looks.
+##
+## Derived from the mouth rather than picked: the contact patches stand
+## `Fangs.patch_reach` of the muzzle ahead of the head node — that is where
+## `tooth_point` puts them, and where the damage is taken — and a closing drives
+## them `close_depth` past whatever surface they met. What is left over is where
+## the head has to be for both of those to be true at once, so the picture and
+## the wound are two readings of one geometry.
+##
+## Positive is the head node still outside the surface with its muzzle buried in;
+## the reference cat's is a little over a pixel, which puts most of a skull inside
+## the silhouette and leaves the eyes out of it. A keen, long-toothed mouth on
+## soft flesh comes out negative — the head node itself inside the animal — which
+## is what a big cat with its face in a haunch actually looks like. Nothing has to
+## be told to clip or not to clip; it is one subtraction, and it is the mouth's.
+func standoff() -> float:
+	return muzzle_reach() * fangs.patch_reach - fangs.close_depth(creature.corpus)
+
+
+## How far the mouth may be dragged off its seat before the wedge comes out of
+## it, px — how deep the teeth are, and a little over. See `TEAR_SHARE`.
+func tear_gap() -> float:
+	return fangs.close_depth(creature.corpus) * TEAR_SHARE
+
+
+## The flesh a bite is about to address, as a live contact on the target.
+##
+## An address is two questions and they have two different answers here.
+##
+## **Where along the animal** is the player's, and the picture can carry it: the
+## cursor picked a station and that station is followed through the target's own
+## pose, so the neck, the flank and the haunch are three things a person can mean
+## and get.
+##
+## **Which way round** is the *approach's*, and it has to be, because the picture
+## cannot say. Drawn from almost overhead a back and the belly under it land on
+## the same pixels — they are separated by height, and height is the axis this
+## view collapsed — so a pointer that tried to choose between them would be
+## guessing, and it was: aiming at a back picked the belly about as often as not.
+## Where the mouth *is* separates them completely and for free. A head level with
+## a flank comes in at the flank; the same head carried over the spine — a cat
+## standing over a carcass, or on a step, or landing out of a leap — comes down
+## onto the back. The player positions the animal and the bite follows from it,
+## which is the only honest way round in a view this flat.
+##
+## With nothing picked at all this is a bare plan coordinate met at the mouth's
+## own height, which is all two numbers can say.
+func _contact(target: Creature2, at: Vector2, picked: Dictionary) -> Dictionary:
+	if picked.is_empty() or not picked.has("band"):
+		return target.contour.locate(Vector3(at.x, at.y, jaw_point().z))
+	var band: StringName = picked["band"]
+	var t: float = picked["t"]
+	var theta: float = target.contour.bearing(band, t, jaw_point())
+	return {
+		"band": band, "t": t, "theta": theta,
+		"station": target.corpus.station_of(band, t),
+		"sector": target.corpus.sector_of(band, theta),
+		"at": target.contour.place(band, t, theta),
+		"centre": target.contour.axis(band, t),
+	}
+
+
+## Where a `Contour.locate` answer puts the seat: the surface it found, taken
+## back in along the same line the mouth approached it on.
+func _seat_found(found: Dictionary) -> Vector3:
+	var flesh: Vector3 = found["at"]
+	var out: Vector3 = flesh - (found["centre"] as Vector3)
+	if out.length_squared() < 0.000001:
+		return flesh
+	return flesh - out.normalized() * standoff()
+
+
+## ...and where the standing hold's own address puts it, through the target's
+## live pose. The address never moves; the flesh carrying it does.
+func _seat_held() -> Vector3:
+	var target: Creature2 = holding["target"]
+	return target.contour.place(holding["band"], holding["t"], holding["theta"],
+		standoff())
+
+
+## The point the jaws are being taken to, or are shut on — in all three
+## dimensions, INF when the mouth is doing neither.
+##
+## The one thing anything outside this file needs to know about where a bite is:
+## `Gaze` points the head at it (which is what makes a side bite face into the
+## flank and a top bite face down onto the back), and nothing else reads it.
+func bite_point() -> Vector3:
+	if not holding.is_empty():
+		return _seat_held()
+	return _at if state == THROW else Vector3.INF
+
+
+## Whether these jaws are in `other`, or on their way into it. What `Clash` asks
+## before it presses two bodies apart: an animal cannot bite what its own contact
+## keeps pushing out of range, and the neck carrying the mouth is inside the other
+## body for exactly as long as this is true.
+func biting(other: Creature2) -> bool:
+	if other == null:
+		return false
+	if not holding.is_empty():
+		return holding["target"] == other
+	return state == THROW and _target == other
 
 
 ## Where the purse is centred: the withers, on the plan.
@@ -247,12 +421,20 @@ func addressable(bearing: float) -> bool:
 ## Three refusals and one region: `window` gives the arc's two edges and
 ## `plan_reach` its radius, which between them are the whole of what `AimMark`
 ## draws. Nothing here is a second opinion about reach.
-func aim(target: Creature2, at: Vector2) -> Dictionary:
+##
+## `picked` is the body address the world already resolved the cursor onto, and
+## it matters more than it looks. Without one, all a bare plan coordinate can be
+## met with is "whatever is at that spot, at the mouth's own height" — which
+## throws away the one thing a top bite and a side bite differ by, because from
+## overhead a back and the flank beneath it are a couple of pixels apart and both
+## answer to the same two numbers. The picture is what separated them
+## (`Contour.locate_seen`) and this is the seam that carries the separation
+## through to the teeth.
+func aim(target: Creature2, at: Vector2, picked: Dictionary = {}) -> Dictionary:
 	var out: Dictionary = {"ok": false, "why": "nothing"}
 	if target == null or target == creature or target.contour == null:
 		return out
-	var jaw: Vector3 = jaw_point()
-	var contact: Dictionary = target.contour.locate(Vector3(at.x, at.y, jaw.z))
+	var contact: Dictionary = _contact(target, at, picked)
 	if contact.is_empty():
 		return out
 	var flesh: Vector3 = contact["at"]
@@ -405,17 +587,26 @@ func lunging() -> bool:
 ## refusals `aim` gives are not wasted for that: they are what the mark draws
 ## hollow and what the readout says, so "you cannot get to that" is said before
 ## the button rather than by swallowing it.
-func strike(target: Creature2, at: Vector2, latch: bool = false) -> bool:
+func strike(target: Creature2, at: Vector2, latch: bool = false,
+		picked: Dictionary = {}) -> bool:
 	if state != IDLE or creature.armature.collapsed or not holding.is_empty():
 		return false
 	var jaw: Vector3 = jaw_point()
-	var seen: Dictionary = aim(target, at)
+	var seen: Dictionary = aim(target, at, picked)
 	var cap: float = throw_cap()
 	var reached: bool = target != null and bool(seen.get("ok", false))
 	if reached:
 		var contact: Dictionary = seen["contact"]
 		_target = target
-		_at = contact["at"]
+		# The flesh, as an address, so the throw goes where it was thrown and
+		# nowhere else — see `_aimed`.
+		_aimed = {"band": contact["band"], "t": contact["t"],
+			"theta": contact["theta"]}
+		# Where the mouth is going is the seat, not the surface: the strike is
+		# aimed at where the teeth will be once they are in, so the throw has the
+		# depth of the bite in it from the first tick rather than stopping at the
+		# skin and leaving the last pixels to something else.
+		_at = _seat_found(contact)
 		# The body covers what the arm cannot: gap from the withers, less the
 		# neck-and-head already reaching along it. A contact inside the arm asks
 		# for almost no body at all — the carry alone takes the mouth there — but
@@ -437,6 +628,7 @@ func strike(target: Creature2, at: Vector2, latch: bool = false) -> bool:
 		# points is where the bite goes, which is also the one place the player can
 		# see it is going, because the head is drawn.
 		_target = null
+		_aimed = {}
 		var toward := Vector2(at.x - jaw.x, at.y - jaw.y)
 		if toward.length() > 0.5 \
 				and not addressable((at - purse_root()).angle()):
@@ -488,19 +680,30 @@ func tick(delta: float) -> void:
 func _tick_throw(delta: float) -> void:
 	var a: Armature = creature.armature
 	var jaw: Vector3 = jaw_point()
-	# The strike is re-aimed every tick at where the flesh actually is — a
-	# target that walks, turns, or is shoved along by the arriving body
-	# itself is met where it is. The commit fixed the *budget*, not the spot.
+	# The strike is re-aimed every tick at where the aimed flesh has got to — a
+	# target that walks, turns, or is shoved along by the arriving body itself is
+	# met where it is. The commit fixed the *budget* and the *address*, not the
+	# spot; see `_aimed`.
 	var arrived: bool = false
 	if _target != null and _target.contour != null:
-		var fresh: Dictionary = _target.contour.locate(jaw)
+		var band: StringName = _aimed.get("band", &"")
+		if not _aimed.is_empty():
+			# The aimed flesh, followed through the target's own pose — the
+			# address is the strike's whole memory of what it is biting.
+			_at = _target.contour.place(band, _aimed["t"], _aimed["theta"],
+				standoff())
+		var fresh: Dictionary = _target.contour.locate(jaw, band)
 		if not fresh.is_empty():
-			_at = fresh["at"]
-			# The jaws close early the moment the teeth are genuinely on the
-			# flesh — a bite is over when it connects. Short of that the
-			# throw runs its course, and the final closing takes whatever
-			# stands inside the gape's grab.
-			arrived = float(fresh["depth"]) >= -muzzle_reach()
+			if _aimed.is_empty():
+				_at = _seat_found(fresh)
+			# The jaws close the moment the mouth reaches its seat — the teeth
+			# are in, and that is what a bite connecting is. This used to be a
+			# whole muzzle short of the flesh, which parked the head a skull's
+			# width off the animal and is the entire reason a bite read as a
+			# nose touching a silhouette. Short of the seat the throw runs its
+			# course, and the final closing takes whatever stands inside the
+			# gape's grab.
+			arrived = float(fresh["depth"]) >= -standoff()
 	var toward := Vector2(_at.x - jaw.x, _at.y - jaw.y)
 	var step: float = minf(_throw * delta / THROW_TIME,
 		minf(_throw - _thrown, toward.length()))
@@ -528,14 +731,35 @@ func _tick_throw(delta: float) -> void:
 ## bite nothing.
 func _close() -> void:
 	var target: Creature2 = _target
+	var want: Dictionary = _aimed
+	var aimed: StringName = want.get("band", &"")
 	_target = null
+	_aimed = {}
 	var jaw: Vector3 = jaw_point()
 	var mouth: Dictionary = {}
 	if target != null and target.contour != null:
-		mouth = target.contour.locate(jaw)
+		# Asked of the part that was aimed at, so the mouthful is the flesh the
+		# throw went to. Where the jaws did not get there, `aimed` is simply not
+		# what they are in and the fall-through below takes whatever is.
+		mouth = target.contour.locate(jaw, aimed)
 		if mouth.is_empty() or float(mouth["depth"]) < -muzzle_reach() * GRAB:
 			target = null
 			mouth = {}
+		elif not want.is_empty():
+			# ...and the mouthful is the flesh the strike was committed to, since
+			# the jaws did close on that part of that body. Not whichever bit of
+			# it the head has ended up nearest: the throw is capped by what the
+			# legs can catch, so a mouth is routinely still short of its seat when
+			# it shuts, and a bearing taken from out there says "from the side"
+			# about every bite there is — including the one taken standing over a
+			# carcass. Which way round the jaws came in was settled when the
+			# strike was aimed (`_contact`), by the approach, which is the only
+			# thing that can settle it. Only the *depth* stays measured where the
+			# teeth actually are, because that is a fact about this closing.
+			mouth["t"] = want["t"]
+			mouth["theta"] = want["theta"]
+			mouth["station"] = target.corpus.station_of(aimed, want["t"])
+			mouth["sector"] = target.corpus.sector_of(aimed, want["theta"])
 	if target == null:
 		# Nothing was committed to, or the strike arrived somewhere other than
 		# where it was thrown. Either way the jaws take what is in them — the
@@ -587,8 +811,8 @@ func _close() -> void:
 
 # ----------------------------------------------------------------- the hold ----
 
-## A latched mouth, tick by tick: the head is carried at the flesh, the tether
-## tows whichever body is lighter, too far parts the hold through the flesh,
+## A latched mouth, tick by tick: the mouth is kept on its seat inside the flesh,
+## whichever body is lighter gives way, too far parts the hold through the flesh,
 ## and the chew re-closes on the same wedge — deeper, because the census got
 ## thinner under it.
 func _tick_hold(delta: float) -> void:
@@ -596,15 +820,14 @@ func _tick_hold(delta: float) -> void:
 	if target == null or target.contour == null:
 		release()
 		return
-	var at: Vector3 = target.contour.place(holding["band"],
-		holding["t"], holding["theta"])
+	var at: Vector3 = _seat_held()
 	var a: Armature = creature.armature
 	a.head_reach_z = at.z
 	var jaw: Vector3 = jaw_point()
 	var gap := Vector2(at.x - jaw.x, at.y - jaw.y)
-	var slack: float = muzzle_reach() * SLACK_SHARE
 
-	if gap.length() > muzzle_reach() * TEAR_SHARE:
+	_strain = _strain + delta if gap.length() > tear_gap() else 0.0
+	if _strain >= STRAIN_PATIENCE:
 		# Torn free: the parting takes flesh, the way leaving with a mouthful
 		# does — one more closing's worth, spent on the way out.
 		var was: float = target.corpus.mass()
@@ -616,18 +839,26 @@ func _tick_hold(delta: float) -> void:
 		release()
 		return
 
-	if gap.length() > slack:
-		# The tether: positional, split by weight — an Elephant's head does not
-		# follow a Cat's mouthful anywhere, and both of those are this share.
-		var over: Vector2 = gap.normalized() * (gap.length() - slack) * TOW
-		var mine: float = creature.corpus.mass()
-		var theirs: float = target.corpus.mass()
-		var share: float = theirs / maxf(mine + theirs, Corpus.MIN_MASS)
-		a.shift(over * share)
-		creature.head_pos += over * share
-		target.armature.shift(-over * (1.0 - share))
-		if not target.armature.collapsed:
-			target.head_pos -= over * (1.0 - share)
+	# The grip, and it is a *placement* rather than a pull. The head is the
+	# chain's one driven point (`Armature.take_head`), so putting the mouth's
+	# anchor on the seat is the whole of holding on: the neck folds to bridge
+	# whatever it can reach and the body is towed after whatever it cannot,
+	# through the solve that was already there — no second tether, and the
+	# anatomy is never violated for a frame, because nothing moves a node behind
+	# the solver's back. Split by weight, because which of the two bodies closes
+	# the gap is a question about mass and nothing else: an Elephant's flank does
+	# not come to a Cat's mouth, and the Cat is dragged instead.
+	#
+	# Eased rather than set, so a hold taken at the far end of a throw shuts the
+	# last of the way over a few frames instead of snapping.
+	var mine: float = creature.corpus.mass()
+	var theirs: float = target.corpus.mass()
+	var share: float = theirs / maxf(mine + theirs, Corpus.MIN_MASS)
+	var close: Vector2 = gap * (1.0 - exp(-GRIP * delta))
+	creature.head_pos += close * share
+	target.armature.shift(-close * (1.0 - share))
+	if not target.armature.collapsed:
+		target.head_pos -= close * (1.0 - share)
 
 	_chew += delta
 	if _chew >= CHEW_TIME:
@@ -638,16 +869,54 @@ func _tick_hold(delta: float) -> void:
 			target.corpus.sector_of(holding["band"], holding["theta"]),
 			fangs.close_depth(creature.corpus)))
 		_swallow_from(target, was)
-		# The jaws re-seat on what is left — v1's work-in law: the chew has
-		# thinned the wedge and its surface has retreated, so the hold walks
-		# onto the nearest standing flesh rather than hanging in the hole the
-		# last mouthful left. This is also how a long piece is eaten
-		# end-first, with nobody deciding to.
-		var seat: Dictionary = target.contour.locate(jaw_point())
-		if not seat.is_empty():
-			holding["band"] = seat["band"]
-			holding["t"] = seat["t"]
-			holding["theta"] = seat["theta"]
+		# ...and the jaws re-seat on what is left — v1's work-in law: the chew has
+		# thinned the wedge, so the next closing goes deeper into the same hole
+		# until there is no hole left to go into, and then the mouth slides onto
+		# the standing flesh beside it. See `_work_in`.
+		holding["theta"] = _work_in(target)
+
+
+## The chew's re-seat — v1's work-in law, said in the one currency that can say
+## it: the census.
+##
+## A closing thins the wedge under the teeth and the next one goes deeper into the
+## same hole, which is what makes a long piece get eaten end-first with nobody
+## deciding to. That holds right up to the moment the wedge is *gone* — chewed
+## down to its bone core, with nothing left for a tooth to take — and then the
+## mouth has to move or it spends the rest of the meal closing on a hollow. It
+## slides to the proudest flesh still standing within its own gape, which is the
+## neighbouring wedge, and starts again there.
+##
+## Asked of the cells rather than of the geometry, because it is a question about
+## what is *left* and only the census knows that. `Contour.locate` cannot answer
+## it at all — it reports the surface in whatever direction you ask from, so a
+## mouth sitting in the hollow it ate is told, quite correctly, that the nearest
+## surface is the hollow.
+func _work_in(target: Creature2) -> float:
+	var band: StringName = holding["band"]
+	var here: float = holding["theta"]
+	var b: Contour.Band = target.contour.band(band)
+	if b == null:
+		return here
+	var corpus: Corpus = target.corpus
+	var station: int = corpus.station_of(band, holding["t"])
+	var at: int = corpus.sector_of(band, here)
+	# Still something to bite: stay, and work in.
+	if corpus.surface_radius(band, station, at) \
+			> corpus.layer_radius(band, station, at, 1) + 0.01:
+		return here
+	# Spent: the standing flesh within the gape, proudest first.
+	var span: int = maxi(int(round(fangs.span / TAU * float(b.sectors))), 1)
+	var best: int = at
+	var proudest: float = -INF
+	for step in range(-span, span + 1):
+		var s: int = posmod(at + step, b.sectors)
+		var r: float = corpus.surface_radius(band, station, s) \
+			- corpus.layer_radius(band, station, s, 1)
+		if r > proudest:
+			proudest = r
+			best = s
+	return wrapf(atan2(b.sines[best], b.cosines[best]), 0.0, TAU)
 
 
 ## Whichever body these jaws are deepest into, and where — or nothing at all.
@@ -690,8 +959,10 @@ func hold(held: bool) -> void:
 func release() -> void:
 	holding.clear()
 	_target = null
+	_aimed = {}
 	_latch = false
 	_chew = 0.0
+	_strain = 0.0
 
 
 ## What a closing took, weighed: the census before against the census after,

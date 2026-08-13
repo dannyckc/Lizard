@@ -36,20 +36,50 @@ extends RefCounted
 ## Share of a limb's fore-aft excursion the drift may spend before the foot
 ## must ask to step. What is left past the trigger is the margin desperate
 ## steps and prediction error live in.
-const TRIGGER: float = 0.60
+##
+## This is one of the two numbers a stride length is made of and the only one
+## that is not anatomy. A foot lifts about `TRIGGER` of its excursion behind its
+## home and lands at the far edge of that same excursion, so a step covers about
+## `(1 + TRIGGER)` of the disc — and how often the animal takes one is that
+## divided into how fast it is going. At 0.60 the cat covered the ground of a
+## walk in the steps of a trot; the extra fifth here is a longer, more deliberate
+## step for exactly the same ground, which is the difference between a body
+## walking and a body scurrying. It is not free — what is left over is the room a
+## desperate step and a mispredicted landing have to live in — so it stops well
+## short of the 1.0 that would leave the leg trailing at full stretch with
+## nothing in reserve at all.
+const TRIGGER: float = 0.78
 
 ## Swing speed, in limb lengths per second at the twitch datum. The one
 ## tempo scale: a longer leg swings a longer arc in the same time, a
 ## fast-twitch body sweeps quicker, and the tendon lever gears it (a tendon
 ## inserted close to the joint trades press for sweep — Carriage.Joint.gear).
-const SWING_RATE: float = 5.5
+##
+## 5.5 was a leg sweeping five and a half of its own lengths every second, which
+## is faster than any of these legs ever has to move: priced against the strides
+## this anatomy actually takes it made every swing come out under the floor
+## below, so the scale decided nothing, the *clamp* decided everything, and every
+## step of every gait was the same 100 ms flick — a foot that teleports and a
+## body that reads as sped-up film. At 2.4 the arithmetic is live again: a stroll
+## swings in about three tenths of a second, a sprint in a fifth, and the
+## difference between them is the pace rather than a constant.
+##
+## It is also the floor of what the legs can be asked to keep up with. A swing is
+## time a foot is not supporting anything, so the duty factor is what is left of
+## the cycle after it — set the sweep much slower than this and a sprinting body
+## has three feet in the air at once, no grip to press with, and comes to a dead
+## stop while its legs windmill. The cat's fore leg is the binding one: it is
+## shorter than the hind and geared level with the reference tendon, so it sweeps
+## the same stride the slowest, and this is the rate at which *it* still lands in
+## time.
+const SWING_RATE: float = 2.4
 const TWITCH_FLOOR: float = 0.6
 const TWITCH_SPAN: float = 0.8
 
 ## A swing is never over before or after these, seconds — the floor is the
 ## fast-twitch law's old truth (limbs stop blurring), the ceiling is a limp
 ## being a limp rather than a step.
-const SWING_MIN: float = 0.10
+const SWING_MIN: float = 0.14
 const SWING_MAX: float = 0.50
 
 ## Step clearance at a walk, px, scaled by the stance's own step-height
