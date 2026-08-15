@@ -123,6 +123,17 @@ var outlook: Outlook = Outlook.new()
 var rhythm: Rhythm = Rhythm.new()
 var footwork: Footwork = Footwork.new()
 
+## What the loop is being asked for this tick, px/s along the facing, and how
+## much of that ask the ground ahead permitted — 1 on open ground, 0 where
+## `Outlook` has refused it (the balk). Readouts of the intent, written here
+## because this is where the intent is read; nothing downstream consumes them.
+var ask_speed: float = 0.0
+var headroom: float = 1.0
+
+## The loop's own record of itself, for whoever is watching it — see
+## `MotionReadout`. Inert and allocation-free until something switches it on.
+var readout: MotionReadout = MotionReadout.new()
+
 ## The current home-shift the acceleration asks of the support, world px.
 var lean: Vector2 = Vector2.ZERO
 ## How sunk the body is carried, 0..1 — the charge and the landing absorb.
@@ -165,6 +176,9 @@ func reset() -> void:
 	_absorb = 0.0
 	_debt = 0.0
 	_wobble = 0.0
+	# Whatever was recorded happened to a body that is no longer standing where
+	# this one is — see MotionReadout.clear.
+	readout.clear()
 	if creature != null:
 		creature.armature.roll = 0.0
 		if not creature.armature.collapsed:
@@ -182,6 +196,8 @@ func steer(delta: float, ground: float) -> void:
 	impetus.derive(creature.corpus)
 	if a.collapsed:
 		impetus.halt()
+		ask_speed = 0.0
+		headroom = 1.0
 		_publish(Vector2.RIGHT.rotated(creature.heading))
 		return
 
@@ -211,7 +227,9 @@ func steer(delta: float, ground: float) -> void:
 	# a body that watched from its centre would hang its whole fore quarter
 	# over a brink before the ask died.
 	var lead: int = a.withers_index() if throttle >= 0.0 else a.pelvis_index()
-	ask *= outlook.headroom(a.plan(lead), motion, ground, spec.hind_leg_length)
+	headroom = outlook.headroom(a.plan(lead), motion, ground, spec.hind_leg_length)
+	ask *= headroom
+	ask_speed = ask
 
 	# The turn: a rate the anatomy and the pace gate, eased at the body's own
 	# responsiveness. Airborne there is nothing to turn against.
@@ -524,6 +542,41 @@ func review(delta: float) -> void:
 		footwork.rescue(p.centre,
 			_lateral() * (keel.side * maxf(keel.spill, p.pad)))
 	_debt = maxf(_debt - 2.0 * delta, 0.0)
+
+
+## The loop, written down — the last thing the tick does, and the only thing in
+## this file that changes nothing.
+##
+## One seam and one assembler, for the reason every other publication in v2 has
+## one: a panel that reached into `Footwork` for a drift and `Keel` for a heel
+## would be holding four opinions about a body that has one, and the first of
+## them to be re-derived a tick late would be the one that looked like a bug in
+## the mover. `Travel` already writes the motion seam the game reads; this is the
+## same seam asked for everything the loop decided rather than only for what it
+## delivered. Free while nothing is watching — see `MotionReadout.watching`.
+func observe(delta: float) -> void:
+	if not readout.watching:
+		return
+	readout.gather(delta, creature, self, _state_word())
+
+
+## What the loop is doing, in one word, from the loop's own state. The order is a
+## precedence: what has happened to the body outranks what it was trying to do.
+func _state_word() -> StringName:
+	var a: Armature = creature.armature
+	if a.collapsed:
+		return &"COLLAPSED"
+	if a.fall.is_airborne():
+		return &"AIRBORNE"
+	if creature.poise.posed and creature.poise.feet == 0:
+		return &"FALLING"
+	if _wobble >= WOBBLE_PATIENCE or keel.strained:
+		return &"RESCUE"
+	if headroom <= 0.0 and absf(creature.command.throttle) > 0.01:
+		return &"BALKED"
+	if footwork.planted() < footwork.feet.size():
+		return &"STEPPING"
+	return &"STANDING"
 
 
 ## The body goes down, however it got there — the same collapse a death is. Keel

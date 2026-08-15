@@ -1,0 +1,1278 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #F3F1EC; }
+  * { box-sizing: border-box; }
+  a { color: #14140F; text-decoration: none; border-bottom: 1px solid rgba(20,20,15,0.22); }
+  a:hover { color: rgba(20,20,15,0.55); }
+  ::selection { background: #14140F; color: #F3F1EC; }
+</style>
+</helmet>
+<div ref="{{ stageRef }}" style="position:relative;width:100%;height:100vh;min-height:780px;overflow:hidden;background:#F3F1EC;color:#14140F;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased">
+
+  <div style="position:absolute;left:302px;right:230px;top:24px;bottom:24px">
+    <canvas ref="{{ canvasRef }}" style="width:100%;height:100%;display:block"></canvas>
+  </div>
+
+  <div style="position:absolute;inset:0;pointer-events:none;background:radial-gradient(115% 85% at 50% 42%, rgba(243,241,236,0) 45%, rgba(20,20,15,0.055) 100%)"></div>
+  <div style="position:absolute;inset:0;pointer-events:none;opacity:0.035;mix-blend-mode:multiply;background-image:url(&quot;data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/></filter><rect width='140' height='140' filter='url(%23n)'/></svg>&quot;)"></div>
+  <div style="position:absolute;inset:14px;pointer-events:none;border:1px solid rgba(20,20,15,0.10)"></div>
+
+  <div style="position:absolute;top:30px;left:32px;width:250px;display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:center;gap:11px">
+      <div style="width:7px;height:7px;border-radius:50%;background:#8E1B12"></div>
+      <div style="font-size:11px;letter-spacing:0.34em;text-transform:uppercase;line-height:1">Evolution</div>
+    </div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.16em;color:rgba(20,20,15,0.42);line-height:1">CREATURE&nbsp;&nbsp;PHYSICS&nbsp;&nbsp;V2&nbsp;&nbsp;0.1</div>
+    <div style="display:flex;align-items:center;gap:2px;margin-left:-12px">
+      <a href="./Blood HUD.dc.html" style="display:flex;align-items:center;padding:7px 12px;font-size:9.5px;letter-spacing:0.22em;text-transform:uppercase;line-height:1;color:rgba(20,20,15,0.42);border-bottom:1px solid transparent">Blood</a>
+      <a href="./Gait HUD.dc.html" style="display:flex;align-items:center;padding:7px 12px;font-size:9.5px;letter-spacing:0.22em;text-transform:uppercase;line-height:1;color:rgba(20,20,15,0.42);border-bottom:1px solid transparent">Gait</a>
+      <div style="display:flex;align-items:center;gap:7px;padding:7px 12px;font-size:9.5px;letter-spacing:0.22em;text-transform:uppercase;line-height:1;border-bottom:1px solid #14140F">
+        <div style="width:4px;height:4px;border-radius:50%;background:#8E1B12"></div>
+        Physics
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:9px;margin-top:2px">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.18em;color:rgba(20,20,15,0.75)">THE&nbsp;LOOP</div>
+      <div style="flex:1;height:1px;background:rgba(20,20,15,0.18)"></div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.12em;color:{{ stateInk }}">{{ stateText }}</div>
+    </div>
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:3px 14px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.06em;line-height:1.35;color:rgba(20,20,15,0.78)">
+      <span style="opacity:0.5">ASK</span><span style="text-align:right">{{ askText }}</span>
+      <span style="opacity:0.5">SPEED</span><span style="text-align:right">{{ speedText }}</span>
+      <span style="opacity:0.5">DEMAND</span><span style="text-align:right">{{ demandText }}</span>
+      <span style="opacity:0.5">DELIVERED</span><span style="text-align:right">{{ deliverText }}</span>
+      <span style="opacity:0.5">CEILING</span><span style="text-align:right">{{ ceilText }}</span>
+      <span style="opacity:0.5">GRIP</span><span style="text-align:right">{{ gripText }}</span>
+      <span style="opacity:0.5">ANG&nbsp;VEL</span><span style="text-align:right">{{ angText }}</span>
+      <span style="opacity:0.5">FEET&nbsp;DOWN</span><span style="text-align:right">{{ feetText }}</span>
+      <span style="opacity:0.5">MARGIN</span><span style="text-align:right;color:{{ marginInk }}">{{ marginText }}</span>
+      <span style="opacity:0.5">STEADINESS</span><span style="text-align:right">{{ steadyText }}</span>
+      <span style="opacity:0.5">ROLL</span><span style="text-align:right">{{ rollText }}</span>
+      <span style="opacity:0.5">RIGHTING</span><span style="text-align:right">{{ rightText }}</span>
+      <span style="opacity:0.5">SCENARIO&nbsp;T</span><span style="text-align:right">{{ scTText }}</span>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:9px;margin-top:6px">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.18em;color:rgba(20,20,15,0.75)">TELLS</div>
+      <div style="flex:1;height:1px;background:rgba(20,20,15,0.18)"></div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;letter-spacing:0.1em;color:rgba(20,20,15,0.35)">NATURAL&nbsp;BAND</div>
+    </div>
+    <div style="display:grid;grid-template-columns:auto 1fr auto;gap:3px 10px;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.04em;line-height:1.35">
+      <sc-for list="{{ tellList }}" as="t" hint-placeholder-count="8">
+        <span style="opacity:0.5;color:#14140F">{{ t.label }}</span>
+        <span style="text-align:right;color:{{ t.ink }}">{{ t.val }}</span>
+        <span style="color:{{ t.vInk }};min-width:52px">{{ t.verdict }}</span>
+      </sc-for>
+    </div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;line-height:1.7;letter-spacing:0.06em;color:rgba(20,20,15,0.38);text-wrap:pretty">{{ diagNote }}</div>
+  </div>
+
+  <div style="position:absolute;top:30px;right:32px;width:176px;display:flex;flex-direction:column;gap:9px">
+    <div style="display:flex;align-items:center;gap:9px">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.18em;color:rgba(20,20,15,0.75)">DRIVE</div>
+      <div style="flex:1;height:1px;background:rgba(20,20,15,0.18)"></div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#8E1B12">{{ askPxText }}</div>
+    </div>
+    <div ref="{{ slideRef }}" onPointerDown="{{ slideDown }}" style="position:relative;height:24px;cursor:ew-resize;touch-action:none">
+      <div style="position:absolute;left:0;right:0;top:11px;height:1px;background:rgba(20,20,15,0.22)"></div>
+      <div style="position:absolute;left:0;top:11px;height:1px;background:#14140F;width:{{ askPct }}"></div>
+      <div style="position:absolute;top:6px;left:{{ askPct }};width:2px;height:11px;background:#8E1B12"></div>
+      <div style="position:absolute;left:0;right:0;top:16px;display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:0.1em;color:rgba(20,20,15,0.3)">
+        <span>0</span><span>STROLL</span><span>CRUISE</span><span>SPRINT</span>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:9px;margin-top:8px">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.18em;color:rgba(20,20,15,0.75)">SCENARIO</div>
+      <div style="flex:1;height:1px;background:rgba(20,20,15,0.18)"></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:1px;margin-left:-10px">
+      <sc-for list="{{ scenList }}" as="s" hint-placeholder-count="9">
+        <div onClick="{{ s.pick }}" style="position:relative;display:flex;align-items:center;gap:9px;padding:4px 10px;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;min-height:24px">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.1em;color:{{ s.tagInk }};transition:color 200ms ease">{{ s.tag }}</div>
+          <div style="font-size:9.5px;letter-spacing:0.2em;text-transform:uppercase;line-height:1;color:{{ s.ink }};transition:color 200ms ease">{{ s.name }}</div>
+          <div style="position:absolute;left:0;right:0;bottom:0;height:1px;background:{{ s.rule }};transition:background 200ms ease"></div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:9px;margin-top:8px">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.18em;color:rgba(20,20,15,0.75)">TIME</div>
+      <div style="flex:1;height:1px;background:rgba(20,20,15,0.18)"></div>
+    </div>
+    <div style="display:flex;gap:6px">
+      <div onClick="{{ togglePause }}" style="flex:1;display:flex;align-items:center;justify-content:center;padding:7px 0;border:1px solid rgba(20,20,15,0.28);font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.14em;cursor:pointer;user-select:none;min-height:30px;color:{{ pauseInk }}">{{ pauseText }}</div>
+      <div onClick="{{ stepOnce }}" style="flex:1;display:flex;align-items:center;justify-content:center;padding:7px 0;border:1px solid rgba(20,20,15,0.28);font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.14em;cursor:pointer;user-select:none;min-height:30px;color:{{ stepInk }}">STEP</div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:2px">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;letter-spacing:0.14em;color:rgba(20,20,15,0.45)">SLOW&#8209;MO</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#8E1B12">{{ rateText }}</div>
+    </div>
+    <div ref="{{ rateRef }}" onPointerDown="{{ rateDown }}" style="position:relative;height:20px;cursor:ew-resize;touch-action:none">
+      <div style="position:absolute;left:0;right:0;top:8px;height:1px;background:rgba(20,20,15,0.22)"></div>
+      <div style="position:absolute;left:0;top:8px;height:1px;background:#14140F;width:{{ ratePct }}"></div>
+      <div style="position:absolute;top:3px;left:{{ ratePct }};width:2px;height:11px;background:#8E1B12"></div>
+      <div style="position:absolute;left:0;right:0;top:13px;display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:0.1em;color:rgba(20,20,15,0.28)">
+        <span>0.10&times;</span><span>1.00&times;</span><span>1.50&times;</span>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:5px;margin-top:8px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="width:13px;height:2px;background:#8E1B12"></div>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;letter-spacing:0.1em;color:rgba(20,20,15,0.44)">PLANTED&nbsp;ANCHOR</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="width:9px;height:9px;border-radius:50%;border:1px solid rgba(20,20,15,0.55)"></div>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;letter-spacing:0.1em;color:rgba(20,20,15,0.44)">SWINGING&nbsp;FOOT</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="width:9px;height:9px;border:1px solid rgba(20,20,15,0.4)"></div>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;letter-spacing:0.1em;color:rgba(20,20,15,0.44)">HOME&nbsp;/&nbsp;DRIFT</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="width:9px;height:9px;border:1px dashed rgba(142,27,18,0.7)"></div>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;letter-spacing:0.1em;color:rgba(20,20,15,0.44)">PREDICTED&nbsp;LANDING</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="width:13px;height:1px;background:rgba(20,20,15,0.4);border-top:1px dashed rgba(20,20,15,0.5)"></div>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;letter-spacing:0.1em;color:rgba(20,20,15,0.44)">SUPPORT&nbsp;POLYGON</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="width:9px;height:9px;border-radius:50%;background:#14140F"></div>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;letter-spacing:0.1em;color:rgba(20,20,15,0.44)">CENTRE&nbsp;OF&nbsp;MASS</span>
+      </div>
+    </div>
+
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;line-height:1.8;letter-spacing:0.08em;color:rgba(20,20,15,0.32);margin-top:6px">SPACE&nbsp;PAUSE&nbsp;&middot;&nbsp;.&nbsp;STEP<br />1&ndash;9&nbsp;SCENARIO&nbsp;&middot;&nbsp;&#9666;&#9656;&nbsp;ASK<br />A&nbsp;/&nbsp;D&nbsp;TURN</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;slowMotion&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:1,&quot;min&quot;:0.15,&quot;max&quot;:1.5,&quot;step&quot;:0.05,&quot;unit&quot;:&quot;\u00d7&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Playback&quot;},&quot;waveGain&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:1,&quot;min&quot;:0,&quot;max&quot;:1.5,&quot;step&quot;:0.05,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Body&quot;},&quot;response&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:0.12,&quot;min&quot;:0.04,&quot;max&quot;:0.4,&quot;step&quot;:0.01,&quot;unit&quot;:&quot;s&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Body&quot;},&quot;beatCoupling&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:0.55,&quot;min&quot;:0,&quot;max&quot;:1,&quot;step&quot;:0.05,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Body&quot;},&quot;showHull&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Overlay&quot;},&quot;showTrails&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Overlay&quot;}}">
+class Component extends DCLogic {
+  state = { sc: 0, paused: false, tick: 0 };
+  stageRef = React.createRef();
+  canvasRef = React.createRef();
+  slideRef = React.createRef();
+  rateRef = React.createRef();
+
+  static INK = '#14140F';
+  static RED = '#8E1B12';
+
+  static C = {
+    GAP: 78, TRUNK_N: 8, NECK: 26, TAIL: 95, HALF_W: 13,
+    SH_Z: 47.6, HIP_Z: 53.8,
+    FORE: { l1: 27, l2: 27, footH: 7, toe: 9, lead: 7, cone: [0.34, 2.62] },
+    HIND: { l1: 30, l2: 33, footH: 9, toe: 10, lead: -6, cone: [0.30, 2.48] },
+    SPRINT: 163, CRUISE: 100, STROLL: 45,
+    PUSH: 518, TAU: 0.12, TURN: 1.57, TURN_EASE: 4.6, TURN_PIVOT: 0.5,
+    EXC: 28, SWEEP: 340, CLEAR: 11, LEAD: 0.62, VAULT: 0.8,
+    SPINE_BEND: 0.30, WAVE: 0.16, BEAT: 0.18, ANTICIPATE: 0.42, SWAY: 8,
+    DEFICIT: 0.85,
+    CLIMB_SHARE: 0.34, DESCEND_SHARE: 0.55, GRAV: 980,
+  };
+
+  static FEET = [
+    { k: 'FL', g: 0, side: 1, dia: 3 },
+    { k: 'FR', g: 0, side: -1, dia: 2 },
+    { k: 'HL', g: 1, side: 1, dia: 1 },
+    { k: 'HR', g: 1, side: -1, dia: 0 },
+  ];
+
+  static SCEN = [
+    { tag: 'S1', name: 'Cruise', terrain: 'flat', warm: 0.61 },
+    { tag: 'S2', name: 'Accelerate', terrain: 'flat', warm: 0 },
+    { tag: 'S3', name: 'Brake', terrain: 'flat', warm: 1 },
+    { tag: 'S4', name: 'Turn on spot', terrain: 'flat', warm: 0 },
+    { tag: 'S5', name: 'Turn at cruise', terrain: 'flat', warm: 0.61 },
+    { tag: 'S6', name: 'Ledge +10', terrain: 'ledge', warm: 0.61, loop: 7.5 },
+    { tag: 'S7', name: 'Brink \u221260', terrain: 'brink', warm: 0.61, loop: 8.5 },
+    { tag: 'S8', name: 'Shove 300', terrain: 'flat', warm: 0.61, loop: 7 },
+    { tag: 'S9', name: 'Collapse', terrain: 'flat', warm: 0.61, loop: 7 },
+  ];
+
+  static TELLS = [
+    { key: 'bob', label: 'COM BOB', unit: 'PX', band: [3.5, 10], lo: 'FLAT', hi: 'HEAVY' },
+    { key: 'sway', label: 'LAT SWAY', unit: 'PX', band: [2.2, 9], lo: 'RIGID', hi: 'LOOSE' },
+    { key: 'lag', label: 'SPINE LAG', unit: '\u00b0', band: [3.5, 16], lo: 'RIGID', hi: 'SLACK' },
+    { key: 'tail', label: 'TAIL TRAIL', unit: '\u00b0', band: [6, 90], lo: 'STIFF', hi: 'WHIP' },
+    { key: 'spread', label: 'BEAT SPREAD', unit: '%', band: [5, 22], lo: 'METRONOME', hi: 'RAGGED' },
+    { key: 'clip', label: 'JOINTS AT CAP', unit: '/8', band: [0, 1.4], lo: '\u2014', hi: 'CLIPPING' },
+    { key: 'stride', label: 'STRIDE/REACH', unit: '', band: [0.4, 0.86], lo: 'MINCING', hi: 'OVERREACH' },
+    { key: 'deliv', label: 'DELIVERY', unit: '', band: [0.3, 0.94], lo: 'STARVED', hi: 'WEIGHTLESS' },
+  ];
+
+  renderVals() {
+    const C = Component.C, d = this._d || {};
+    const mk = (a) => ({ ink: a ? '#14140F' : 'rgba(20,20,15,0.42)', tagInk: a ? '#8E1B12' : 'rgba(20,20,15,0.28)', rule: a ? '#14140F' : 'transparent' });
+    const n = (v, p) => (v === undefined || v === null || !isFinite(v) ? '\u2014' : v.toFixed(p === undefined ? 1 : p));
+    const still = (d.speed || 0) < 9 && Math.abs(d.angVel || 0) < 0.12;
+    const tellList = Component.TELLS.map(t => {
+      const v = d.tells ? d.tells[t.key] : undefined;
+      const mute = (still && t.key !== 'clip') || !this._tellGate(t.key);
+      let verdict = 'OK', vInk = 'rgba(20,20,15,0.55)';
+      if (v === undefined || !isFinite(v)) { verdict = '\u2014'; vInk = 'rgba(20,20,15,0.25)'; }
+      else if (mute) { verdict = still ? 'STILL' : 'N/A'; vInk = 'rgba(20,20,15,0.25)'; }
+      else if (v < t.band[0]) { verdict = t.lo; vInk = Component.RED; }
+      else if (v > t.band[1]) { verdict = t.hi; vInk = Component.RED; }
+      return {
+        label: t.label,
+        val: (v === undefined || !isFinite(v) ? '\u2014' : (t.key === 'clip' ? String(Math.round(v)) : v.toFixed(t.key === 'stride' || t.key === 'deliv' ? 2 : 1)) + (t.unit ? ' ' + t.unit : '')),
+        verdict, vInk,
+        ink: (verdict === 'OK' || verdict === 'STILL' || verdict === '\u2014') ? 'rgba(20,20,15,0.82)' : Component.RED,
+      };
+    });
+    const askN = (d.ask || 0);
+    return {
+      stageRef: this.stageRef, canvasRef: this.canvasRef, slideRef: this.slideRef,
+      scenList: Component.SCEN.map((s, i) => Object.assign({ name: s.name, tag: s.tag, pick: () => this._pick(i) }, mk(i === this.state.sc))),
+      askPct: (askN * 100).toFixed(1) + '%',
+      askPxText: Math.round(askN * C.SPRINT) + ' PX/S',
+      askText: n(askN * C.SPRINT, 0) + ' PX/S',
+      speedText: n(d.speed, 1) + ' PX/S',
+      demandText: n(d.demand, 0) + ' PX/S\u00b2',
+      deliverText: n(d.deliv, 0) + ' PX/S\u00b2',
+      ceilText: n(d.ceil, 0) + ' PX/S\u00b2',
+      gripText: n(d.grip, 2),
+      angText: n(d.angVel, 2) + ' RAD/S',
+      feetText: n(d.feetDown, 2) + ' / 4',
+      marginText: n(d.margin, 1) + ' PX',
+      marginInk: (d.margin || 0) < 0 ? Component.RED : 'rgba(20,20,15,0.82)',
+      steadyText: n(d.steady, 2),
+      rollText: n((d.roll || 0) * 57.2958, 1) + '\u00b0',
+      rightText: n(d.right, 1) + ' / ' + n(d.rightCeil, 1),
+      scTText: '+' + n(d.scT, 2) + ' S',
+      stateText: d.state || 'STANDING',
+      stateInk: (d.state === 'COLLAPSED' || d.state === 'RESCUE' || d.state === 'FALLING') ? Component.RED : 'rgba(20,20,15,0.72)',
+      tellList, diagNote: d.note || '',
+      pauseText: this.state.paused ? 'RUN' : 'PAUSE',
+      pauseInk: this.state.paused ? Component.RED : 'rgba(20,20,15,0.7)',
+      stepInk: this.state.paused ? 'rgba(20,20,15,0.7)' : 'rgba(20,20,15,0.3)',
+      togglePause: () => this.setState(s => ({ paused: !s.paused })),
+      stepOnce: () => { this._step = 2; },
+      slideDown: (e) => this._drag(e, this.slideRef, (f) => { this._ask = f; this._manual = true; }),
+      rateDown: (e) => this._drag(e, this.rateRef, (f) => { this._rate = 0.1 + f * 1.4; }),
+      rateRef: this.rateRef,
+      rateText: (this._rate ?? this.props.slowMotion ?? 1).toFixed(2) + '\u00d7',
+      ratePct: ((((this._rate ?? this.props.slowMotion ?? 1) - 0.1) / 1.4) * 100).toFixed(1) + '%',
+    };
+  }
+
+  _pick(i) { this.setState({ sc: i }); this._reset(i); }
+
+  _tellGate(key) {
+    const d = this._d || {}, sp = d.speed || 0;
+    if (key === 'lag') return Math.abs(d.angVel || 0) > 0.25;
+    if (key === 'bob' || key === 'sway' || key === 'stride' || key === 'spread') return sp > 20;
+    return true;
+  }
+
+  _drag(e, ref, cb) {
+    const el = ref.current; if (!el) return;
+    const move = (ev) => { const r = el.getBoundingClientRect(); cb(Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width))); };
+    move(e);
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+    e.preventDefault();
+  }
+
+  componentDidMount() {
+    window.__physicsHud = this; // console handle: inspect the live loop state
+    const cv = this.canvasRef.current;
+    this._resize = () => {
+      const r = cv.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 2);
+      cv.width = Math.max(1, r.width * dpr); cv.height = Math.max(1, r.height * dpr);
+      this._w = r.width; this._h = r.height; this._dpr = dpr;
+    };
+    this._resize(); window.addEventListener('resize', this._resize);
+    this._keys = (e) => {
+      if (e.key === ' ') { this.setState(s => ({ paused: !s.paused })); e.preventDefault(); }
+      else if (e.key === '.') { this._step = 2; e.preventDefault(); }
+      else if (e.key >= '1' && e.key <= '9') { const i = e.key.charCodeAt(0) - 49; if (i < Component.SCEN.length) this._pick(i); }
+      else if (e.key === 'ArrowRight') { this._ask = Math.min(1, (this._ask || 0) + 0.06); this._manual = true; e.preventDefault(); }
+      else if (e.key === 'ArrowLeft') { this._ask = Math.max(0, (this._ask || 0) - 0.06); this._manual = true; e.preventDefault(); }
+      else if (e.key === 'a' || e.key === 'A') { this._turnKey = 1; this._manual = true; }
+      else if (e.key === 'd' || e.key === 'D') { this._turnKey = -1; this._manual = true; }
+    };
+    this._up = (e) => { if (e.key === 'a' || e.key === 'A' || e.key === 'd' || e.key === 'D') this._turnKey = 0; };
+    window.addEventListener('keydown', this._keys); window.addEventListener('keyup', this._up);
+    this._reset(this.state.sc);
+    this._last = performance.now(); this._acc = 0; this._uiT = 0;
+    const loop = (now) => {
+      this._raf = requestAnimationFrame(loop);
+      let dt = Math.min((now - this._last) / 1000, 0.05); this._last = now;
+      if (this.props.slowMotion !== this._rateProp) { this._rateProp = this.props.slowMotion; this._rate = this.props.slowMotion ?? 1; }
+      const rate = this._rate ?? 1;
+      if (this.state.paused) { if (this._step) { this._acc += 1 / 60; this._step--; } else dt = 0; }
+      else this._acc += dt * rate;
+      let guard = 0;
+      while (this._acc >= 1 / 120 && guard++ < 8) { this._acc -= 1 / 120; this._sim(1 / 120); }
+      this._draw();
+      this._uiT += dt;
+      if (this._uiT > 0.11) { this._uiT = 0; this.setState({ tick: this._t }); }
+    };
+    this._raf = requestAnimationFrame(loop);
+  }
+
+  componentWillUnmount() {
+    cancelAnimationFrame(this._raf);
+    window.removeEventListener('resize', this._resize);
+    window.removeEventListener('keydown', this._keys);
+    window.removeEventListener('keyup', this._up);
+  }
+
+  // ---------- world ----------
+  _surface(x) {
+    if (this.terrain === 'ledge') return x > 210 ? 10 : 0;
+    if (this.terrain === 'brink') return x > 300 ? -60 : 0;
+    return 0;
+  }
+  _brinkX() { return this.terrain === 'brink' ? 300 : null; }
+
+  _reset(i) {
+    const C = Component.C, S = Component.SCEN[i];
+    this._sc = i;
+    this.terrain = S.terrain; this.scT = 0; this.collapsed = false; this.shoved = false;
+    this.sway = 0;
+    this._t = 0; this._manual = false; this._turnKey = 0;
+    this.pel = { x: 0, y: 0 }; this.heading = 0; this.angVel = 0;
+    this.vel = { x: (S.warm || 0) * C.SPRINT, y: 0 };
+    this.tAng = new Array(7).fill(0); this.nAng = new Array(4).fill(0);
+    this.kAng = new Array(6).fill(Math.PI);
+    this.pelZ = C.HIP_Z; this.whZ = C.SH_Z; this.zVel = [0, 0];
+    this.roll = 0; this.rollRate = 0; this.wavePh = 0; this.deficit = 0; this.fallT = 0;
+    this._ask = S.warm || 0;
+    this.demand = { x: 0, y: 0 }; this.deliv = { x: 0, y: 0 }; this.ceil = C.PUSH; this.grip = 1;
+    this.hist = []; this.rings = []; this.beats = []; this.trail = []; this.strides = [];
+    this._diagT = 0;
+    this.cam = { x: 0, y: 0 };
+    this.feet = Component.FEET.map(f => ({ key: f.k, g: f.g, side: f.side, dia: f.dia, st: 'plant', need: 0, desp: false, torn: false, t: 0, dur: 0.2, anchor: { x: 0, y: 0, z: 0 }, from: { x: 0, y: 0, z: 0 }, tgt: { x: 0, y: 0, z: 0 }, pos: { x: 0, y: 0, z: 0 }, home: { x: 0, y: 0, z: 0 }, drift: 0, along: 0, lat: 0, lastLand: 0, strideLen: 40 }));
+    this._axial();
+    for (const f of this.feet) { const h = this._home(f); f.anchor = { x: h.x, y: h.y, z: h.z }; f.pos = { x: h.x, y: h.y, z: h.z }; f.home = h; }
+    this._limbs(); this._poise();
+    for (let k = 0; k < 140; k++) this._sim(1 / 120);
+    this.hist = []; this.rings = []; this.trail = []; this.beats = []; this.scT = 0; this._t = 0;
+  }
+
+  _fwd() { return { x: Math.cos(this.heading), y: Math.sin(this.heading) }; }
+  _perp() { return { x: -Math.sin(this.heading), y: Math.cos(this.heading) }; }
+
+  // ---------- the loop ----------
+  _sim(dt) {
+    const C = Component.C;
+    this._t += dt; this.scT += dt;
+    const S = Component.SCEN[this._sc];
+    if (S.loop && this.scT > S.loop) { this._reset(this._sc); return; }
+    this._drive(dt, S);
+
+    const fwd = this._fwd();
+    const planted = this.feet.filter(f => f.st === 'plant');
+    const bias = planted.length ? planted.reduce((a, f) => a + f.side, 0) / planted.length : 0;
+    this.sway += (bias * C.SWAY - this.sway) * Math.min(1, 6 * dt);
+    this.grip = Math.min(1, planted.length / 3.2) * (this.collapsed ? 0.15 : 1);
+    const desired = { x: fwd.x * this.askSpeed, y: fwd.y * this.askSpeed };
+    const tau = this.props.response ?? C.TAU;
+    this.demand = { x: (desired.x - this.vel.x) / tau, y: (desired.y - this.vel.y) / tau };
+    this.ceil = C.PUSH * this.grip;
+    const dm = Math.hypot(this.demand.x, this.demand.y);
+    const k = dm > this.ceil && dm > 0 ? this.ceil / dm : 1;
+    this.deliv = { x: this.demand.x * k, y: this.demand.y * k };
+    if (planted.length === 0) { this.deliv = { x: 0, y: 0 }; }
+    this.vel.x += this.deliv.x * dt; this.vel.y += this.deliv.y * dt;
+    if (this.collapsed) { this.vel.x *= (1 - 3.2 * dt); this.vel.y *= (1 - 3.2 * dt); }
+
+    const sp = Math.hypot(this.vel.x, this.vel.y), sn = Math.min(1, sp / C.SPRINT);
+    const tTgt = this.askTurn * C.TURN * (this.collapsed ? 0 : 1);
+    this.angVel += (tTgt - this.angVel) * Math.min(1, C.TURN_EASE * dt);
+    const dth = this.angVel * dt;
+    if (Math.abs(dth) > 1e-6) {
+      const px = this.pel.x + fwd.x * C.GAP * (0.5 + C.TURN_PIVOT * sn);
+      const py = this.pel.y + fwd.y * C.GAP * (0.5 + C.TURN_PIVOT * sn);
+      const cs = Math.cos(dth), sni = Math.sin(dth), dx = this.pel.x - px, dy = this.pel.y - py;
+      this.pel.x = px + dx * cs - dy * sni; this.pel.y = py + dx * sni + dy * cs;
+      this.heading += dth;
+      const rv = { x: this.vel.x * cs - this.vel.y * sni, y: this.vel.x * sni + this.vel.y * cs };
+      this.vel = rv;
+    }
+    this.pel.x += this.vel.x * dt; this.pel.y += this.vel.y * dt;
+
+    this.wavePh += dt * (1.1 + sn * 2.4);
+    this._axialStep(dt, sn);
+    this._zchannel(dt, sn);
+    this._axial();
+    this._footwork(dt, sn);
+    this._rhythm(sn);
+    this._limbs();
+    this._poise();
+    this._keel(dt, sn);
+    this._sample(dt, sn);
+  }
+
+  _drive(dt, S) {
+    const C = Component.C, t = this.scT;
+    let ask = this._ask, turn = 0;
+    if (this._manual) { turn = this._turnKey || 0; }
+    else {
+      const key = S.tag;
+      if (key === 'S1') ask = 0.61;
+      else if (key === 'S2') ask = t < 0.4 ? 0 : 1;
+      else if (key === 'S3') ask = t < 0.6 ? 1 : 0;
+      else if (key === 'S4') { ask = 0; turn = t > 0.5 ? 1 : 0; }
+      else if (key === 'S5') { ask = 0.61; turn = t > 1.1 ? 0.85 : 0; }
+      else if (key === 'S6') ask = 0.61;
+      else if (key === 'S7') ask = 0.61;
+      else if (key === 'S8') { ask = 0.61; if (!this.shoved && t > 1.6) { const p = this._perp(); this.vel.x += p.x * 300; this.vel.y += p.y * 300; this.shoved = true; } }
+      else if (key === 'S9') { ask = 0.61; if (t > 1.6) this.collapsed = true; }
+      this._ask = ask;
+    }
+    // Outlook: headroom from the leading girdle, never less than half a body ahead
+    const fwd = this._fwd(), sp = Math.hypot(this.vel.x, this.vel.y);
+    const wx = this.pel.x + fwd.x * C.GAP, look = Math.max(C.GAP * 0.5, sp * 0.45);
+    const ahead = this._surface(wx + fwd.x * look), here = this._surface(wx);
+    this.riseAhead = ahead - here;
+    this.headroom = (ahead - here) < -C.DESCEND_SHARE * (C.HIND.l1 + C.HIND.l2) ? 0 : 1;
+    this.askSpeed = ask * C.SPRINT * this.headroom;
+    this.askTurn = turn;
+  }
+
+  _axialStep(dt, sn) {
+    const C = Component.C;
+    const bend = Math.max(-1, Math.min(1, this.angVel / C.TURN)) * C.SPINE_BEND;
+    const wave = C.WAVE * (this.props.waveGain ?? 1) * (0.25 + sn);
+    for (let i = 0; i < 7; i++) {
+      const tgt = this.heading - bend * (1 - i / 6) + wave * (1.3 - i * 0.12) * Math.sin(this.wavePh * 6.283 - i * 0.55);
+      let e = 9 + i * 2;
+      this.tAng[i] += this._wrap(tgt - this.tAng[i]) * Math.min(1, e * dt);
+    }
+    for (let i = 0; i < 4; i++) {
+      const base = i === 0 ? this.tAng[6] : this.nAng[i - 1];
+      const tgt = base + (i === 0 ? 0.10 : 0.04) * Math.sin(this.wavePh * 6.283 * 0.5);
+      this.nAng[i] += this._wrap(tgt - this.nAng[i]) * Math.min(1, (9 - i) * dt);
+    }
+    for (let i = 0; i < 6; i++) {
+      const base = i === 0 ? this.tAng[0] + Math.PI : this.kAng[i - 1];
+      const sway = (this.collapsed ? 0 : 1) * (0.14 - i * 0.012) * Math.sin(this._t * 1.7 + i * 0.6 + this.wavePh * 3.1);
+      let d = this._wrap(base + sway - this.kAng[i]);
+      this.kAng[i] += d * Math.min(1, (2.6 - i * 0.28) * dt);
+      const lim = 0.16 + i * 0.07;
+      const rel = this._wrap(this.kAng[i] - base);
+      if (Math.abs(rel) > lim) this.kAng[i] = base + Math.sign(rel) * lim;
+    }
+  }
+
+  _wrap(a) { while (a > Math.PI) a -= 6.28318; while (a < -Math.PI) a += 6.28318; return a; }
+
+  _zchannel(dt, sn) {
+    const C = Component.C;
+    const crouch = this.collapsed ? 0.62 : 0;
+    for (let g = 0; g < 2; g++) {
+      const L = g === 0 ? C.FORE : C.HIND;
+      const nom = (g === 0 ? C.SH_Z : C.HIP_Z) * (1 - crouch);
+      const reach = L.l1 + L.l2, restLeg = Math.max(10, nom - L.footH);
+      const sock = this._socketPlan(g, 0);
+      let best = null;
+      for (const f of this.feet) {
+        if (f.g !== g || f.st !== 'plant') continue;
+        const s2 = this._socketPlan(g, f.side);
+        const d = Math.hypot(f.anchor.x - s2.x, f.anchor.y - s2.y);
+        // the body vaults over its stance leg: pendulum drop, less what the leg extends back
+        const drop = Math.min(nom * 0.45, C.VAULT * (d * d) / (2 * restLeg));
+        const cap = Math.sqrt(Math.max(0, reach * reach - d * d)) + L.footH;
+        const av = Math.max(9, Math.min(nom - drop, cap)) + f.anchor.z;
+        best = best === null ? av : Math.min(best, av);
+      }
+      let z = g === 0 ? this.whZ : this.pelZ;
+      if (best === null) { this.zVel[g] -= C.GRAV * dt; z += this.zVel[g] * dt; const floor = this._surface(sock.x) + 8; if (z < floor) { z = floor; this.zVel[g] = 0; } }
+      else {
+        this.zVel[g] = 0;
+        let tgt = Math.min(nom + this._surface(sock.x), best);
+        tgt += Math.max(0, this.riseAhead || 0) * C.ANTICIPATE * (g === 0 ? 1 : 0.45);
+        z += (tgt - z) * Math.min(1, 30 * dt);
+      }
+      if (g === 0) this.whZ = z; else this.pelZ = z;
+    }
+  }
+
+  _socketPlan(g, side) {
+    const C = Component.C;
+    const i = g === 0 ? 6 : 0;
+    const n = this.trunk ? this.trunk[i] : { x: this.pel.x, y: this.pel.y };
+    const a = g === 0 ? this.tAng[5] : this.tAng[0];
+    const px = -Math.sin(a), py = Math.cos(a);
+    const w = C.HALF_W * (g === 0 ? 1 : 0.95) * Math.cos(this.roll);
+    return { x: n.x + px * side * w, y: n.y + py * side * w };
+  }
+  _socket(g, side) {
+    const C = Component.C, p = this._socketPlan(g, side);
+    const z = (g === 0 ? this.whZ : this.pelZ) + side * C.HALF_W * Math.sin(this.roll);
+    return { x: p.x, y: p.y, z };
+  }
+
+  _axial() {
+    const C = Component.C, TL = C.GAP / 7, pp = this._perp(), sw = this.sway || 0;
+    const tr = [{ x: this.pel.x, y: this.pel.y, z: 0 }];
+    for (let i = 0; i < 7; i++) {
+      const p = tr[i];
+      tr.push({ x: p.x + Math.cos(this.tAng[i]) * TL, y: p.y + Math.sin(this.tAng[i]) * TL, z: 0 });
+    }
+    for (let i = 0; i < 8; i++) {
+      const k = sw * (1 - 0.45 * i / 7);
+      tr[i].x += pp.x * k; tr[i].y += pp.y * k;
+      tr[i].z = this.pelZ + (this.whZ - this.pelZ) * (i / 7);
+    }
+    this.trunk = tr;
+    const NL = C.NECK / 4, nk = [];
+    let p = tr[7];
+    for (let i = 0; i < 4; i++) {
+      p = { x: p.x + Math.cos(this.nAng[i]) * NL, y: p.y + Math.sin(this.nAng[i]) * NL, z: this.whZ + (i + 1) * (this.collapsed ? 1 : 4.4) };
+      nk.push(p);
+    }
+    this.neck = nk;
+    this.head = { x: nk[3].x + Math.cos(this.nAng[3]) * 11, y: nk[3].y + Math.sin(this.nAng[3]) * 11, z: nk[3].z + (this.collapsed ? 0 : 2) };
+    const KL = [19, 18, 17, 15, 14, 12], tl = [];
+    p = tr[0];
+    for (let i = 0; i < 6; i++) {
+      p = { x: p.x + Math.cos(this.kAng[i]) * KL[i], y: p.y + Math.sin(this.kAng[i]) * KL[i], z: Math.max(this._surface(p.x) + 2, this.pelZ - 4 - i * 5.2) };
+      tl.push(p);
+    }
+    this.tail = tl;
+  }
+
+  // ---------- Footwork ----------
+  _home(f) {
+    const C = Component.C, L = f.g === 0 ? C.FORE : C.HIND;
+    const s = this._socketPlan(f.g, f.side), fwd = this._fwd(), pp = this._perp();
+    const sp = Math.hypot(this.vel.x, this.vel.y), sn = Math.min(1, sp / C.SPRINT);
+    const leanA = (this.deliv.x * fwd.x + this.deliv.y * fwd.y) / C.PUSH;
+    const leanL = (this.vel.x * pp.x + this.vel.y * pp.y) / C.SPRINT;
+    const along = L.lead - leanA * 13 - sn * 3;
+    const lat = -2 * f.side - leanL * 7;
+    const x = s.x + fwd.x * along + pp.x * lat, y = s.y + fwd.y * along + pp.y * lat;
+    return { x, y, z: this._surface(x) };
+  }
+
+  _footwork(dt, sn) {
+    const C = Component.C, fwd = this._fwd(), pp = this._perp();
+    for (const f of this.feet) {
+      const L = f.g === 0 ? C.FORE : C.HIND;
+      f.home = this._home(f);
+      const sock = this._socketPlan(f.g, f.side);
+      if (f.st === 'plant') {
+        const dx = f.anchor.x - f.home.x, dy = f.anchor.y - f.home.y;
+        f.along = dx * fwd.x + dy * fwd.y; f.lat = dx * pp.x + dy * pp.y;
+        f.drift = Math.hypot(dx, dy);
+        f.need = (Math.max(0, -f.along) + Math.max(0, f.along - C.EXC * 1.7) + Math.abs(f.lat) * 0.75) / C.EXC;
+        const span = Math.hypot(f.anchor.x - sock.x, f.anchor.y - sock.y);
+        f.torn = span > (L.l1 + L.l2) * 0.99;
+        if (f.torn) { f.desp = true; f.need = Math.max(f.need, 2); }
+        f.pos = { x: f.anchor.x, y: f.anchor.y, z: f.anchor.z };
+      } else {
+        f.t += dt;
+        const rem = Math.max(0.02, f.dur - f.t);
+        const h = f.home;
+        let tx = h.x + this.vel.x * rem * C.LEAD, ty = h.y + this.vel.y * rem * C.LEAD;
+        if (f.rescue) { tx += f.rescue.x * 15; ty += f.rescue.y * 15; }
+        const dxr = tx - sock.x, dyr = ty - sock.y, dr = Math.hypot(dxr, dyr), cap = (L.l1 + L.l2) * 0.82;
+        if (dr > cap) { tx = sock.x + dxr / dr * cap; ty = sock.y + dyr / dr * cap; }
+        const bx = this._brinkX();
+        if (bx !== null && tx > bx - 5) tx = bx - 5;
+        f.tgt = { x: tx, y: ty, z: this._surface(tx) };
+        const p = Math.min(1, f.t / f.dur), e = p * p * (3 - 2 * p);
+        f.pos = {
+          x: f.from.x + (tx - f.from.x) * e,
+          y: f.from.y + (ty - f.from.y) * e,
+          z: f.from.z + (f.tgt.z - f.from.z) * e + C.CLEAR * (0.55 + sn * 0.7) * Math.sin(Math.PI * p) + Math.max(0, this.riseAhead || 0) * Math.sin(Math.PI * p),
+        };
+        f.need = 0;
+        if (p >= 1) {
+          f.st = 'plant'; f.anchor = { x: tx, y: ty, z: f.tgt.z }; f.pos = { x: tx, y: ty, z: f.tgt.z };
+          f.strideLen = Math.hypot(tx - f.from.x, ty - f.from.y);
+          this.strides.push(f.strideLen); if (this.strides.length > 12) this.strides.shift();
+          if (f.lastLand > 0) { this.beats.push(this._t - f.lastLand); if (this.beats.length > 12) this.beats.shift(); }
+          f.lastLand = this._t;
+          this.rings.push({ x: tx, y: ty, z: f.tgt.z, t0: this._t, desp: f.desp });
+          f.desp = false; f.rescue = null; f.torn = false;
+          const part = this.feet[f.dia];
+          if (part.st === 'plant') part.need += (this.props.beatCoupling ?? 0.55) * 0.5;
+        }
+      }
+    }
+    this.rings = this.rings.filter(r => this._t - r.t0 < 0.7);
+  }
+
+  _rhythm(sn) {
+    const C = Component.C;
+    const seats = this.collapsed ? 0 : Math.max(1, Math.min(3, 1 + Math.floor(sn * 2.45)));
+    let swinging = this.feet.filter(f => f.st === 'swing').length;
+    const cands = this.feet.filter(f => f.st === 'plant' && (f.need >= 1 || f.desp)).sort((a, b) => (b.desp ? 9 : b.need) - (a.desp ? 9 : a.need));
+    for (const f of cands) {
+      const mate = this.feet.find(o => o !== f && o.g === f.g);
+      if (!f.desp) {
+        if (swinging >= seats) break;
+        if (mate && mate.st === 'swing') continue;
+      }
+      const sock = this._socketPlan(f.g, f.side);
+      const dist = Math.hypot(f.home.x - f.anchor.x, f.home.y - f.anchor.y) + 26;
+      f.st = 'swing'; f.t = 0;
+      f.dur = Math.max(0.14, Math.min(0.46, dist / C.SWEEP));
+      f.from = { x: f.anchor.x, y: f.anchor.y, z: f.anchor.z };
+      swinging++;
+    }
+  }
+
+  // ---------- Poise ----------
+  _poise() {
+    const W = { trunk: 0.60, neck: 0.09, head: 0.075, tail: 0.05, limb: 0.185 };
+    let mx = 0, my = 0, mz = 0, m = 0;
+    const add = (p, w) => { mx += p.x * w; my += p.y * w; mz += p.z * w; m += w; };
+    for (let i = 0; i < 8; i++) add(this.trunk[i], W.trunk / 8 * (i < 4 ? 1.15 : 0.85));
+    for (let i = 0; i < 4; i++) add(this.neck[i], W.neck / 4);
+    add(this.head, W.head);
+    for (let i = 0; i < 6; i++) add(this.tail[i], W.tail / 6 * (1.5 - i * 0.16));
+    for (const f of this.feet) { const s = this._socket(f.g, f.side); add({ x: (s.x + f.pos.x) / 2, y: (s.y + f.pos.y) / 2, z: (s.z + f.pos.z) / 2 }, W.limb / 4); }
+    this.com = { x: mx / m, y: my / m, z: mz / m };
+    this.trail.push({ x: this.com.x, y: this.com.y, z: this.com.z });
+    if (this.trail.length > 260) this.trail.shift();
+
+    const pts = this.feet.filter(f => f.st === 'plant').map(f => ({ x: f.anchor.x, y: f.anchor.y }));
+    this.hull = this._hull(pts);
+    const cen = pts.length ? { x: pts.reduce((a, p) => a + p.x, 0) / pts.length, y: pts.reduce((a, p) => a + p.y, 0) / pts.length } : { x: this.com.x, y: this.com.y };
+    this.hullCen = cen;
+    this.margin = this._hullMargin(this.hull, this.com);
+    const half = pts.length ? Math.max(14, pts.reduce((a, p) => a + Math.hypot(p.x - cen.x, p.y - cen.y), 0) / pts.length) : 20;
+    this.halfBase = half;
+    this.spill = Math.max(0, -this.margin) / half;
+    const st = 1 - Math.min(1, this.spill * 0.8);
+    this.steady = this.steady === undefined ? st : this.steady + (st - this.steady) * 0.06;
+    this.spillDir = { x: (this.com.x - cen.x), y: (this.com.y - cen.y) };
+    const sl = Math.hypot(this.spillDir.x, this.spillDir.y) || 1;
+    this.spillDir = { x: this.spillDir.x / sl, y: this.spillDir.y / sl };
+    // the review
+    const C = Component.C;
+    this.rescuing = false;
+    if (this.spill > C.DEFICIT && !this.collapsed) {
+      this.deficit += 1 / 120;
+      if (this.deficit > C.BEAT) {
+        this.rescuing = true;
+        const sw = this.feet.filter(f => f.st === 'swing');
+        if (sw.length) { for (const f of sw) f.rescue = this.spillDir; }
+        else {
+          let best = null, bd = 1e9;
+          for (const f of this.feet) { const d = Math.hypot(f.anchor.x - (cen.x + this.spillDir.x * half), f.anchor.y - (cen.y + this.spillDir.y * half)); if (d < bd) { bd = d; best = f; } }
+          if (best) best.desp = true;
+        }
+      }
+      if (this.spill > 2.3 && this.deficit > 0.5) this.collapsed = true;
+    } else this.deficit = Math.max(0, this.deficit - 1 / 60);
+  }
+
+  _hull(pts) {
+    if (pts.length < 3) return pts.slice();
+    const cx = pts.reduce((a, p) => a + p.x, 0) / pts.length, cy = pts.reduce((a, p) => a + p.y, 0) / pts.length;
+    return pts.slice().sort((a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx));
+  }
+  _segD(p, a, b) {
+    const vx = b.x - a.x, vy = b.y - a.y, l2 = vx * vx + vy * vy;
+    let t = l2 ? ((p.x - a.x) * vx + (p.y - a.y) * vy) / l2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p.x - (a.x + vx * t), p.y - (a.y + vy * t));
+  }
+  _hullMargin(h, p) {
+    if (!h.length) return -140;
+    if (h.length === 1) return -Math.hypot(p.x - h[0].x, p.y - h[0].y);
+    if (h.length === 2) return -this._segD(p, h[0], h[1]);
+    let inside = true, minD = 1e9, sgn = 0;
+    for (let i = 0; i < h.length; i++) {
+      const a = h[i], b = h[(i + 1) % h.length];
+      const cr = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+      if (sgn === 0 && Math.abs(cr) > 1e-6) sgn = Math.sign(cr);
+      else if (Math.sign(cr) !== sgn && Math.abs(cr) > 1e-6) inside = false;
+      minD = Math.min(minD, this._segD(p, a, b));
+    }
+    return inside ? minD : -minD;
+  }
+
+  // ---------- Keel ----------
+  _keel(dt, sn) {
+    const C = Component.C;
+    const pp = this._perp();
+    const lat = (this.com.x - this.hullCen.x) * pp.x + (this.com.y - this.hullCen.y) * pp.y;
+    const H = Math.max(12, this.com.z);
+    const tip = 26 * (lat / 40) * (this.collapsed ? 2.1 : 1);
+    const bank = this.collapsed ? 0 : -Math.max(-0.5, Math.min(0.5, (Math.hypot(this.vel.x, this.vel.y) * this.angVel) / 900));
+    const planted = this.feet.filter(f => f.st === 'plant').length;
+    this.rightCeil = this.collapsed ? 0 : 30 * (planted / 4) * (0.45 + 0.55 * this.grip);
+    const dem = -(90 * (this.roll - bank) + 11 * this.rollRate);
+    this.right = Math.max(-this.rightCeil, Math.min(this.rightCeil, dem));
+    this.rollRate += (tip + this.right) * dt;
+    this.rollRate *= (1 - 1.4 * dt);
+    this.roll += this.rollRate * dt;
+    const lim = 1.48;
+    if (this.roll > lim) { this.roll = lim; this.rollRate = 0; }
+    if (this.roll < -lim) { this.roll = -lim; this.rollRate = 0; }
+  }
+
+  // ---------- limbs ----------
+  _ik(a, bx, bz, l1, l2, bend) {
+    let dx = bx - a.a, dz = bz - a.z, d = Math.hypot(dx, dz);
+    const m = l1 + l2 - 0.4;
+    if (d > m) { dx *= m / d; dz *= m / d; d = m; bx = a.a + dx; bz = a.z + dz; }
+    d = Math.max(d, Math.abs(l1 - l2) + 0.4);
+    const ang = Math.atan2(bz - a.z, bx - a.a);
+    const cos = (l1 * l1 + d * d - l2 * l2) / (2 * l1 * d);
+    const t = Math.acos(Math.max(-1, Math.min(1, cos)));
+    const ja = ang + bend * t;
+    return { ja: { a: a.a + Math.cos(ja) * l1, z: a.z + Math.sin(ja) * l1 }, end: { a: bx, z: bz }, bendAng: Math.PI - t * 2 };
+  }
+
+  _limbs() {
+    const C = Component.C, fwd = this._fwd(), pp = this._perp();
+    this.clip = 0;
+    for (const f of this.feet) {
+      const L = f.g === 0 ? C.FORE : C.HIND, s = this._socket(f.g, f.side);
+      const dx = f.pos.x - s.x, dy = f.pos.y - s.y;
+      const along = dx * fwd.x + dy * fwd.y, lat = dx * pp.x + dy * pp.y;
+      const planeD = Math.hypot(along, lat) || 0.001;
+      const ux = (fwd.x * along + pp.x * lat) / planeD, uy = (fwd.y * along + pp.y * lat) / planeD;
+      const ankleA = planeD, ankleZ = f.pos.z + L.footH;
+      const r = this._ik({ a: 0, z: s.z }, ankleA, ankleZ, L.l1, L.l2, f.g === 0 ? 1 : -1);
+      const map = (o) => ({ x: s.x + ux * o.a, y: s.y + uy * o.a, z: o.z });
+      f.joint = map(r.ja); f.ankle = map(r.end);
+      f.toe = { x: f.ankle.x + fwd.x * L.toe * (f.st === 'plant' ? 1 : 0.6), y: f.ankle.y + fwd.y * L.toe * (f.st === 'plant' ? 1 : 0.6), z: f.pos.z + (f.st === 'plant' ? 0 : L.footH * 0.3) };
+      f.bend = r.bendAng;
+      f.sat = f.bend < L.cone[0] + 0.05 || f.bend > L.cone[1] - 0.05;
+      const ankBend = Math.abs(this._wrap(Math.atan2(f.toe.z - f.ankle.z, 1) - Math.atan2(f.ankle.z - f.joint.z, f.ankle.x - f.joint.x)));
+      f.satA = ankBend > 1.5;
+      if (f.sat) this.clip++;
+      if (f.satA) this.clip++;
+      f.socket = s;
+    }
+  }
+
+  // ---------- history + tells ----------
+  _sample(dt, sn) {
+    const C = Component.C;
+    const dm = Math.hypot(this.demand.x, this.demand.y), dl = Math.hypot(this.deliv.x, this.deliv.y);
+    const fs = this.feet.map(f => f.st === 'swing' ? (f.rescue ? 2 : 1) : (f.desp ? 3 : 0));
+    this.hist.push({ t: this._t, fs, fd: this.feet.filter(f => f.st === 'plant').length, dm, dl, ceil: this.ceil, sp: this.spill, roll: this.roll, sd: this.steady });
+    while (this.hist.length && this._t - this.hist[0].t > 5) this.hist.shift();
+
+    if (!this._diagT || this._t - this._diagT > 0.1) {
+      this._diagT = this._t;
+      const win = this.trail.slice(-150);
+      let zmin = 1e9, zmax = -1e9;
+      for (const p of win) { zmin = Math.min(zmin, p.z); zmax = Math.max(zmax, p.z); }
+      const pp = this._perp();
+      let lmin = 1e9, lmax = -1e9;
+      if (win.length > 4) {
+        const c = win[win.length - 1];
+        for (const p of win) { const l = (p.x - c.x) * pp.x + (p.y - c.y) * pp.y; lmin = Math.min(lmin, l); lmax = Math.max(lmax, l); }
+      }
+      const lag = Math.abs(this._wrap(this.tAng[6] - this.tAng[0])) * 57.2958;
+      const tailA = Math.abs(this._wrap(this.kAng[5] - (this.tAng[0] + Math.PI))) * 57.2958;
+      let spread;
+      if (this.beats.length > 4) {
+        const iv = this.beats.slice();
+        const mu = iv.reduce((a, b) => a + b, 0) / iv.length;
+        const sd = Math.sqrt(iv.reduce((a, b) => a + (b - mu) * (b - mu), 0) / iv.length);
+        spread = mu > 0 ? (sd / mu) * 100 : undefined;
+      }
+      const stride = this.strides.length ? this.strides.reduce((a, b) => a + b, 0) / this.strides.length / ((C.HIND.l1 + C.HIND.l2) * 1.1) : undefined;
+      const hw = this.hist.slice(-90);
+      const fdMean = hw.length ? hw.reduce((a, s) => a + s.fd, 0) / hw.length : 4;
+      const dRat = hw.filter(s => s.dm > 12);
+      const deliv = dRat.length ? dRat.reduce((a, s) => a + s.dl / s.dm, 0) / dRat.length : undefined;
+      let state = 'STANDING';
+      const sw = this.feet.filter(f => f.st === 'swing').length;
+      if (this.collapsed) state = 'COLLAPSED';
+      else if (this.feet.every(f => f.st === 'swing')) state = 'FALLING';
+      else if (this.rescuing) state = 'RESCUE';
+      else if (this.headroom === 0) state = 'BALKED';
+      else if (sw > 0) state = 'STEPPING';
+      const tells = {
+        bob: win.length > 20 ? zmax - zmin : undefined,
+        sway: win.length > 20 ? lmax - lmin : undefined,
+        lag, tail: tailA, spread,
+        clip: this.clip, stride, deliv,
+      };
+      const notes = [];
+      if (tells.bob !== undefined && tells.bob < 3.5 && Math.hypot(this.vel.x, this.vel.y) > 40) notes.push('COM RIDES FLAT \u2014 THE LEGS ARE NOT SPENDING THEIR FOLD; STANCE IS PINNED AT NOMINAL.');
+      if (this.clip > 1) notes.push('JOINTS PRESSED AGAINST THEIR CONE \u2014 IK IS CLAMPING, WHICH IS WHERE STIFFNESS COMES FROM.');
+      if (spread !== undefined && spread < 5) notes.push('STRIDE PERIOD IS REGULAR TO ' + spread.toFixed(1) + '% \u2014 ON FLAT GROUND NOTHING PERTURBS THE DRIFT, SO THE GAIT READS AS A CLOCK. TERRAIN OR A PER-FOOT JITTER IS WHAT SELLS IT.');
+      if (tells.lag < 3.5 && Math.abs(this.angVel) > 0.5) notes.push('THE BACK IS NOT BENDING THROUGH THE TURN \u2014 A RIGID PIROUETTE.');
+      if (deliv !== undefined && deliv > 0.94) notes.push('DEMAND IS NEVER CLAMPED \u2014 THE BODY HAS NO MASS TO FEEL.');
+      this._d = {
+        ask: this._ask, speed: Math.hypot(this.vel.x, this.vel.y), demand: dm, deliv: dl, ceil: this.ceil,
+        grip: this.grip, angVel: this.angVel, feetDown: fdMean, margin: this.margin, steady: this.steady,
+        roll: this.roll, right: this.right, rightCeil: this.rightCeil, scT: this.scT, state, tells,
+        note: notes.length ? notes[0] : (this.headroom === 0 ? 'OUTLOOK REFUSES THE ASK \u2014 THE DROP AHEAD IS NOT A STEP. FORE FEET CROWD THE RIM.' : ''),
+      };
+    }
+  }
+
+  // ---------- draw ----------
+  _draw() {
+    const cv = this.canvasRef.current; if (!cv || !this._w) return;
+    const ctx = cv.getContext('2d'), W = this._w, H = this._h;
+    ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    const TH = 148, gap = 14;
+    const rowsH = H - TH - gap;
+    const hE = Math.round(rowsH * 0.40), y2 = hE + gap, hR = rowsH - y2;
+    const wP = Math.round((W - gap) * 0.61), wF = W - gap - wP, fx0 = wP + gap;
+    this.cam.x += (this.com.x - this.cam.x) * 0.12;
+    this.cam.y += (this.com.y - this.cam.y) * 0.12;
+    this._E = { x0: 0, x1: W, y0: 0, y1: hE, cx: W * 0.42, base: hE - 42, s: Math.max(0.9, Math.min(W / 380, hE / 112, 2.2)) };
+    this._P = { x0: 0, x1: wP, y0: y2, y1: rowsH, cx: wP * 0.5, cy: y2 + hR * 0.52, s: Math.max(0.9, Math.min(wP / 250, hR / 165, 2.4)) };
+    this._F = { x0: fx0, x1: W, y0: y2, y1: rowsH, cx: fx0 + wF * 0.5, base: y2 + hR - 62, s: Math.max(0.9, Math.min(wF / 120, hR / 112, 3)) };
+    this._frame(ctx, 0, 0, W, hE, 'SAGITTAL', 'ALONG HEADING \u00b7 Z UP \u00b7 \u00d7' + this._E.s.toFixed(2));
+    this._frame(ctx, 0, y2, wP, hR, 'PLAN', 'SUPPORT & WEIGHT \u00b7 \u00d7' + this._P.s.toFixed(2));
+    this._frame(ctx, fx0, y2, wF, hR, 'FRONTAL', 'HEAD-ON \u00b7 \u00d7' + this._F.s.toFixed(2));
+    ctx.save(); ctx.beginPath(); ctx.rect(1, 1, W - 2, hE - 2); ctx.clip(); this._drawElev(ctx); ctx.restore();
+    ctx.save(); ctx.beginPath(); ctx.rect(1, y2 + 1, wP - 2, hR - 2); ctx.clip(); this._drawPlan(ctx); ctx.restore();
+    ctx.save(); ctx.beginPath(); ctx.rect(fx0 + 1, y2 + 1, wF - 2, hR - 2); ctx.clip(); this._drawFront(ctx); ctx.restore();
+    this._drawTime(ctx, 0, H - TH, W, TH);
+  }
+
+  _frame(ctx, x, y, w, h, label, sub) {
+    ctx.strokeStyle = 'rgba(20,20,15,0.13)'; ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    ctx.font = '9px "IBM Plex Mono",monospace'; ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(20,20,15,0.72)'; ctx.fillText(label, x + 12, y + 18);
+    ctx.fillStyle = 'rgba(20,20,15,0.32)'; ctx.fillText(sub, x + 12 + ctx.measureText(label).width + 14, y + 18);
+  }
+
+  _ep(p) {
+    const E = this._E, fwd = this._fwd();
+    const a = (p.x - this.cam.x) * fwd.x + (p.y - this.cam.y) * fwd.y;
+    return [E.cx + a * E.s, E.base - p.z * E.s];
+  }
+  _pp(p) { const P = this._P; return [P.cx + (p.x - this.cam.x) * P.s, P.cy + (p.y - this.cam.y) * P.s]; }
+  _fp(p) {
+    const F = this._F, pp = this._perp();
+    const lat = (p.x - this.cam.x) * pp.x + (p.y - this.cam.y) * pp.y;
+    return [F.cx - lat * F.s, F.base - p.z * F.s];
+  }
+  _lat(p) { const pp = this._perp(); return (p.x - this.cam.x) * pp.x + (p.y - this.cam.y) * pp.y; }
+
+  _drawFront(ctx) {
+    const F = this._F, C = Component.C, gz = this._surface(this.cam.x), gy = F.base - gz * F.s;
+    ctx.strokeStyle = 'rgba(20,20,15,0.30)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(F.x0 + 2, gy + 0.5); ctx.lineTo(F.x1 - 2, gy + 0.5); ctx.stroke();
+    ctx.font = '8px "IBM Plex Mono",monospace';
+    // lateral extent of the support base
+    const pl = this.feet.filter(f => f.st === 'plant');
+    let lo = 0, hi = 0;
+    if (pl.length) {
+      const lats = pl.map(f => this._lat(f.anchor));
+      lo = Math.min.apply(null, lats); hi = Math.max.apply(null, lats);
+      const xa = F.cx - hi * F.s, xb = F.cx - lo * F.s;
+      ctx.strokeStyle = 'rgba(142,27,18,0.4)'; ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(xa, gy + 11); ctx.lineTo(xb, gy + 11);
+      ctx.moveTo(xa, gy + 8); ctx.lineTo(xa, gy + 14); ctx.moveTo(xb, gy + 8); ctx.lineTo(xb, gy + 14);
+      ctx.stroke();
+    }
+    if ((this.props.showTrails ?? true) && this.trail.length > 3) {
+      ctx.strokeStyle = 'rgba(20,20,15,0.16)'; ctx.lineWidth = 1; ctx.beginPath();
+      const n = Math.min(this.trail.length, 150);
+      for (let i = this.trail.length - n; i < this.trail.length; i++) {
+        const q = this._fp(this.trail[i]);
+        if (i === this.trail.length - n) ctx.moveTo(q[0], q[1]); else ctx.lineTo(q[0], q[1]);
+      }
+      ctx.stroke();
+    }
+    this._chain(ctx, this.tail, this._fp, 1.3, 0.30);
+    for (const f of this.feet) if (f.g === 1) this._limbDraw(ctx, f, this._fp, 0.32);
+    for (let g = 1; g >= 0; g--) {
+      const a = this._fp(this._socket(g, 1)), b = this._fp(this._socket(g, -1));
+      ctx.strokeStyle = 'rgba(20,20,15,' + (g === 0 ? 0.85 : 0.4) + ')'; ctx.lineWidth = g === 0 ? 2 : 1.4;
+      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+      ctx.fillStyle = 'rgba(20,20,15,' + (g === 0 ? 0.5 : 0.3) + ')';
+      ctx.fillText(g === 0 ? 'F' : 'H', Math.max(a[0], b[0]) + 6, (a[1] + b[1]) / 2 + 3);
+      if (g === 1) this._chain(ctx, this.trunk, this._fp, 1.6, 0.45);
+    }
+    this._beads(ctx, this.trunk, this._fp, 2.2, 0.6);
+    this._chain(ctx, [this.trunk[7]].concat(this.neck, [this.head]), this._fp, 1.5, 0.7);
+    const hq = this._fp(this.head);
+    ctx.strokeStyle = 'rgba(20,20,15,0.8)'; ctx.lineWidth = 1.3;
+    ctx.beginPath(); ctx.arc(hq[0], hq[1], 4.4, 0, 7); ctx.stroke();
+    for (const f of this.feet) if (f.g === 0) this._limbDraw(ctx, f, this._fp, 0.9);
+    // weight and its plumb
+    const cq = this._fp(this.com), pq = this._fp({ x: this.com.x, y: this.com.y, z: gz });
+    ctx.strokeStyle = 'rgba(20,20,15,0.35)'; ctx.setLineDash([2, 3]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cq[0], cq[1]); ctx.lineTo(pq[0], pq[1]); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = Component.INK; ctx.beginPath(); ctx.arc(cq[0], cq[1], 4, 0, 7); ctx.fill();
+    ctx.strokeStyle = 'rgba(20,20,15,0.5)';
+    ctx.beginPath(); ctx.moveTo(cq[0] - 9, cq[1]); ctx.lineTo(cq[0] + 9, cq[1]); ctx.moveTo(cq[0], cq[1] - 9); ctx.lineTo(cq[0], cq[1] + 9); ctx.stroke();
+    ctx.strokeStyle = Component.RED; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(pq[0] - 4, pq[1]); ctx.lineTo(pq[0] + 4, pq[1]); ctx.stroke();
+    // lateral margin: plumb to the nearer edge of the base
+    let latMar = null;
+    if (pl.length > 1) {
+      const cl = this._lat(this.com);
+      latMar = Math.min(cl - lo, hi - cl);
+      const edge = (cl - lo) < (hi - cl) ? lo : hi;
+      const xe = F.cx - edge * F.s, y = gy + 24;
+      ctx.strokeStyle = latMar < 0 ? Component.RED : 'rgba(20,20,15,0.35)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(pq[0], y); ctx.lineTo(xe, y);
+      ctx.moveTo(pq[0], y - 3); ctx.lineTo(pq[0], y + 3); ctx.moveTo(xe, y - 3); ctx.lineTo(xe, y + 3);
+      ctx.stroke();
+    }
+    // righting demand against its ceiling, read at the withers
+    const wq = this._fp(this._socket(0, 0));
+    const rr = Math.max(-1, Math.min(1, (this.right || 0) / 30));
+    if (Math.abs(rr) > 0.02) {
+      ctx.strokeStyle = 'rgba(142,27,18,0.75)'; ctx.lineWidth = 1.6;
+      const len = 8 + Math.abs(rr) * 20, dir = rr > 0 ? -1 : 1;
+      ctx.beginPath(); ctx.moveTo(wq[0], wq[1] - 16); ctx.lineTo(wq[0] + dir * len, wq[1] - 16);
+      ctx.lineTo(wq[0] + dir * (len - 4), wq[1] - 19); ctx.stroke();
+    }
+    this._dial(ctx);
+    ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(20,20,15,0.34)';
+    ctx.fillText('ROLL ' + (this.roll * 57.2958).toFixed(1) + '\u00b0  \u00b7  RIGHTING ' + (this.right || 0).toFixed(1) + ' / ' + (this.rightCeil || 0).toFixed(1), F.x0 + 12, F.y1 - 26);
+    ctx.fillText('LATERAL BASE ' + (hi - lo).toFixed(0) + ' PX  \u00b7  MARGIN ' + (latMar === null ? '\u2014' : latMar.toFixed(1) + ' PX'), F.x0 + 12, F.y1 - 14);
+  }
+
+  _chain(ctx, pts, proj, w, alpha) {
+    ctx.strokeStyle = 'rgba(20,20,15,' + alpha + ')'; ctx.lineWidth = w;
+    ctx.beginPath();
+    for (let i = 0; i < pts.length; i++) { const q = proj.call(this, pts[i]); if (i === 0) ctx.moveTo(q[0], q[1]); else ctx.lineTo(q[0], q[1]); }
+    ctx.stroke();
+  }
+  _beads(ctx, pts, proj, r, alpha) {
+    ctx.fillStyle = 'rgba(20,20,15,' + alpha + ')';
+    for (const p of pts) { const q = proj.call(this, p); ctx.beginPath(); ctx.arc(q[0], q[1], r, 0, 7); ctx.fill(); }
+  }
+
+  _drawElev(ctx) {
+    const E = this._E, C = Component.C, fwd = this._fwd();
+    // ground profile
+    ctx.strokeStyle = 'rgba(20,20,15,0.30)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let px = E.x0; px <= E.x1; px += 3) {
+      const a = (px - E.cx) / E.s;
+      const z = this._surface(this.cam.x + fwd.x * a);
+      const y = E.base - z * E.s + 0.5;
+      if (px === E.x0) ctx.moveTo(px, y); else ctx.lineTo(px, y);
+    }
+    ctx.stroke();
+    const sp = 46 * E.s, trav = ((this.cam.x * fwd.x + this.cam.y * fwd.y) * E.s) % sp;
+    ctx.strokeStyle = 'rgba(20,20,15,0.13)'; ctx.beginPath();
+    for (let px = E.x0 - trav; px < E.x1; px += sp) {
+      const a = (px - E.cx) / E.s, z = this._surface(this.cam.x + fwd.x * a), y = E.base - z * E.s;
+      ctx.moveTo(px, y + 5); ctx.lineTo(px, y + 12);
+    }
+    ctx.stroke();
+    // COM trail
+    if ((this.props.showTrails ?? true) && this.trail.length > 3) {
+      ctx.strokeStyle = 'rgba(20,20,15,0.16)'; ctx.lineWidth = 1; ctx.beginPath();
+      const n = Math.min(this.trail.length, 120);
+      for (let i = this.trail.length - n; i < this.trail.length; i++) {
+        const q = this._ep(this.trail[i]);
+        if (i === this.trail.length - n) ctx.moveTo(q[0], q[1]); else ctx.lineTo(q[0], q[1]);
+      }
+      ctx.stroke();
+    }
+    // far limbs
+    for (const f of this.feet) if (f.side === 1) this._limbDraw(ctx, f, this._ep, 0.26);
+    this._chain(ctx, this.tail, this._ep, 1.5, 0.55);
+    this._beads(ctx, this.tail, this._ep, 1.7, 0.5);
+    this._chain(ctx, this.trunk, this._ep, 1.8, 0.88);
+    this._chain(ctx, [this.trunk[7]].concat(this.neck, [this.head]), this._ep, 1.6, 0.85);
+    this._beads(ctx, this.trunk, this._ep, 2.6, 0.9);
+    this._beads(ctx, this.neck, this._ep, 2.1, 0.8);
+    const hq = this._ep(this.head);
+    ctx.strokeStyle = 'rgba(20,20,15,0.85)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(hq[0], hq[1], 4.6, 0, 7); ctx.stroke();
+    for (const f of this.feet) if (f.side === -1) this._limbDraw(ctx, f, this._ep, 0.92);
+    // COM + plumb
+    const cq = this._ep(this.com);
+    const gz = this._surface(this.com.x);
+    const pq = this._ep({ x: this.com.x, y: this.com.y, z: gz });
+    ctx.strokeStyle = 'rgba(20,20,15,0.35)'; ctx.setLineDash([2, 3]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cq[0], cq[1]); ctx.lineTo(pq[0], pq[1]); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = Component.INK; ctx.beginPath(); ctx.arc(cq[0], cq[1], 4, 0, 7); ctx.fill();
+    ctx.strokeStyle = 'rgba(20,20,15,0.5)'; ctx.beginPath();
+    ctx.moveTo(cq[0] - 9, cq[1]); ctx.lineTo(cq[0] + 9, cq[1]); ctx.moveTo(cq[0], cq[1] - 9); ctx.lineTo(cq[0], cq[1] + 9); ctx.stroke();
+    ctx.strokeStyle = Component.RED; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(pq[0] - 4, pq[1]); ctx.lineTo(pq[0] + 4, pq[1]); ctx.stroke();
+    // anticipate marker
+    if (Math.abs(this.riseAhead || 0) > 0.5) {
+      const look = Math.max(C.GAP * 0.5, Math.hypot(this.vel.x, this.vel.y) * 0.45);
+      const wp = { x: this.trunk[7].x + fwd.x * look, y: this.trunk[7].y + fwd.y * look, z: this._surface(this.trunk[7].x + fwd.x * look) };
+      const q = this._ep(wp);
+      ctx.strokeStyle = Component.RED; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(q[0] - 4, q[1] - 7); ctx.lineTo(q[0], q[1] - 12); ctx.lineTo(q[0] + 4, q[1] - 7); ctx.stroke();
+      ctx.font = '8px "IBM Plex Mono",monospace'; ctx.fillStyle = 'rgba(142,27,18,0.8)'; ctx.textAlign = 'center';
+      ctx.fillText('RISE ' + (this.riseAhead > 0 ? '+' : '') + this.riseAhead.toFixed(0), q[0], q[1] - 17);
+      ctx.textAlign = 'left';
+    }
+    // readout strip
+    ctx.font = '8.5px "IBM Plex Mono",monospace'; ctx.fillStyle = 'rgba(20,20,15,0.34)';
+    ctx.fillText('STANCE  FORE ' + this.whZ.toFixed(1) + '  HIND ' + this.pelZ.toFixed(1) + '  COM Z ' + this.com.z.toFixed(1), 12, E.base + 34);
+  }
+
+  _limbDraw(ctx, f, proj, alpha) {
+    const C = Component.C, L = f.g === 0 ? C.FORE : C.HIND;
+    const s = proj.call(this, f.socket), j = proj.call(this, f.joint), a = proj.call(this, f.ankle), t = proj.call(this, f.toe);
+    ctx.strokeStyle = 'rgba(20,20,15,' + alpha + ')'; ctx.lineWidth = alpha > 0.5 ? 2 : 1.6;
+    ctx.beginPath(); ctx.moveTo(s[0], s[1]); ctx.lineTo(j[0], j[1]); ctx.lineTo(a[0], a[1]); ctx.lineTo(t[0], t[1]); ctx.stroke();
+    const sat = f.sat && alpha > 0.5;
+    ctx.fillStyle = sat ? Component.RED : 'rgba(20,20,15,' + alpha + ')';
+    ctx.beginPath(); ctx.arc(j[0], j[1], sat ? 3.2 : 2.4, 0, 7); ctx.fill();
+    ctx.fillStyle = f.satA && alpha > 0.5 ? Component.RED : 'rgba(20,20,15,' + alpha + ')';
+    ctx.beginPath(); ctx.arc(a[0], a[1], 2.1, 0, 7); ctx.fill();
+    if (sat) { ctx.strokeStyle = 'rgba(142,27,18,0.55)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(j[0], j[1], 7, 0, 7); ctx.stroke(); }
+    if (alpha > 0.5) {
+      const gq = proj.call(this, { x: f.pos.x, y: f.pos.y, z: f.pos.z });
+      if (f.st === 'plant') {
+        ctx.strokeStyle = f.desp ? Component.RED : 'rgba(142,27,18,0.85)'; ctx.lineWidth = 2.2;
+        ctx.beginPath(); ctx.moveTo(gq[0] - 7, gq[1] + 3); ctx.lineTo(gq[0] + 11, gq[1] + 3); ctx.stroke();
+        const hq = proj.call(this, { x: f.home.x, y: f.home.y, z: f.home.z });
+        ctx.strokeStyle = 'rgba(20,20,15,0.34)'; ctx.lineWidth = 1;
+        ctx.strokeRect(hq[0] - 2.5, hq[1] + 0.5, 5, 5);
+        if (f.need > 0.35) {
+          ctx.strokeStyle = f.need >= 1 ? Component.RED : 'rgba(20,20,15,0.4)';
+          ctx.setLineDash([2, 2]); ctx.beginPath(); ctx.moveTo(gq[0], gq[1] + 8); ctx.lineTo(hq[0], hq[1] + 8); ctx.stroke(); ctx.setLineDash([]);
+        }
+      } else {
+        ctx.strokeStyle = 'rgba(20,20,15,0.6)'; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.arc(gq[0], gq[1], 3.4, 0, 7); ctx.stroke();
+        const tq = proj.call(this, f.tgt);
+        ctx.strokeStyle = 'rgba(142,27,18,0.7)'; ctx.setLineDash([2, 2]);
+        ctx.beginPath(); ctx.moveTo(gq[0], gq[1]); ctx.lineTo(tq[0], tq[1]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.beginPath(); ctx.moveTo(tq[0] - 4, tq[1] + 3); ctx.lineTo(tq[0] + 4, tq[1] + 3); ctx.moveTo(tq[0], tq[1] - 1); ctx.lineTo(tq[0], tq[1] + 7); ctx.stroke();
+      }
+    }
+  }
+
+  _drawPlan(ctx) {
+    const P = this._P, C = Component.C;
+    // grid
+    const g = 46 * P.s;
+    ctx.fillStyle = 'rgba(20,20,15,0.14)';
+    const ox = ((-this.cam.x * P.s) % g + g) % g, oy = ((-this.cam.y * P.s) % g + g) % g;
+    for (let x = P.x0 + ox - g; x < P.x1; x += g) for (let y = P.y0 + oy - g; y < P.y1; y += g) {
+      if (x < P.x0 || y < P.y0) continue; ctx.fillRect(x, y, 1, 1);
+    }
+    // terrain features
+    if (this.terrain === 'ledge' || this.terrain === 'brink') {
+      const wx = this.terrain === 'ledge' ? 210 : 300;
+      const q = this._pp({ x: wx, y: this.cam.y });
+      ctx.strokeStyle = this.terrain === 'brink' ? Component.RED : 'rgba(20,20,15,0.4)';
+      ctx.lineWidth = this.terrain === 'brink' ? 1.6 : 1;
+      ctx.beginPath(); ctx.moveTo(q[0], P.y0); ctx.lineTo(q[0], P.y1); ctx.stroke();
+      ctx.strokeStyle = this.terrain === 'brink' ? 'rgba(142,27,18,0.30)' : 'rgba(20,20,15,0.16)';
+      ctx.lineWidth = 1;
+      for (let y = P.y0; y < P.y1; y += 9) {
+        ctx.beginPath(); ctx.moveTo(q[0] + 2, y); ctx.lineTo(Math.min(P.x1, q[0] + 14), y + 7); ctx.stroke();
+      }
+      ctx.font = '8px "IBM Plex Mono",monospace'; ctx.fillStyle = this.terrain === 'brink' ? Component.RED : 'rgba(20,20,15,0.4)';
+      ctx.fillText(this.terrain === 'brink' ? 'BRINK \u221260' : 'LEDGE +10', Math.min(P.x1 - 60, q[0] + 18), P.y0 + 34);
+    }
+    // support polygon
+    if ((this.props.showHull ?? true) && this.hull.length > 1) {
+      ctx.setLineDash([3, 3]); ctx.strokeStyle = 'rgba(20,20,15,0.45)'; ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = 0; i < this.hull.length; i++) { const q = this._pp({ x: this.hull[i].x, y: this.hull[i].y }); if (i === 0) ctx.moveTo(q[0], q[1]); else ctx.lineTo(q[0], q[1]); }
+      if (this.hull.length > 2) { ctx.closePath(); ctx.fillStyle = 'rgba(20,20,15,0.045)'; ctx.fill(); }
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+    // footfall rings
+    for (const r of this.rings) {
+      const age = this._t - r.t0, q = this._pp(r);
+      ctx.strokeStyle = 'rgba(142,27,18,' + (0.5 * (1 - age / 0.7)).toFixed(3) + ')'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(q[0], q[1], 3 + age * 40, 0, 7); ctx.stroke();
+    }
+    // COM trail
+    if ((this.props.showTrails ?? true) && this.trail.length > 3) {
+      ctx.strokeStyle = 'rgba(20,20,15,0.18)'; ctx.lineWidth = 1; ctx.beginPath();
+      for (let i = 0; i < this.trail.length; i++) { const q = this._pp(this.trail[i]); if (i === 0) ctx.moveTo(q[0], q[1]); else ctx.lineTo(q[0], q[1]); }
+      ctx.stroke();
+    }
+    // body
+    this._chain(ctx, this.tail, this._pp, 1.4, 0.5);
+    this._chain(ctx, this.trunk, this._pp, 1.8, 0.85);
+    this._chain(ctx, [this.trunk[7]].concat(this.neck, [this.head]), this._pp, 1.5, 0.8);
+    this._beads(ctx, this.trunk, this._pp, 2.4, 0.9);
+    this._beads(ctx, this.neck, this._pp, 1.9, 0.7);
+    this._beads(ctx, this.tail, this._pp, 1.6, 0.45);
+    const hq = this._pp(this.head);
+    ctx.strokeStyle = 'rgba(20,20,15,0.85)'; ctx.lineWidth = 1.3;
+    ctx.beginPath(); ctx.arc(hq[0], hq[1], 4, 0, 7); ctx.stroke();
+    // girdle bars
+    for (let g = 0; g < 2; g++) {
+      const a = this._pp(this._socketPlan(g, 1)), b = this._pp(this._socketPlan(g, -1));
+      ctx.strokeStyle = 'rgba(20,20,15,0.5)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+    }
+    // limbs + feet
+    for (const f of this.feet) {
+      const s = this._pp(f.socket), j = this._pp(f.joint), t = this._pp(f.toe);
+      ctx.strokeStyle = 'rgba(20,20,15,0.5)'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(s[0], s[1]); ctx.lineTo(j[0], j[1]); ctx.lineTo(t[0], t[1]); ctx.stroke();
+      const q = this._pp(f.pos), hq2 = this._pp(f.home);
+      ctx.strokeStyle = 'rgba(20,20,15,0.34)'; ctx.lineWidth = 1;
+      ctx.strokeRect(hq2[0] - 2.5, hq2[1] - 2.5, 5, 5);
+      if (f.st === 'plant') {
+        ctx.setLineDash([2, 2]); ctx.strokeStyle = f.need >= 1 ? Component.RED : 'rgba(20,20,15,0.30)';
+        ctx.beginPath(); ctx.moveTo(q[0], q[1]); ctx.lineTo(hq2[0], hq2[1]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = f.desp ? Component.RED : 'rgba(142,27,18,0.9)';
+        ctx.beginPath(); ctx.arc(q[0], q[1], 3.4, 0, 7); ctx.fill();
+        ctx.strokeStyle = 'rgba(142,27,18,0.35)'; ctx.beginPath(); ctx.arc(q[0], q[1], 6.5, 0, 7); ctx.stroke();
+      } else {
+        ctx.strokeStyle = 'rgba(20,20,15,0.65)'; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.arc(q[0], q[1], 3.4, 0, 7); ctx.stroke();
+        const tq = this._pp(f.tgt);
+        ctx.setLineDash([2, 2]); ctx.strokeStyle = 'rgba(142,27,18,0.7)';
+        ctx.beginPath(); ctx.moveTo(q[0], q[1]); ctx.lineTo(tq[0], tq[1]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.beginPath(); ctx.moveTo(tq[0] - 4.5, tq[1]); ctx.lineTo(tq[0] + 4.5, tq[1]); ctx.moveTo(tq[0], tq[1] - 4.5); ctx.lineTo(tq[0], tq[1] + 4.5); ctx.stroke();
+      }
+      ctx.font = '8px "IBM Plex Mono",monospace'; ctx.fillStyle = 'rgba(20,20,15,0.4)';
+      ctx.fillText(f.key, q[0] + 8, q[1] - 6);
+    }
+    // COM + vectors
+    const cq = this._pp(this.com);
+    ctx.fillStyle = Component.INK; ctx.beginPath(); ctx.arc(cq[0], cq[1], 4.2, 0, 7); ctx.fill();
+    ctx.strokeStyle = 'rgba(20,20,15,0.45)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cq[0] - 10, cq[1]); ctx.lineTo(cq[0] + 10, cq[1]); ctx.moveTo(cq[0], cq[1] - 10); ctx.lineTo(cq[0], cq[1] + 10); ctx.stroke();
+    const vs = 0.22 * P.s, as = 0.055 * P.s;
+    ctx.strokeStyle = 'rgba(20,20,15,0.75)'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(cq[0], cq[1]); ctx.lineTo(cq[0] + this.vel.x * vs, cq[1] + this.vel.y * vs); ctx.stroke();
+    ctx.setLineDash([2, 2]); ctx.strokeStyle = 'rgba(20,20,15,0.35)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cq[0], cq[1]); ctx.lineTo(cq[0] + this.demand.x * as, cq[1] + this.demand.y * as); ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle = Component.RED; ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.moveTo(cq[0], cq[1]); ctx.lineTo(cq[0] + this.deliv.x * as, cq[1] + this.deliv.y * as); ctx.stroke();
+    // margin readout at the spill boundary
+    if (this.hull.length > 1) {
+      const cen = this._pp(this.hullCen);
+      ctx.strokeStyle = this.margin < 0 ? 'rgba(142,27,18,0.55)' : 'rgba(20,20,15,0.25)';
+      ctx.setLineDash([1, 2]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(cen[0], cen[1]); ctx.lineTo(cq[0], cq[1]); ctx.stroke(); ctx.setLineDash([]);
+    }
+    ctx.font = '8.5px "IBM Plex Mono",monospace'; ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(20,20,15,0.34)';
+    ctx.fillText('VEL \u2014\u2014  DELIVERED \u2014\u2014  DEMAND \u00b7\u00b7\u00b7', P.x0 + 12, P.y1 - 14);
+    ctx.fillText('MARGIN ' + this.margin.toFixed(1) + ' PX  \u00b7  BASE ' + this.halfBase.toFixed(0) + ' PX  \u00b7  ' + this.hull.length + ' PLANTED', P.x0 + 12, P.y1 - 26);
+  }
+
+  _dial(ctx) {
+    const F = this._F, cx = F.x1 - 44, cy = F.y0 + 50, r = 21;
+    ctx.strokeStyle = 'rgba(20,20,15,0.22)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke();
+    const a = this.roll;
+    ctx.strokeStyle = 'rgba(20,20,15,0.8)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(cx - Math.cos(a) * r, cy - Math.sin(a) * r); ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); ctx.stroke();
+    const cl = Math.min(1, Math.abs(this.rightCeil) / 30) * 1.1;
+    ctx.strokeStyle = 'rgba(20,20,15,0.25)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx, cy, r + 4, -Math.PI / 2 - cl, -Math.PI / 2 + cl); ctx.stroke();
+    const rt = Math.max(-1.1, Math.min(1.1, (this.right || 0) / 30 * 1.1));
+    ctx.strokeStyle = Component.RED; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx, cy, r + 4, -Math.PI / 2, -Math.PI / 2 + rt); ctx.stroke();
+    ctx.font = '8px "IBM Plex Mono",monospace'; ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(20,20,15,0.4)';
+    ctx.fillText('KEEL', cx, cy + r + 16);
+    ctx.fillText((this.roll * 57.2958).toFixed(1) + '\u00b0', cx, cy + r + 26);
+    ctx.textAlign = 'left';
+  }
+
+  _drawTime(ctx, x, y, w, h) {
+    const WIN = 4.5, C = Component.C;
+    ctx.strokeStyle = 'rgba(20,20,15,0.13)'; ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    ctx.font = '9px "IBM Plex Mono",monospace'; ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(20,20,15,0.72)'; ctx.fillText('TIMELINE', x + 12, y + 17);
+    ctx.fillStyle = 'rgba(20,20,15,0.32)'; ctx.fillText('4.5 S WINDOW \u00b7 FOOTFALL \u00b7 DELIVERY \u00b7 POISE', x + 12 + 62, y + 17);
+    const lx = x + 66, rx = x + w - 14, span = rx - lx;
+    const tx = (t) => rx - (this._t - t) / WIN * span;
+    const H = this.hist;
+    let cy = y + 30;
+    const rows = ['FL', 'FR', 'HL', 'HR'];
+    ctx.textAlign = 'left';
+    for (let i = 0; i < 4; i++) {
+      const ry = cy + 6;
+      ctx.font = '8.5px "IBM Plex Mono",monospace'; ctx.fillStyle = 'rgba(20,20,15,0.45)';
+      ctx.fillText(rows[i], x + 14, ry + 3);
+      ctx.strokeStyle = 'rgba(20,20,15,0.10)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(lx, ry + 0.5); ctx.lineTo(rx, ry + 0.5); ctx.stroke();
+      let run = null;
+      for (let k = 0; k < H.length; k++) {
+        const st = H[k].fs[i], px = tx(H[k].t);
+        if (px < lx) continue;
+        if (!run || run.st !== st) { if (run) this._runDraw(ctx, run, ry); run = { st, x0: px, x1: px }; }
+        else run.x1 = px;
+      }
+      if (run) this._runDraw(ctx, run, ry);
+      cy += 13;
+    }
+    cy += 4;
+    // feet down
+    const rowH = 22;
+    ctx.fillStyle = 'rgba(20,20,15,0.45)'; ctx.fillText('DOWN', x + 14, cy + 14);
+    ctx.strokeStyle = 'rgba(20,20,15,0.10)';
+    ctx.beginPath(); ctx.moveTo(lx, cy + rowH + 0.5); ctx.lineTo(rx, cy + rowH + 0.5); ctx.stroke();
+    ctx.strokeStyle = 'rgba(20,20,15,0.55)'; ctx.lineWidth = 1.2; ctx.beginPath();
+    let started = false;
+    for (const s of H) { const px = tx(s.t); if (px < lx) continue; const py = cy + rowH - (s.fd / 4) * rowH; if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py); }
+    ctx.stroke();
+    cy += rowH + 8;
+    // delivery
+    const aH = 26, ceil = C.PUSH;
+    ctx.fillStyle = 'rgba(20,20,15,0.45)'; ctx.fillText('ACCEL', x + 14, cy + 14);
+    ctx.strokeStyle = 'rgba(20,20,15,0.10)';
+    ctx.beginPath(); ctx.moveTo(lx, cy + aH + 0.5); ctx.lineTo(rx, cy + aH + 0.5); ctx.stroke();
+    ctx.setLineDash([2, 3]); ctx.strokeStyle = 'rgba(20,20,15,0.30)'; ctx.beginPath();
+    started = false;
+    for (const s of H) { const px = tx(s.t); if (px < lx) continue; const py = cy + aH - Math.min(1, s.dm / ceil) * aH; if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py); }
+    ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(142,27,18,0.22)'; ctx.beginPath(); ctx.moveTo(lx, cy + aH);
+    for (const s of H) { const px = tx(s.t); if (px < lx) continue; ctx.lineTo(px, cy + aH - Math.min(1, s.dl / ceil) * aH); }
+    ctx.lineTo(rx, cy + aH); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = Component.RED; ctx.lineWidth = 1.2; ctx.beginPath(); started = false;
+    for (const s of H) { const px = tx(s.t); if (px < lx) continue; const py = cy + aH - Math.min(1, s.dl / ceil) * aH; if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py); }
+    ctx.stroke();
+    cy += aH + 8;
+    // poise
+    const pH = 20;
+    ctx.fillStyle = 'rgba(20,20,15,0.45)'; ctx.fillText('POISE', x + 14, cy + 12);
+    ctx.strokeStyle = 'rgba(20,20,15,0.10)';
+    ctx.beginPath(); ctx.moveTo(lx, cy + pH + 0.5); ctx.lineTo(rx, cy + pH + 0.5); ctx.stroke();
+    ctx.strokeStyle = 'rgba(20,20,15,0.6)'; ctx.lineWidth = 1; ctx.beginPath(); started = false;
+    for (const s of H) { const px = tx(s.t); if (px < lx) continue; const py = cy + pH - Math.max(0, Math.min(1, s.sd)) * pH; if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py); }
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(142,27,18,0.5)';
+    for (const s of H) { const px = tx(s.t); if (px < lx) continue; if (s.sp > C.DEFICIT) ctx.fillRect(px, cy + pH - 3, 1, 3); }
+    // now line + ticks
+    ctx.strokeStyle = 'rgba(142,27,18,0.8)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(rx, y + 26); ctx.lineTo(rx, cy + pH); ctx.stroke();
+    ctx.font = '8px "IBM Plex Mono",monospace'; ctx.fillStyle = 'rgba(20,20,15,0.28)'; ctx.textAlign = 'center';
+    for (let k = 0; k <= 4; k++) { const px = rx - (k / 4) * span; ctx.fillText(k === 0 ? 'NOW' : '\u2212' + (k * WIN / 4).toFixed(1) + 'S', px, cy + pH + 12); }
+    ctx.textAlign = 'left';
+  }
+
+  _runDraw(ctx, run, ry) {
+    const w = Math.max(1, run.x1 - run.x0);
+    if (run.st === 0) { ctx.fillStyle = 'rgba(142,27,18,0.85)'; ctx.fillRect(run.x0, ry - 2.5, w, 5); }
+    else if (run.st === 3) { ctx.fillStyle = Component.RED; ctx.fillRect(run.x0, ry - 4, w, 8); }
+    else {
+      ctx.strokeStyle = run.st === 2 ? 'rgba(142,27,18,0.6)' : 'rgba(20,20,15,0.42)'; ctx.lineWidth = 1;
+      ctx.strokeRect(run.x0, ry - 2.5, w, 5);
+    }
+  }
+}
+</script>
+</body>
+</html>

@@ -349,6 +349,20 @@ func flanks(lat: Vector2) -> Vector2:
 	return Vector2(right + pad, left + pad)
 
 
+## The support as a shape: the planted prints, walked in hull order, which is
+## the polygon `clearance` was measured against and never a second opinion about
+## it. Two prints come back as the two ends of the capsule and one as itself —
+## the same three cases the distance below has.
+##
+## Here so that anything drawing the support draws the support: a panel that
+## wrapped its own hull round the same points would agree until the moment a
+## foot was torn off its footing, which is the moment worth looking at.
+func support_shape() -> PackedVector2Array:
+	if feet <= 2:
+		return _prints.duplicate()
+	return _hull(_prints)
+
+
 ## How much of its own support the line is inside, as a share of the
 ## support's radius: 1 dead over the middle, 0 on the edge, negative going
 ## over. From Plumb, verbatim.

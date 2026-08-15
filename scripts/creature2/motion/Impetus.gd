@@ -69,6 +69,15 @@ var power: float = 1.0
 ## the body into it and for the HUD. Never an input to anything upstream.
 var thrust: Vector2 = Vector2.ZERO
 
+## ...and what was asked for before the clamp, px/s², with the ceiling it was
+## clamped to. Readouts as well, and kept for one reason: the *difference*
+## between them is the body having mass. A reader that only ever saw the
+## delivery could not tell a leg pressing easily from a leg that has run out of
+## ground, and those are the two halves of whether a movement looks like it
+## weighs anything.
+var demand: Vector2 = Vector2.ZERO
+var ceiling: float = 0.0
+
 var _derived_rev: int = -1
 
 
@@ -94,14 +103,17 @@ func propel(delta: float, desired_v: Vector2, along: Vector2, drive: float,
 		# Ballistic: the plan velocity is whatever the take-off left, until the
 		# ground is back under the feet. The vertical belongs to Gravity.Fall.
 		thrust = Vector2.ZERO
+		demand = Vector2.ZERO
+		ceiling = 0.0
 		return
 
 	var press: float = clampf(grip, 0.0, 1.0)
-	var ceiling: float = PUSH * power * maxf(drive, 0.0) * press
+	ceiling = PUSH * power * maxf(drive, 0.0) * press
 	var want: Vector2 = (desired_v - velocity) / maxf(RESPONSE, delta)
 	# Braking is any demand that takes speed out of the body.
 	if want.dot(velocity) < 0.0:
 		ceiling *= BRAKE
+	demand = want
 	thrust = want.limit_length(ceiling)
 	velocity += thrust * delta
 
@@ -144,3 +156,5 @@ func speed() -> float:
 func halt() -> void:
 	velocity = Vector2.ZERO
 	thrust = Vector2.ZERO
+	demand = Vector2.ZERO
+	ceiling = 0.0

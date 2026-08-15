@@ -171,6 +171,10 @@ var axial_stick: PackedInt32Array = PackedInt32Array()
 ## limit taken per chain (the junction takes the stricter neighbour), then
 ## graded by section exactly as Spine.bend_at: thin stations fold further.
 var axial_bend: PackedFloat32Array = PackedFloat32Array()
+## Where each node sits in the axial order, or -1 for one that is not an
+## interior axial vertex — the reverse of `axial`, kept so a reader can ask a
+## node what limit it is under without walking the line. Filled by `_build_axial`.
+var _axial_at: PackedInt32Array = PackedInt32Array()
 
 var chains: Dictionary = {}
 var limbs: Array[Chain] = []
@@ -417,6 +421,11 @@ func _build_axial() -> void:
 			* 0.5 / maxf(stoutest, 0.001)
 		var hold: float = clampf(section * section * section, MIN_SECTION, 1.0)
 		axial_bend.append(base * lerpf(LIMBER_BEND, 1.0, hold))
+
+	_axial_at.resize(pos.size())
+	_axial_at.fill(-1)
+	for k in range(1, axial.size() - 1):
+		_axial_at[axial[k]] = k
 
 
 ## Lays the body out standing: axial chain straight along the heading, limbs
@@ -1354,6 +1363,67 @@ func centre() -> Vector2:
 ## own copy of either.
 func plan(i: int) -> Vector2:
 	return _p2(i)
+
+
+## How much bend a joint has left before it is against its own limit, radians.
+## INF where a node is not a joint anything constrains — a chain end, a socket, a
+## toe — so a reader can ask any node and only get an answer where there is one.
+##
+## The two limits are different things and both are real. An axial vertex carries
+## the graded cone the build gave it (`axial_bend`), and what is left is how much
+## further it may turn. A placed limb has no cone at all — the bones are folded by
+## FABRIK between a socket and a foot — so the only cap it can reach is being
+## *straight*, and what is left there is the fold still in the joint. A leg
+## solving at full stretch is a leg with nothing left to give, which is exactly
+## where stiffness comes from and exactly what a reader wants to see per joint.
+func joint_slack(i: int) -> float:
+	if i < 0 or i >= pos.size():
+		return INF
+	var k: int = _axial_at[i] if i < _axial_at.size() else -1
+	if k >= 0:
+		var incoming: Vector2 = _p2(axial[k]) - _p2(axial[k - 1])
+		var outgoing: Vector2 = _p2(axial[k + 1]) - _p2(axial[k])
+		if incoming.length_squared() < 0.000001 or outgoing.length_squared() < 0.000001:
+			return INF
+		var turn: float = absf(wrapf(outgoing.angle() - incoming.angle(), -PI, PI))
+		return axial_bend[k - 1] - turn
+	for limb in limbs:
+		for j in range(1, limb.nodes.size() - 1):
+			if limb.nodes[j] == i:
+				return limb_slack(limb, j)
+	return INF
+
+
+## The fold left in one interior joint of a placed limb, radians — measured in
+## the limb's own sagittal solution, because that is where the leg was actually
+## folded and the plan projection of a columnar leg is a dot.
+func limb_slack(limb: Chain, j: int) -> float:
+	var incoming: Vector2 = limb.sag[j] - limb.sag[j - 1]
+	var outgoing: Vector2 = limb.sag[j + 1] - limb.sag[j]
+	if incoming.length_squared() < 0.000001 or outgoing.length_squared() < 0.000001:
+		return INF
+	return absf(wrapf(outgoing.angle() - incoming.angle(), -PI, PI))
+
+
+## How many joints are pressed against a limit — the count a reader quotes as
+## "the IK is clamping". `margin` is how close to its own cap a joint has to be
+## to count, radians.
+##
+## Walks the two structures that have limits rather than asking every node
+## whether it is one of them: this is read every tick by anything watching the
+## loop, and the difference is a couple of dozen angles against several hundred.
+func joints_at_cap(margin: float) -> int:
+	var count: int = 0
+	for k in range(1, axial.size() - 1):
+		var slack: float = joint_slack(axial[k])
+		if is_finite(slack) and slack <= margin:
+			count += 1
+	for limb in limbs:
+		for j in range(1, limb.nodes.size() - 1):
+			var slack: float = limb_slack(limb, j)
+			if is_finite(slack) and slack <= margin:
+				count += 1
+	return count
 
 
 ## Worst axial stick error against the rest length the current mode holds —

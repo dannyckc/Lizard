@@ -26,7 +26,8 @@
 ##   shift        sprint
 ##   space        jump (held to charge, released to spring)
 ##   wheel        zoom
-##   F3           step the view round: field → anatomy → field
+##   F3           step the view round: field → anatomy → physics → field
+##   P            pause the world (physics view), . step it one tick
 ##   R            reset the creature to its spawn
 ##   K            collapse / revive (ragdoll mode toggle)
 ##   F            drop the body from a height
@@ -224,6 +225,16 @@ func _pump_key(event: InputEventKey) -> void:
 		if hud != null:
 			hud.toggle_view()
 		return
+	# The clock, while the physics drawer has it. Keys rather than only buttons
+	# because walking a footfall through a tick at a time is done with one hand on
+	# the movement keys — see MotionDrawer.step_once.
+	if hud != null and hud.physics != null and hud.physics.is_open():
+		if event.keycode == KEY_P:
+			hud.physics.toggle_pause()
+			return
+		if event.keycode == KEY_PERIOD:
+			hud.physics.step_once()
+			return
 	if creature == null:
 		return
 	match event.keycode:

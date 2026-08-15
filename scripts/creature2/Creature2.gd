@@ -253,6 +253,9 @@ func _physics_process(delta: float) -> void:
 	# The physical result, reviewed: a weight over its edge demands rescue
 	# steps; one past rescue falls, and next tick's loop starts from that.
 	travel.review(delta)
+	# ...and the loop written down, for whatever is watching it. Last, so what is
+	# recorded is the tick as it finished, and free while nothing is looking.
+	travel.observe(delta)
 	# ...and last of all the skin, over bones that have finished moving. Nothing
 	# reads back from it, which is why it can be last: the flesh is a consequence
 	# of the tick, never a term in it.
@@ -274,6 +277,18 @@ func _physics_process(delta: float) -> void:
 	# mouth is, which is why a walking target stays selected.
 	_update_aim()
 	queue_redraw()
+
+
+## What the locomotion loop decided this tick, and what it has been deciding —
+## the one seam anything watching the mover reads (`MotionReadout`). Assembled by
+## `Travel`, which is already the only writer of the published motion state, so a
+## panel never reaches into `Footwork`, `Rhythm`, `Poise` or `Keel` and can never
+## hold a second opinion about a body that has one.
+##
+## Inert until something calls `watch(true)` on it: the loop pays for the reading
+## only while it is being read.
+func motion_readout() -> MotionReadout:
+	return travel.readout
 
 
 ## The speed this creature walks at flat out without sprinting — the denominator

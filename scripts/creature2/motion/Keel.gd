@@ -140,6 +140,11 @@ var side: float = 0.0
 var pivot: float = 0.0
 var spill: float = 0.0
 var righting: float = 0.0
+## ...and the most the girdles could have pressed if they had asked for
+## everything. `strained` is only the sign of `righting` having hit it; the
+## number itself is what says by how much the legs are outmatched, and it moves
+## on its own as feet leave the ground.
+var ceiling: float = 0.0
 var strained: bool = false
 
 var _derived_rev: int = -1
@@ -196,6 +201,7 @@ func strike(lateral: float, lever: float, high: float) -> void:
 func tick(delta: float, support: Vector2, high: float, hold: float, base: float,
 		power: float, collapsed: bool) -> void:
 	righting = 0.0
+	ceiling = 0.0
 	strained = false
 	if collapsed:
 		if not _was_down:
@@ -236,7 +242,7 @@ func tick(delta: float, support: Vector2, high: float, hold: float, base: float,
 	# press — and the clamp is the whole mechanism: under it the animal holds
 	# itself level through a two-footed beat without noticing, over it the muscle
 	# is simply outmatched and the weight has its way.
-	var ceiling: float = RIGHTING * mass * Gravity.PULL * maxf(base, 0.0) \
+	ceiling = RIGHTING * mass * Gravity.PULL * maxf(base, 0.0) \
 		* maxf(power, 0.0) * clampf(hold, 0.0, 1.0) / about
 	var demand: float = -(STIFF * roll + BRACE * rate)
 	righting = clampf(demand, -ceiling, ceiling)
@@ -267,6 +273,7 @@ func reset() -> void:
 	pivot = 0.0
 	spill = 0.0
 	righting = 0.0
+	ceiling = 0.0
 	strained = false
 	_down_side = 0.0
 	_was_down = false

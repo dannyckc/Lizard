@@ -60,6 +60,13 @@ const DIAGONAL: Array[int] = [3, 2, 1, 0]
 const PAIR: Array[int] = [1, 0, 3, 2]
 
 
+## How many feet the last decision would seat, and the ceiling even desperation
+## honoured. Readouts of the policy — the gait, as a number, for anything
+## watching the loop; nothing here reads them back.
+var seats: int = 1
+var most: int = 2
+
+
 ## Decides which of the asking feet may lift this tick.
 ##
 ## `urgency` is per-foot drift in trigger units (≥ 1.0 is a request, 0 for a
@@ -74,11 +81,11 @@ func choose(urgency: PackedFloat32Array, swinging: PackedByteArray,
 	for i in swinging.size():
 		if swinging[i] != 0:
 			up += 1
-	var seats: int = 1 if pace < WALK_EDGE else 2
+	seats = 1 if pace < WALK_EDGE else 2
 	# The absolute ceiling even desperation honours: a body reorganising all
 	# its support at once has none, and a stumble that lifted a third foot at
 	# a walk was making its own emergency worse.
-	var most: int = 2 if pace < RUN_EDGE else 3
+	most = 2 if pace < RUN_EDGE else 3
 
 	# Requests, most urgent first. Insertion sort on four entries.
 	var order := PackedInt32Array()

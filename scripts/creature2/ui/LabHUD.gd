@@ -28,7 +28,8 @@ const INK := Color("14140f")
 
 const VIEW_FIELD: String = "Field"
 const VIEW_ANATOMY: String = "Anatomy"
-const VIEWS: Array[String] = [VIEW_FIELD, VIEW_ANATOMY]
+const VIEW_PHYSICS: String = "Physics"
+const VIEWS: Array[String] = [VIEW_FIELD, VIEW_ANATOMY, VIEW_PHYSICS]
 
 ## The keys the lab actually answers to — see V2Lab, which is where they are
 ## pumped. Two rows rather than v1's one, because the lab has the handling a probe
@@ -36,12 +37,13 @@ const VIEWS: Array[String] = [VIEW_FIELD, VIEW_ANATOMY]
 const LEGEND: Array[Array] = [
 	[[["W", "A", "S", "D"], "MOVE"], [["⇧"], "SPRINT"], [["SPACE"], "JUMP"],
 		[["LMB"], "BITE / HOLD"], [["RMB"], "DRAG NODE"]],
-	[[["F3"], "ANATOMY"], [["V"], "SKELETON"], [["K"], "COLLAPSE"],
-		[["F"], "DROP"], [["R"], "RESET"]],
+	[[["F3"], "VIEWS"], [["P"], "PAUSE"], [["."], "STEP"], [["V"], "SKELETON"],
+		[["K"], "COLLAPSE"], [["F"], "DROP"], [["R"], "RESET"]],
 ]
 
 var subject: Creature2
 var anatomy: SpecimenDrawer
+var physics: MotionDrawer
 
 var _sans_base: SystemFont
 var _mono_base: Font
@@ -82,6 +84,7 @@ func _ready() -> void:
 	_build_condition_and_legend()
 	_build_move_hint()
 	_build_anatomy()
+	_build_physics()
 	set_view(_active_view)
 	resized.connect(_fit_drawers)
 	_fit_drawers()
@@ -91,6 +94,8 @@ func _process(delta: float) -> void:
 	_read_subject()
 	if anatomy != null and anatomy.visible:
 		anatomy.refresh()
+	if physics != null and physics.visible:
+		physics.refresh()
 	if _move_hint == null:
 		return
 	_move_hint.modulate.a = lerpf(
@@ -108,6 +113,8 @@ func set_subject(each: Creature2) -> void:
 	subject = each
 	if anatomy != null:
 		anatomy.set_subject(each)
+	if physics != null:
+		physics.set_subject(each)
 	_fit_drawers()
 
 
@@ -172,6 +179,14 @@ func _apply_chrome() -> void:
 		anatomy.visible = _active_view == VIEW_ANATOMY
 		if anatomy.visible:
 			anatomy.refresh()
+	if physics != null:
+		physics.visible = _active_view == VIEW_PHYSICS
+		# The physics drawer records the loop and holds the clock while it is up,
+		# and hands both back when it is not — see MotionDrawer.set_open. Closing
+		# it is what puts the game back to full speed.
+		physics.set_open(physics.visible)
+		if physics.visible:
+			physics.refresh()
 
 
 ## Every drawer is sized to the window rather than to a fixed rect: they all stand
@@ -522,6 +537,20 @@ func _build_anatomy() -> void:
 	_anatomy_note.offset_bottom = -30.0
 	_anatomy_note.add_theme_constant_override("line_spacing", 6)
 	add_child(_anatomy_note)
+
+
+## The third stop of the F3 loop: the locomotion, while it runs.
+##
+## The one drawer that is about the *mover* rather than about the body — three
+## projections of the armature, the timeline of the last few seconds, and eight
+## measured tells with the band each is natural inside. It reads one seam
+## (`Creature2.motion_readout`) and nothing else.
+func _build_physics() -> void:
+	physics = MotionDrawer.new()
+	physics.set_ui_fonts(_sans, _sans_tracked, _mono, _mono_tracked)
+	physics.set_subject(subject)
+	add_child(physics)
+	_drawers.append(physics)
 
 
 func _build_move_hint() -> void:
