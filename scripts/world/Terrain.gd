@@ -268,7 +268,7 @@ func height_under(obstacle: Obstacle, cursor: Vector2) -> float:
 ##     being nearer the sun, closed by a contact line at its foot and a contour
 ##     where it meets the ground behind it.
 ##
-## The projection is the one everything else in the picture uses — `Posture.drop`
+## The projection is the one everything else in the picture uses — `Carriage.drop`
 ## and nothing else — so a rock, a foot and a belly all read at one scale.
 func _draw() -> void:
 	# Anything that reached `obstacles` without going through `add` — a test

@@ -28,7 +28,7 @@ extends SceneTree
 
 const TICK: float = 1.0 / 60.0
 
-## The Cat row of "Evolution Game UI Design-6/Gait HUD.dc.html", as proportions
+## The Cat row of "Evolution Game UI Design-7/Gait HUD.dc.html", as proportions
 ## of its own girdle gap — the spec the silhouette is checked against. Taken
 ## from the mock's `geo` block: gap 78, shH 50, hipH 53, depth 30, headR 8.5.
 ## Proportions rather than pixels, because the mock is drawn at its own scale.

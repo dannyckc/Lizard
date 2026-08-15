@@ -114,7 +114,7 @@ func push_capsule(a: Vector2, b: Vector2, capsule_radius: float,
 		capsule_band: Vector2) -> Vector2:
 	if gone() or not Volume.overlaps(band, capsule_band):
 		return Vector2.ZERO
-	return push_disc(a.lerp(b, AnatomyState.segment_u(at, a, b)), capsule_radius,
+	return push_disc(a.lerp(b, _segment_u(at, a, b)), capsule_radius,
 		capsule_band)
 
 
@@ -125,7 +125,7 @@ func push_capsule(a: Vector2, b: Vector2, capsule_radius: float,
 func blocks(from: Vector2, to: Vector2, line_band: Vector2) -> bool:
 	if gone() or not Volume.overlaps(band, line_band):
 		return false
-	var u: float = AnatomyState.segment_u(at, from, to)
+	var u: float = _segment_u(at, from, to)
 	# Only genuinely between the two ends. An object behind the mouth or beyond
 	# the target is not in the way of anything.
 	if u <= 0.0001 or u >= 0.9999:
@@ -138,8 +138,20 @@ func blocks(from: Vector2, to: Vector2, line_band: Vector2) -> bool:
 ## ground plane rather than to any animal's, which is what keeps a rock still
 ## while a creature walks past it.
 func drawn(height: float) -> Vector2:
-	return at + Posture.drop(height, 0.0)
+	return at + Carriage.drop(height, 0.0)
 
 
 func describe() -> String:
 	return "%s r%.0f %s" % [kind, girth(), Volume.describe(band)]
+
+
+## How far along `a`→`b` the foot of the perpendicular from `point` falls, clamped
+## to the segment. Plain geometry, kept here because this file is its only caller:
+## both questions above are "how near is this object to a line", and neither is
+## about heights, which is the whole of what `Volume` speaks.
+static func _segment_u(point: Vector2, a: Vector2, b: Vector2) -> float:
+	var ab: Vector2 = b - a
+	var length_squared: float = ab.length_squared()
+	if length_squared < 0.000001:
+		return 0.0
+	return clampf((point - a).dot(ab) / length_squared, 0.0, 1.0)

@@ -11,9 +11,10 @@
 ## So this file owns the pull, and it owns it for everything. Not as a service
 ## anything calls into — a body is not pulled downward by a manager — but as the
 ## one statement of how fast a thing gains speed when nothing is holding it up,
-## and the one integrator that turns that into a height. `Elevation` is a creature
-## under it with wings in the way; `Fall` below is everything else, which is to
-## say a lump of anatomy with nothing in the way at all.
+## and the one integrator that turns that into a height. `Fall` below is the
+## whole of it: a creature carries one on its `Armature` and `Travel` reads it to
+## know it is airborne, and a lump of severed anatomy carries the same one with
+## nothing in the way at all.
 ##
 ## Two rules, and every consequence in the game comes out of them:
 ##
@@ -31,11 +32,11 @@
 ##     changes nothing. For a body standing on something it is the whole
 ##     difference between staying up and going over, because a supported body is
 ##     not free to fall and *is* free to turn about the edge of its support. Where
-##     the weight of an animal is is `Plumb`; what the pull does to it from there
+##     the weight of an animal is is `Poise`; what the pull does to it from there
 ##     is `topple` below.
 ##
 ## Nothing here stores a mass. Weight decides how hard a thing is to *move* — that
-## is `Physique`, and the contact solver already divides by it — but it does not
+## is `Corpus`, and the contact solver already divides by it — but it does not
 ## decide how fast it falls, and a simulation in which a heavy part sank faster
 ## than a light one would be wrong about the one thing everybody can check. That
 ## holds for the topple too, and for the same arithmetic: the mass is on both
@@ -150,8 +151,8 @@ class Fall extends RefCounted:
 	## and a leg dropped on a rock lies on the rock.
 	var floor_height: float = 0.0
 	## True on the tick it arrived, with the speed it arrived at. The pair is read
-	## the same way `Elevation` reads its own — a landing is over the instant it
-	## happens, so what it was worth has to be kept.
+	## the same way `Travel` reads a landing — it is over the instant it happens,
+	## so what it was worth has to be kept.
 	var landed: bool = false
 	var impact: float = 0.0
 	## Whether it has come to rest. A thing at rest costs nothing per tick, which is

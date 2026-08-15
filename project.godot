@@ -14,9 +14,9 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 [application]
 
-config/name="Evolution — Procedural Lizard"
-config/description="Top-down prototype: constraint-driven spine, parametric body, FABRIK limbs, procedural gait."
-run/main_scene="res://scenes/Main.tscn"
+config/name="Evolution v2 — Procedural Creature"
+config/description="Top-down prototype, v2: one schema-driven census, a posed armature, and a locomotion control loop. v1 is archived beside this folder in Evolution-V1-Backup."
+run/main_scene="res://scenes/V2Lab.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 
 [display]

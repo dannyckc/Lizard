@@ -2,7 +2,7 @@
 ## rule that makes that direction matter.
 ##
 ## Everything in this world already has an x and a y. This file adds the z — not
-## as a third direction to *move* in, which is Elevation's business, but as a
+## as a third direction to *move* in, which is `Travel`'s business, but as a
 ## third question every interaction is asked before it is allowed to happen. Two
 ## things touch when their footprints overlap on the ground plane *and* the
 ## heights they occupy overlap. Miss either half and they are simply not in each
