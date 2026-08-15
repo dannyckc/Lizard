@@ -470,6 +470,10 @@ func support(delta: float, _ground: float) -> void:
 		# on, and the legs absorb the rest. Also why a body never bounces: it
 		# is meat with knees, not rubber.
 		a.fall.absorb_landing(0.0)
+	# The crouch is also the gather: the same state the carries sink under
+	# rounds the back over the loins, expressed by the Z channel through the
+	# rig's arch profile.
+	a.arch = crouch
 	footwork.tick(delta, creature, impetus.velocity, lean, crouch,
 		creature.speed_norm, a.fall.is_airborne())
 

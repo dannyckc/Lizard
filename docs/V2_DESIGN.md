@@ -85,6 +85,20 @@ Two things had to be added that the original sketch did not have, and both are l
 
 Gate: `tests/TippingProbe.gd` (§11.2, below). Not taken: full 3D constraint solving, any second gravity or second integrator, and any change to the plan solver, the gait math, the census or combat addressing.
 
+#### 4.1b The rig — anatomy as a layer, not a solver (2026-08-15)
+
+The second complaint the revisit clause anticipated was the skeleton itself: the graph had explicit points and rigid sticks, but no *joints* — a live limb was three bones folded by free FABRIK between a socket and a foot (no angular limits at all, a seeded pole its only anatomy, and a left leg standing unlike the right because FABRIK keeps history), the spine's cones were one authored number graded by stick radius (so the thin tail folded further, but nothing knew where a back actually bends), the scapula did not exist, and the body's heel was one scalar over the whole animal.
+
+The answer keeps the bargain of 4.1a: **anatomy is a layer over the same solver, not a new solver.** `rig/Rig.gd` is the erect-quadrupedal class's anatomy — cat-referenced, literature-cited, every number tagged FACT or APPROX — consulted at three seams and nowhere else:
+
+- **`axial_limits`** replaces the radius grading: per-station lateral cones by spinal region (lumbosacral largest, cranial thorax stiffest, tail limbering toward its tip, the atlanto-axial region the neck's biggest mover), scaled by the chains' authored scalars so `BodySpec` stays the single authoring seam. Sweep totals are held within a few percent of the tuned build, so the turn and gaze behaviours never noticed.
+- **`solve_limb`** replaces the limb FABRIK: a closed-form solve in the limb's own vertical plane — deterministic and left/right symmetric, digitigrade by the authored pastern angles, elbow/stifle placed on their own anatomical side (a property of the joint, not a seed), and stopped at goniometric range-of-motion tables. A planted toe is exact (support is not negotiable); full stretch is the extension *stop*, never a straight rod; beyond total reach the chain arrives short and the tear-off owns the honesty. The elbow and stifle stand a little out of the sagittal plane (the bow), with in-plane lengths pre-shrunk so bone lengths stay exact in 3D.
+- **Expression constants** for the Z channel: the scapular glide (`socket_of` — no clavicle, the glenoid follows the working foot fore-aft; `girdle_of` stays the gait's unmoved datum), the sagittal arch profile (the crouch rounds the back over the loins, girdles pinned at what the legs deliver), and the head-righting grade (`node_roll` — the neck carries the head back toward level while the trunk heels; `Contour` turns each ring by its own station's heel).
+
+One transition also became physical: at `collapse`, a leg's height under its socket flops into ventral plan reach, scaled by the heel — before this, the tumble flattened Z wholesale and the length projections re-invented the missing reach in whatever direction the crumpled pose leaned, which could unfold a leg dorsally out of a body lying on its flank.
+
+Gate: `tests/RigProbe.gd` (census named, symmetry, ROM under load, planted exactness, scapula alive and datum-true, righting, gather) and `tests/RigShot.gd` (front/side/plan views of the skeleton standing, striding and gathering). Not taken: per-vertebra stations, a second census, joint *dynamics* (the rig bounds poses; the motion layer still asks for them), and pitch/heave (still Keel's future phase).
+
 ### 4.2 The graph for the cat reference
 
 One rooted graph, six chains. Node counts are **functional stations, not vertebrae** — see 4.3.

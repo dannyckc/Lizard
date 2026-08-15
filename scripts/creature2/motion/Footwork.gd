@@ -493,11 +493,13 @@ func _measure(creature: Creature2) -> void:
 		reach.press = (fore_pair if fore else hind_pair) / total
 
 
-## Where the foot's socket is on the plan — the armature's own answer, not a
-## second copy of the arithmetic, so a heeled body's shortened plan offset is
-## here the moment it is there.
+## Where the foot's girdle datum is on the plan — the armature's own answer,
+## not a second copy of the arithmetic, so a heeled body's shortened plan
+## offset is here the moment it is there. The *bare* girdle, deliberately:
+## the scapular glide follows the working foot, and measuring homes against a
+## socket that chases its own foot would slacken every stride trigger.
 func _socket(a: Armature, f: Foot) -> Vector2:
-	var seat: Vector3 = a.socket_of(f.limb)
+	var seat: Vector3 = a.girdle_of(f.limb)
 	return Vector2(seat.x, seat.y)
 
 

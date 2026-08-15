@@ -94,6 +94,23 @@ class ChainSpec extends RefCounted:
 @export var fore_girdle_hold: float = 0.55
 @export var hind_girdle_hold: float = 1.0
 
+# The rig's own anatomy knobs — consumed by Rig, the anatomy layer. The cat's
+# scapula is ~6–7 cm of blade (about 10–11 px on this body's 1.59 px/cm
+# ruler); it has no bony joint to the trunk, and Rig expresses it as a
+# fore-aft glide of the shoulder socket. The pastern angles are how steeply a
+# digitigrade paw stands off the ground at rest — the fore paw a little
+# flatter than the hind (skeletal mounts; approximation, not goniometry). The
+# bows are how far the elbow and stifle stand out of the limb's own sagittal
+# plane, px — what gives the front view its width.
+@export var scapula_len: float = 11.0
+@export var fore_pastern_deg: float = 62.0
+@export var hind_pastern_deg: float = 68.0
+@export var fore_bow: float = 1.2
+@export var hind_bow: float = 0.9
+## How much of the body's heel the neck rights the head away from, 0..1 —
+## graded from the withers to the skull and capped by Rig.HEAD_RIGHT_MAX.
+@export var head_righting: float = 0.65
+
 # --------------------------------------------------------------- posture ----
 # How the limbs are carried, and what the joints between their bones do. The
 # angle is the trait and every length is a projection of it (§7.5, and the v1

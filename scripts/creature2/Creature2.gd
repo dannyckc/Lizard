@@ -201,6 +201,9 @@ func _physics_process(delta: float) -> void:
 
 	var airborne: bool = armature.fall.is_airborne()
 	attitude.tick(delta, speed_norm, command.sprint, airborne)
+	# The rig reads its stand preferences off the posture actually being
+	# carried, so a blending stance folds the limbs the way it holds them.
+	armature.rig.carriage = attitude.active
 
 	# Where the animal is looking, before the mover reads it: the bearing the
 	# steering leads on and the bearing the neck is swept to have to be the same

@@ -38,14 +38,6 @@ extends RefCounted
 ## and forth forever and the residue ratchets the body across the world.
 const REST_EPSILON: float = 0.005
 
-## Section grading of the bend limits, from Spine: a vertebra's grip goes with
-## the section it is cut from, so a joint at the thin end of a taper folds
-## LIMBER_BEND times further than the stoutest station's limit, and no station
-## may count as less than MIN_SECTION of the stoutest or the tip has no limit
-## holding it at all.
-const LIMBER_BEND: float = 1.5
-const MIN_SECTION: float = 0.06
-
 ## Inertia the free chain keeps between ticks when nothing is driving the
 ## body — ground friction as heavy damping, from v1's dead solve.
 const RAGDOLL_DAMPING: float = 0.5
@@ -71,10 +63,6 @@ const DROOP_MIN_WIDTH: float = 1.5
 const DEAD_HOLD: float = 0.05
 const CARRIAGE: float = 0.45
 
-## FABRIK settings for placed limbs, from v1.
-const FABRIK_ITERATIONS: int = 8
-const FABRIK_TOLERANCE: float = 0.05
-
 
 ## One chain of the graph. Node and stick entries are indices into the flat
 ## body arrays; `nodes` is root-first and `sticks` attach-first, so stick j
@@ -92,14 +80,11 @@ class Chain extends RefCounted:
 	var foot_lead: float = 0.0
 	## The three bone lengths of a limb (upper, lower, paw).
 	var bones: PackedFloat32Array = PackedFloat32Array()
-	## A limb's persistent sagittal solution (x along the body axis from the
-	## socket, y absolute height). Kept between ticks because FABRIK stays on
-	## whichever side of the root→target axis it starts on — this IS the pole.
+	## A limb's sagittal solution (x along the solve plane from the socket, y
+	## absolute height) — the rig's constrained solve, re-derived every tick.
+	## Kept on the chain because the slack readouts and the motion HUD read
+	## the limb in its own plane, where a columnar leg is not a dot.
 	var sag: PackedVector2Array = PackedVector2Array()
-	## Seed bend direction per interior joint, used to re-pole a limb that has
-	## gone collinear (after a drop straightens it): fore elbows point back,
-	## hind knees point forward, and a straight chain has forgotten which.
-	var pole: PackedFloat32Array = PackedFloat32Array()
 	## The plan direction the limb's own solve plane runs along — socket toward
 	## foot, kept between ticks so a foot arriving directly beneath its socket
 	## does not lose the plane it was being solved in.
@@ -178,6 +163,25 @@ var _axial_at: PackedInt32Array = PackedInt32Array()
 
 var chains: Dictionary = {}
 var limbs: Array[Chain] = []
+
+## The anatomy layer: every joint named and bounded, the spine's regional
+## cones, the constrained limb solve, the scapular glide. Built with the
+## graph; its `carriage` is re-pointed at the active posture by the creature
+## each tick (a bare armature keeps the rest posture it was built in).
+var rig: Rig
+
+## How gathered the back is carried, 0..1 — the crouch, written by the mover
+## on the same terms as `roll`: assigned, never integrated. The Z channel
+## expresses it as the rig's sagittal arch over the lumbar run.
+var arch: float = 0.0
+
+## Per-node heel, radians — the body's roll with the neck's head-righting
+## graded in. Expression only (Contour reads it for the ring frames); the
+## solver never sees it, and a collapsed body abandons the righting.
+var node_roll: PackedFloat32Array = PackedFloat32Array()
+
+## Cached arch shares per trunk node, from the rig at build.
+var _arch_shares: PackedFloat32Array = PackedFloat32Array()
 
 ## The body datum's height above the local surface — 0 standing on it. The
 ## world's one integrator; a drop, a collapse and a leap all live here.
@@ -352,6 +356,12 @@ func build(p_spec: BodySpec, at: Vector2, heading: float) -> void:
 	flesh_r.fill(0.0)
 
 	stick_plan_rest = stick_plan.duplicate()
+	rig = Rig.new()
+	rig.build(spec)
+	rig.name_joints(self)
+	_arch_shares = rig.arch_profile(_trunk.nodes.size())
+	node_roll.resize(total_nodes)
+	node_roll.fill(0.0)
 	_build_axial()
 	fore_stance = spec.stance_height(true)
 	hind_stance = spec.stance_height(false)
@@ -376,10 +386,13 @@ func build(p_spec: BodySpec, at: Vector2, heading: float) -> void:
 	_layout(at, heading)
 
 
-## The axial solve order and its graded bend limits. The junction vertices
-## (pelvis, withers) take the stricter of the two chains meeting there; every
-## limit is then graded by the section it is cut from, so the tail folds
-## further out where it is thin and nobody authored that.
+## The axial solve order and its per-vertex bend limits. The limits are the
+## rig's regional anatomy — lumbar folds, cranial thorax does not, the tail
+## limbers toward its tip — scaled by the chains' authored scalars; junction
+## vertices (pelvis, withers) take the stricter of the two chains meeting
+## there. The radius-graded uniform cone this replaced graded by section
+## alone, which had the thin tail folding further but knew nothing of where a
+## back actually bends.
 func _build_axial() -> void:
 	axial.clear()
 	axial_stick.clear()
@@ -397,30 +410,7 @@ func _build_axial() -> void:
 	axial_stick.append_array(_trunk.sticks)
 	axial_stick.append_array(_neck.sticks)
 
-	# Base cone limit per stick = its owning chain's authored limit; a
-	# vertex's base = the stricter of its two sticks. Uniform per chain today;
-	# per-joint authoring can refine this without touching the solver.
-	var stick_base: Dictionary = {}
-	var specs: Array[BodySpec.ChainSpec] = spec.chains()
-	for c in specs:
-		if c.limb:
-			continue
-		var chain: Chain = chains[c.name]
-		var base: float = c.bend_deg[0] if not c.bend_deg.is_empty() else 30.0
-		for s in chain.sticks:
-			stick_base[s] = deg_to_rad(base)
-
-	var stoutest: float = 0.0
-	for k in axial_stick.size():
-		stoutest = maxf(stoutest, stick_radius[axial_stick[k]])
-	for k in range(axial_stick.size() - 1):
-		var incoming: int = axial_stick[k]
-		var outgoing: int = axial_stick[k + 1]
-		var base: float = minf(stick_base[incoming], stick_base[outgoing])
-		var section: float = (stick_radius[incoming] + stick_radius[outgoing]) \
-			* 0.5 / maxf(stoutest, 0.001)
-		var hold: float = clampf(section * section * section, MIN_SECTION, 1.0)
-		axial_bend.append(base * lerpf(LIMBER_BEND, 1.0, hold))
+	axial_bend = rig.axial_limits(self)
 
 	_axial_at.resize(pos.size())
 	_axial_at.fill(-1)
@@ -458,6 +448,7 @@ func _layout(at: Vector2, heading: float) -> void:
 	pinned.fill(0)
 	roll = 0.0
 	_rolled = 0.0
+	arch = 0.0
 	fore_carry = fore_stance
 	hind_carry = hind_stance
 	head_reach_z = NAN
@@ -472,20 +463,13 @@ func _layout(at: Vector2, heading: float) -> void:
 	_compute_frames()
 	_solve_heights(0.0)
 
-	# Limbs: seed the sagittal pose bent the way that limb bends — elbows
-	# back, knees forward — then let the placement solve stand them.
+	# Limbs: the rig's solve is deterministic — no seed to plant, the fold
+	# directions are properties of the joints themselves.
 	for limb in limbs:
-		var fore: bool = limb.parent_node != _trunk.nodes[0]
 		limb.foot_driven = false
 		limb.plane = dir
-		limb.pole = PackedFloat32Array([-1.0, 1.0] if fore else [1.0, -1.0])
 		limb.sag = PackedVector2Array()
 		limb.sag.resize(4)
-		var socket_z: float = pos[limb.parent_node].z
-		limb.sag[0] = Vector2(0.0, socket_z)
-		limb.sag[1] = Vector2(limb.pole[0] * 3.0, socket_z * 0.6)
-		limb.sag[2] = Vector2(limb.pole[1] * 3.0, socket_z * 0.25)
-		limb.sag[3] = Vector2(limb.foot_lead, 0.0)
 	_place_limbs(0.0)
 	_compute_frames()
 
@@ -866,6 +850,7 @@ func _solve_heights(surface: float) -> void:
 		# the whole of the sag the carry line implies.
 		_neck.tip_sag = 0.0
 		_tail.tip_sag = 0.0
+		_grade_roll()
 		return
 
 	# What the legs deliver, which is a measurement of the feet once there is a
@@ -884,14 +869,41 @@ func _solve_heights(surface: float) -> void:
 	var pelvis_z: float = clearance + hind_carry * heel + hind_half * over
 	var withers_z: float = clearance + fore_carry * heel + fore_half * over
 	var n_trunk: int = _trunk.nodes.size()
+	# The gather: a crouched back rounds over the loins. The rig's arch
+	# profile lifts the interior stations off the straight carry line — most
+	# over the lumbar run, nothing at the girdles, which stand at exactly
+	# what the legs deliver.
+	var rise: float = clampf(arch, 0.0, 1.0) * Rig.ARCH_RISE * spec.trunk_length
 	for j in n_trunk:
 		var z: float = lerpf(pelvis_z, withers_z, float(j) / float(n_trunk - 1))
+		if rise > 0.0 and j < _arch_shares.size():
+			z += rise * _arch_shares[j]
 		var i: int = _trunk.nodes[j]
 		pos[i] = Vector3(pos[i].x, pos[i].y, z)
 		prev[i] = Vector3(prev[i].x, prev[i].y, z)
 	var tone: float = 1.0 - CARRIAGE
 	_droop_chain(_neck, withers_z, surface, tone, head_reach_z)
 	_droop_chain(_tail, pelvis_z, surface, tone)
+	_grade_roll()
+
+
+## The per-node heel: the trunk, tail and limbs carry the body's roll; the
+## neck rights the head back toward level, graded from the withers to the
+## skull and capped — a cat heeled right over does not hold a level head, and
+## a dead one does not right it at all. Expression only: Contour reads this
+## for its ring frames, the solver never sees it.
+func _grade_roll() -> void:
+	if node_roll.size() != pos.size():
+		node_roll.resize(pos.size())
+	node_roll.fill(roll)
+	if collapsed or _neck == null:
+		return
+	var m: int = _neck.nodes.size()
+	for j in m:
+		var t: float = float(j) / float(maxi(m - 1, 1))
+		var counter: float = clampf(roll * spec.head_righting * t,
+			-Rig.HEAD_RIGHT_MAX, Rig.HEAD_RIGHT_MAX)
+		node_roll[_neck.nodes[j]] = roll - counter
 
 
 ## The droop walk, ported from Droop.update: one walk from the support to the
@@ -955,25 +967,50 @@ func socket_of(limb: Chain) -> Vector3:
 	var p: int = limb.parent_node
 	var out: float = limb.side * stick_bone[limb.sticks[0]]
 	var plan: Vector2 = _p2(p) + perp[p] * (out * cos(roll))
+	if rig != null and limb.foot_driven and not collapsed \
+			and p != _trunk.nodes[0]:
+		# The scapular glide: the cat has no clavicle, so the glenoid follows
+		# the working foot fore-aft by the rig's share — the scapula acting as
+		# the first segment of the forelimb. Zero at the rest lead by
+		# construction, so the stance and the census datum never move.
+		var foot := Vector2(limb.foot_target.x, limb.foot_target.y)
+		var along: float = (foot - plan).dot(fwd[p]) - limb.foot_lead
+		plan += fwd[p] * rig.scapula_shift(along)
+	return Vector3(plan.x, plan.y, pos[p].z - out * sin(roll))
+
+
+## The bare girdle datum — the socket with the scapular glide left out. What
+## the gait measures homes and excursions against: the scapula extends the
+## limb's working reach without moving the stride's own datum, which is what
+## keeps the step timing a property of the legs rather than of the shoulder
+## chasing its own foot.
+func girdle_of(limb: Chain) -> Vector3:
+	var p: int = limb.parent_node
+	var out: float = limb.side * stick_bone[limb.sticks[0]]
+	var plan: Vector2 = _p2(p) + perp[p] * (out * cos(roll))
 	return Vector3(plan.x, plan.y, pos[p].z - out * sin(roll))
 
 
 ## Places every limb: the socket rides its girdle, the foot reaches for the
-## ground, and FABRIK folds the bones between the two in the limb's sagittal
-## plane (x along the body axis from the socket, y absolute height). Bone
-## lengths are exact in 3D by construction: every joint of one limb shares
-## the same lateral offset, so sagittal distances are world distances.
+## ground, and the rig's constrained solve folds the bones between the two in
+## the limb's own vertical plane (x along the socket→foot run, y absolute
+## height) — deterministic, symmetric, digitigrade, and stopped at each
+## joint's anatomical range. The elbow and stifle stand a little out of that
+## plane (the lateral bow); the in-plane lengths are pre-shrunk by exactly
+## the bow's cost, so bone lengths stay exact in 3D.
 ## A walking limb is placed, not integrated — prev mirrors pos so a mode
 ## switch hands the ragdoll no phantom velocity.
 func _place_limbs(surface: float) -> void:
 	for limb in limbs:
 		var p: int = limb.parent_node
+		var fore: bool = p != _trunk.nodes[0]
 		var seat: Vector3 = socket_of(limb)
 		var socket_plan := Vector2(seat.x, seat.y)
 		var socket_z: float = seat.z
 		var target_plan: Vector2 = socket_plan + fwd[p] * limb.foot_lead
 		var target_z: float = surface
 		var axis: Vector2 = fwd[p]
+		var standing: bool = true
 		if limb.foot_driven:
 			# The gait owns the foot and the corner this leg is holding up. The solve
 			# plane is the vertical one containing the socket and the foot — which is
@@ -983,38 +1020,32 @@ func _place_limbs(surface: float) -> void:
 			socket_z = limb.socket_rise
 			target_plan = Vector2(limb.foot_target.x, limb.foot_target.y)
 			target_z = limb.foot_target.z
+			standing = limb.grounded
 			var run: Vector2 = target_plan - socket_plan
 			axis = run.normalized() if run.length_squared() > 0.000001 else limb.plane
 		limb.plane = axis
-		limb.sag[0] = Vector2(0.0, socket_z)
+		var lead: float = signf(fwd[p].dot(axis))
+		var bow: float = spec.fore_bow if fore else spec.hind_bow
+		var offs := PackedFloat32Array([0.0, bow, bow * 0.4, 0.0])
+		var flat := PackedFloat32Array()
+		flat.resize(3)
+		for j in 3:
+			var step_out: float = offs[j + 1] - offs[j]
+			flat[j] = sqrt(maxf(limb.bones[j] * limb.bones[j]
+				- step_out * step_out, 0.01))
 		var target := Vector2((target_plan - socket_plan).dot(axis), target_z)
-		_repole(limb, signf(fwd[p].dot(axis)))
-		limb.sag = _fabrik(limb.sag, limb.bones, limb.sag[0], target,
-			FABRIK_ITERATIONS, FABRIK_TOLERANCE)
+		limb.sag = rig.solve_limb(flat, socket_z, target, lead, fore, standing)
+		# Which way in plan is outboard of this limb's own plane.
+		var n_plan := Vector2(-axis.y, axis.x)
+		var out_sign: float = signf(n_plan.dot(perp[p]) * limb.side)
+		if out_sign == 0.0:
+			out_sign = 1.0
 		for j in limb.nodes.size():
 			var i: int = limb.nodes[j]
-			var plan: Vector2 = socket_plan + axis * limb.sag[j].x
+			var plan: Vector2 = socket_plan + axis * limb.sag[j].x \
+				+ n_plan * (out_sign * offs[j])
 			pos[i] = Vector3(plan.x, plan.y, limb.sag[j].y)
 			prev[i] = pos[i]
-
-
-## Re-seeds a limb's bend direction if it has gone collinear — a leg straightened
-## by a drop has forgotten which way its elbow points, and FABRIK keeps whatever
-## side it starts on. `lead` is which way the body's own forward axis points in the
-## solve plane, so an elbow folds backward along the animal however the foot has
-## been placed.
-func _repole(limb: Chain, lead: float) -> void:
-	var root: Vector2 = limb.sag[0]
-	var tip: Vector2 = limb.sag[3]
-	var axis: Vector2 = tip - root
-	if axis.length_squared() < 0.000001:
-		return
-	var n: Vector2 = Vector2(-axis.y, axis.x).normalized()
-	var sense: float = lead if absf(lead) > 0.001 else 1.0
-	for j in [1, 2]:
-		var off: float = (limb.sag[j] - root).dot(n)
-		if absf(off) < 0.25:
-			limb.sag[j] += n * (limb.pole[j - 1] * sense * 1.5)
 
 
 ## One tick of every limb nothing is holding out — the ported Ragdoll step.
@@ -1091,6 +1122,22 @@ func collapse() -> void:
 	fall.start(datum)
 	for limb in limbs:
 		limb.foot_driven = false
+		# A leg going limp under a body going over flops toward the low side:
+		# its height under the socket becomes ventral plan reach as it rotates
+		# about the socket it hangs from. The tumble flattens Z wholesale, so
+		# without this the standing leg's vertical extent simply vanished and
+		# the length projections re-invented it in whatever direction the
+		# crumpled pose happened to lean — legs unfolding dorsally out of a
+		# body lying on its flank. Scaled by the heel: a belly-flop death has
+		# no low side and its legs splay where they stood.
+		var flop: float = sin(roll)
+		var top: float = pos[limb.nodes[0]].z
+		var p_i: int = limb.parent_node
+		for j in range(1, limb.nodes.size()):
+			var i: int = limb.nodes[j]
+			var hung: float = maxf(top - pos[i].z, 0.0)
+			var shift: Vector2 = -perp[p_i] * (flop * hung)
+			pos[i] = Vector3(pos[i].x + shift.x, pos[i].y + shift.y, pos[i].z)
 		for i in limb.nodes:
 			prev[i] = pos[i]
 
@@ -1370,12 +1417,12 @@ func plan(i: int) -> Vector2:
 ## toe — so a reader can ask any node and only get an answer where there is one.
 ##
 ## The two limits are different things and both are real. An axial vertex carries
-## the graded cone the build gave it (`axial_bend`), and what is left is how much
-## further it may turn. A placed limb has no cone at all — the bones are folded by
-## FABRIK between a socket and a foot — so the only cap it can reach is being
-## *straight*, and what is left there is the fold still in the joint. A leg
-## solving at full stretch is a leg with nothing left to give, which is exactly
-## where stiffness comes from and exactly what a reader wants to see per joint.
+## the regional cone the rig gave it (`axial_bend`), and what is left is how much
+## further it may turn. A placed limb's joints carry the rig's anatomical stops,
+## and what is left is the room to the *nearer* stop — a leg solved out to its
+## extension stop has nothing left to give however far it still is from
+## geometric straight, which is exactly where stiffness comes from and exactly
+## what a reader wants to see per joint.
 func joint_slack(i: int) -> float:
 	if i < 0 or i >= pos.size():
 		return INF
@@ -1394,15 +1441,20 @@ func joint_slack(i: int) -> float:
 	return INF
 
 
-## The fold left in one interior joint of a placed limb, radians — measured in
-## the limb's own sagittal solution, because that is where the leg was actually
-## folded and the plan projection of a columnar leg is a dot.
+## The room left in one interior joint of a placed limb before its nearer
+## anatomical stop, radians — measured in the limb's own sagittal solution,
+## because that is where the leg was actually folded and the plan projection
+## of a columnar leg is a dot.
 func limb_slack(limb: Chain, j: int) -> float:
 	var incoming: Vector2 = limb.sag[j] - limb.sag[j - 1]
 	var outgoing: Vector2 = limb.sag[j + 1] - limb.sag[j]
 	if incoming.length_squared() < 0.000001 or outgoing.length_squared() < 0.000001:
 		return INF
-	return absf(wrapf(outgoing.angle() - incoming.angle(), -PI, PI))
+	var interior: float = PI - absf(wrapf(outgoing.angle() - incoming.angle(),
+		-PI, PI))
+	var fore: bool = limb.parent_node != _trunk.nodes[0]
+	var rom: Vector2 = rig.mid_rom(fore) if j == 1 else rig.low_rom(fore)
+	return maxf(minf(interior - rom.x, rom.y - interior), 0.0)
 
 
 ## How many joints are pressed against a limit — the count a reader quotes as
@@ -1530,43 +1582,6 @@ static func _fold(a: Vector2, b: Vector2, c: Vector2, max_bend: float) -> Vector
 		return c
 	var clamped: float = clampf(delta, -max_bend, max_bend)
 	return b + outgoing.rotated(clamped - delta)
-
-
-## FABRIK, ported verbatim: the same circle projection applied alternately
-## from each end. The caller seeds the middle joints — the seed is the pole.
-static func _fabrik(joints: PackedVector2Array, lengths: PackedFloat32Array,
-		root: Vector2, target: Vector2, iterations: int = 6,
-		tolerance: float = 0.05) -> PackedVector2Array:
-	var out: PackedVector2Array = joints.duplicate()
-	var n: int = out.size()
-	if n < 2 or lengths.size() != n - 1:
-		return out
-
-	var total: float = 0.0
-	for l in lengths:
-		total += l
-
-	# Unreachable: lay the chain out straight toward it — a clean "fully
-	# extended" pose instead of an oscillating loop.
-	if root.distance_to(target) >= total:
-		var dir: Vector2 = target - root
-		dir = dir.normalized() if dir.length_squared() > 0.000001 else Vector2.RIGHT
-		out[0] = root
-		for i in range(1, n):
-			out[i] = out[i - 1] + dir * lengths[i - 1]
-		return out
-
-	for _it in range(maxi(iterations, 1)):
-		out[n - 1] = target
-		for i in range(n - 2, -1, -1):
-			out[i] = _project_to_circle(out[i], out[i + 1], lengths[i])
-		out[0] = root
-		for i in range(1, n):
-			out[i] = _project_to_circle(out[i], out[i - 1], lengths[i - 1])
-		if out[n - 1].distance_to(target) < tolerance:
-			break
-
-	return out
 
 
 # ------------------------------------------------------------------ helpers ----
