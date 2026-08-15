@@ -79,7 +79,16 @@ const TWITCH_SPAN: float = 0.8
 ## A swing is never over before or after these, seconds — the floor is the
 ## fast-twitch law's old truth (limbs stop blurring), the ceiling is a limp
 ## being a limp rather than a step.
+##
+## The floor is not one number for every body: a leg is a pendulum, and a
+## pendulum's time goes with the root of its length — so the floor is quoted at
+## the leg it was tuned on (the reference cat's hind, `SWING_MIN_LEG`) and
+## scaled by √(leg/datum) for every limb of every body. A draught animal's
+## swing floor is slower because its legs are longer, and nobody authored it;
+## the reference hind comes out at the tuned number by construction and the
+## shorter fore a shade under it, which is the pendulum being honest.
 const SWING_MIN: float = 0.14
+const SWING_MIN_LEG: float = 47.0
 const SWING_MAX: float = 0.50
 
 ## Step clearance at a walk, px, scaled by the stance's own step-height
@@ -93,6 +102,20 @@ const RETARGET: float = 10.0
 
 ## Share of the excursion a rescue step spends reaching toward the spill.
 const RESCUE_REACH: float = 0.9
+
+## Share of a limb's remaining *plan* capacity — what its true anatomical
+## reach (`Rig.reach_share` of its bones) leaves across the ground once the
+## socket's own height is spent — past which the leg itself asks to step,
+## whatever the drift says. Quoted on the plan and not on the bare span
+## because a standing leg is mostly vertical: the fore leg spends nine tenths
+## of its reach just standing, and a span-quoted ask would fire from the
+## stance itself. The ramp ends at the tear-off, and it starts early enough
+## that a *standing* body whose whole support is creeping toward the edge —
+## every anchor stretching in step, because the trunk slides as one piece —
+## can renew its four legs one at a time before the anatomy binds: a walk's
+## serial queue takes most of a second to turn three legs over, and an ask
+## that fired closer to the tear had all three torn off together instead.
+const STRETCH_ASK: float = 0.90
 
 ## The lateral-sequence seed, per foot in armature order (FL, FR, HL, HR):
 ## how far behind its own rhythm each anchor starts, as a phase. Only read at
@@ -146,6 +169,10 @@ class Foot extends RefCounted:
 	var home: Vector2 = Vector2.ZERO
 	var drift: Vector2 = Vector2.ZERO
 	var torn: bool = false
+	## How much of the limb's remaining plan capacity the anchor is currently
+	## spending, 0..1 — 1.0 is the tear-off. A readout of the tear measurement,
+	## kept because the urgency reads it.
+	var stretch: float = 0.0
 	## A standing balance demand: where the next step must land, or INF for
 	## none. Set by `rescue`, spent by the next lift.
 	var rescue_at: Vector2 = Vector2.INF
@@ -160,6 +187,8 @@ class Span extends RefCounted:
 	var clearance: float = 20.0
 	## Swing speed, px/s.
 	var sweep: float = 200.0
+	## The pendulum floor under this pair's swing, seconds — see SWING_MIN_LEG.
+	var floor_time: float = 0.14
 	## The pair's share of the body's press, per foot.
 	var press: float = 0.25
 
@@ -168,6 +197,16 @@ var feet: Array[Foot] = []
 ## How much press the planted feet have left, 0..1 — Impetus's ground term.
 ## 1.0 standing square and fresh; 0 airborne or with everything trailing.
 var grip: float = 1.0
+
+## How risen the body is, 0..1 — 1 standing, ramped up through a get-up. Scales
+## the carries and the press together, because a body pushing itself up off its
+## chest has folded legs under it and folded legs have little to press with.
+## Written by Travel's recovery; 1 everywhere else, where it is an exact no-op.
+var rise: float = 1.0
+
+## Whether a foot came down out of a stride's own flight this tick — the
+## gallop's landing, for Travel to spend as the absorb. Cleared every tick.
+var stride_landed: bool = false
 
 ## What each girdle's own strip of path is about to rise by, px — the
 ## anticipation `_carry` spends, published because it is the one term of the
@@ -183,6 +222,11 @@ var _hind: Span = Span.new()
 var _fore_ground: float = 0.0
 var _hind_ground: float = 0.0
 
+## The standing hip height of the stance the body is *built* in — the Froude
+## ladder's ruler. The rest stance deliberately (the v1 lesson: a crouch must
+## not inflate the regime), cached at build because it cannot move in life.
+var _rest_hip: float = 30.0
+
 var _outlook: Outlook
 var _rhythm: Rhythm
 
@@ -192,6 +236,9 @@ var _rhythm: Rhythm
 func build(creature: Creature2, outlook: Outlook, rhythm: Rhythm) -> void:
 	_outlook = outlook
 	_rhythm = rhythm
+	_rest_hip = creature.body.stance_height(false)
+	rise = 1.0
+	stride_landed = false
 	feet.clear()
 	var a: Armature = creature.armature
 	var dir: Vector2 = creature.move_dir
@@ -233,15 +280,33 @@ func build(creature: Creature2, outlook: Outlook, rhythm: Rhythm) -> void:
 ## absorb). Order matters and is the loop's: the body has already moved this
 ## tick; the feet are answering it.
 func tick(delta: float, creature: Creature2, velocity: Vector2, lean: Vector2,
-		crouch: float, pace: float, airborne: bool) -> void:
+		crouch: float, pace: float, airborne: bool, bounding: bool = false) -> void:
 	var a: Armature = creature.armature
 	_measure(creature)
+	stride_landed = false
 
 	for f in feet:
 		f.since += delta
 
 	if airborne:
-		_float_feet(creature, velocity)
+		# Two kinds of air. A leap gathers the legs toward the landing
+		# (`_float_feet`); a stride's own flight is nothing of the kind — the
+		# swings that were already going keep going, aimed where the gait aimed
+		# them, and the first to finish catches the body. That is the gallop's
+		# suspension ending on a forefoot rather than on all fours.
+		if bounding:
+			for f in feet:
+				if not f.swinging:
+					continue
+				f.swing += delta
+				var fresh: Vector3 = _predict(a, f, velocity, lean,
+					maxf(f.swing_time - f.swing, 0.0))
+				f.land = f.land.lerp(fresh, 1.0 - exp(-RETARGET * delta))
+				if f.swing >= f.swing_time:
+					_plant(f)
+					stride_landed = true
+		else:
+			_float_feet(creature, velocity)
 		grip = 0.0
 		_write(creature)
 		_carry(creature, crouch, velocity, true)
@@ -263,15 +328,36 @@ func tick(delta: float, creature: Creature2, velocity: Vector2, lean: Vector2,
 			# to anchor has pulled the foot off its footing — the anchor is no
 			# longer support, whatever the foot would prefer, and saying so is
 			# what lets the review see a body going over an edge as one losing
-			# its feet rather than as one mysteriously still standing.
+			# its feet rather than as one mysteriously still standing. The
+			# span that counts is the rig's, not the ruler's: the joints stop
+			# a few percent short of geometric straight, and past *that* the
+			# leg is no longer delivering the anchor however the bones add up.
 			var seat: Vector3 = a.socket_of(f.limb)
 			var span: Vector2 = f.anchor - Vector2(seat.x, seat.y)
 			var rise: float = seat.z - f.anchor_z
 			var held: float = sqrt(span.length_squared() + rise * rise)
-			if held > creature.body.limb_length(f.fore) * 1.05:
+			var reach_len: float = creature.body.limb_length(f.fore) \
+				* a.rig.reach_share(f.fore)
+			if held > reach_len:
 				f.torn = true
 				f.urgency = Rhythm.DESPERATE
 				_lift(a, f, velocity, lean, pace)
+			elif f.limb.cramped:
+				# The rig ran out of joints holding this anchor last tick —
+				# every stop taken and the pose still short (`Rig.cramped`).
+				# The same emergency a torn anchor is, told one seam earlier,
+				# and it may not wait its turn: the alternative is a paw
+				# standing outside its own anatomy.
+				f.torn = true
+				f.urgency = Rhythm.DESPERATE
+				_lift(a, f, velocity, lean, pace)
+			else:
+				# What the anatomy leaves across the ground from this socket
+				# height — the plan room the anchor is spending. The vertical
+				# came off the reach first, because it always does.
+				var plan_max: float = sqrt(maxf(
+					reach_len * reach_len - rise * rise, 1.0))
+				f.stretch = span.length() / plan_max
 		if f.swinging:
 			f.urgency = 0.0
 			f.drift = Vector2.ZERO
@@ -288,6 +374,18 @@ func tick(delta: float, creature: Creature2, velocity: Vector2, lean: Vector2,
 				var lat: float = drift.dot(Vector2(-travel_dir.y, travel_dir.x))
 				need = Vector2(along, lat).length()
 			f.urgency = need / maxf(TRIGGER * reach.excursion, 0.001)
+			# ...and the anatomy has its own voice: the drift is measured to the
+			# foot's *preferred* spot, and a lean can park the preference right
+			# next to the anchor while the leg itself is quietly running out of
+			# joint — a standing body being pressed off its feet by nothing but
+			# its own sway. So a leg near the edge of its plan capacity asks on
+			# that account, ramping to undeniable just before the tear-off
+			# would fire, which is what lets the feet reorganise one at a time
+			# instead of three of them being torn together the moment the
+			# stretch arrives.
+			if f.stretch > STRETCH_ASK:
+				f.urgency = maxf(f.urgency, 1.0 + (f.stretch - STRETCH_ASK)
+					/ maxf(1.0 - STRETCH_ASK, 0.001) * (Rhythm.DESPERATE - 1.0))
 			if absf(f.anchor_z - f.stood_z) > GROUND_SHIFT:
 				# The world moved under the anchor — the ground gone from under a
 				# foot (or risen through it) is a step nothing may deny.
@@ -298,9 +396,16 @@ func tick(delta: float, creature: Creature2, velocity: Vector2, lean: Vector2,
 		swinging.append(1 if f.swinging else 0)
 		since.append(f.since)
 
-	# The gait: who steps, in what company.
+	# The gait: who steps, in what company. The regime is the body's own Froude
+	# number off the speed it is actually travelling at — a turning gallop is
+	# still a gallop, and quoting only the forward share was what starved a
+	# hard-turning sprint of the seats its own legs needed. The couplings the
+	# policy weighs are anatomy: the spec's trotting coupling, each girdle's
+	# attach hold, the spine's freedom to bound.
 	var granted: PackedInt32Array = _rhythm.choose(urgency, swinging, since,
-		pace, creature.body.beat_coupling)
+		velocity.length(), _rest_hip, creature.body.beat_coupling,
+		Vector2(creature.body.fore_girdle_hold, creature.body.hind_girdle_hold),
+		creature.body.spine_freedom)
 	for i in granted:
 		_lift(a, feet[i], velocity, lean, pace)
 
@@ -372,11 +477,15 @@ func calm() -> void:
 			f.rescue_at = Vector2.INF
 
 
-## Every swinging foot comes down where it was aimed — what a landing body
-## does with the legs it was holding ready.
-func touchdown() -> void:
+## Every swinging foot far enough through its arc comes down where it was
+## aimed — what a landing body does with the legs it was holding ready. A leap
+## passes 0 (the float gathered every foot toward the landing, and they all
+## arrive with the body); a stride's flight passes a share, so the feet still
+## early in their swings keep swinging and the gallop's landings stay
+## staggered instead of being stamped down four at once.
+func touchdown(min_share: float = 0.0) -> void:
 	for f in feet:
-		if f.swinging:
+		if f.swinging and f.swing >= f.swing_time * min_share:
 			_plant(f)
 
 
@@ -386,6 +495,32 @@ func planted() -> int:
 		if not f.swinging:
 			count += 1
 	return count
+
+
+## Seconds until the first swinging foot arrives — how long a stride's flight
+## has before something catches the body. INF with nothing in the air.
+func first_landing_in() -> float:
+	var least: float = INF
+	for f in feet:
+		if f.swinging:
+			least = minf(least, maxf(f.swing_time - f.swing, 0.0))
+	return least
+
+
+## The mean swing phase of a girdle's pair, 0..1 peaking mid-swing — the
+## gather, as a measurement: how far under the body the pair is being carried.
+## The spine's stride share is driven off this, so the back rounds exactly when
+## the hindquarters are coming under and not on any clock of its own.
+func gather_of(fore: bool) -> float:
+	var sum: float = 0.0
+	var count: int = 0
+	for f in feet:
+		if f.fore != fore:
+			continue
+		count += 1
+		if f.swinging:
+			sum += sin(PI * clampf(f.swing / maxf(f.swing_time, 0.001), 0.0, 1.0))
+	return sum / maxf(float(count), 1.0)
 
 
 # ------------------------------------------------------------- the stages ----
@@ -402,15 +537,15 @@ func _lift(a: Armature, f: Foot, velocity: Vector2, lean: Vector2,
 	# First guess at the swing time from the drift it has to cover; the arc is
 	# re-priced once the landing is known.
 	var guess: float = clampf(f.urgency * TRIGGER * reach.excursion / reach.sweep,
-		SWING_MIN, SWING_MAX)
+		reach.floor_time, SWING_MAX)
 	f.land = _predict(a, f, velocity, lean, guess)
 	var arc: float = Vector2(f.land.x - f.lift.x, f.land.y - f.lift.y).length() \
 		+ absf(f.land.z - f.lift.z)
 	# A quicker beat at pace — the same leg sweeps the same arc harder — but
-	# never under the twitch's own floor: limbs do not blur.
+	# never under the leg's own pendulum floor: limbs do not blur.
 	var haste: float = 1.0 + 0.6 * clampf(pace, 0.0, 1.5)
 	f.swing_time = clampf(arc / maxf(reach.sweep * haste, 1.0),
-		SWING_MIN, SWING_MAX)
+		reach.floor_time, SWING_MAX)
 
 
 ## Where this foot should land: its home carried forward by the body's own
@@ -479,6 +614,14 @@ func _measure(creature: Creature2) -> void:
 	var hind_pair: float = float(c.get(&"hind_girdle", 1.0)) \
 		* carriage.hind.advantage
 	var total: float = maxf(fore_pair + hind_pair, 0.0001)
+	# The engine under the swing: locomotor muscle over body mass, against the
+	# reference cat's own ratio — the same derived number Impetus pushes with,
+	# read at the root because a swing is a force moving a mass and its time
+	# goes with the root of the acceleration. Exactly 1.0 on the default build
+	# (the power datum), so the reference tempo is untouched; a heavy body with
+	# ordinary muscle genuinely swings its legs slower, and a chewed one slows
+	# as its compartments shrink.
+	var engine: float = sqrt(clampf(creature.travel.impetus.power, 0.05, 4.0))
 	for fore in [true, false]:
 		var reach: Span = _fore if fore else _hind
 		var joint: Carriage.Joint = carriage.of(fore)
@@ -489,7 +632,9 @@ func _measure(creature: Creature2) -> void:
 			spec.stance_width,
 			spec.front_foot_bias if fore else spec.rear_foot_bias)
 		reach.sweep = SWING_RATE * leg \
-			* (TWITCH_FLOOR + TWITCH_SPAN * spec.fast_twitch) * joint.gear
+			* (TWITCH_FLOOR + TWITCH_SPAN * spec.fast_twitch) * joint.gear \
+			* engine
+		reach.floor_time = SWING_MIN * sqrt(maxf(leg, 1.0) / SWING_MIN_LEG)
 		reach.press = (fore_pair if fore else hind_pair) / total
 
 
@@ -528,8 +673,10 @@ func _press(creature: Creature2) -> void:
 		sum += reach.press * left * corpus.soundness(f.limb.name) \
 			* creature.vitals.numbness(f.limb.name)
 	# Standing square and fresh, the four feet sum to two pair-shares — that
-	# is the datum grip 1.0 is quoted against.
-	grip = clampf(sum / 2.0, 0.0, 1.0)
+	# is the datum grip 1.0 is quoted against. A body still pushing itself up
+	# presses with folded legs, which is most of why a get-up is a vulnerable
+	# moment rather than a teleport.
+	grip = clampf(sum / 2.0, 0.0, 1.0) * lerpf(0.3, 1.0, clampf(rise, 0.0, 1.0))
 
 
 ## Hands the armature its feet: the world points, and whether each is
@@ -588,7 +735,13 @@ func _carry(creature: Creature2, crouch: float, velocity: Vector2,
 				_hind_ground = ground
 		else:
 			ground = _fore_ground if fore else _hind_ground
-		var carry: float = ground + reach.clearance * (1.0 - 0.4 * clampf(crouch, 0.0, 1.0))
+		# The clearance the pair delivers, sunk by the crouch — and by how far
+		# through a get-up the body is: a rising animal's girdles travel from
+		# chest height to stance height because its legs are unfolding under
+		# it, and `rise` is that unfolding. 1 everywhere outside a get-up.
+		var carry: float = ground + reach.clearance \
+			* (1.0 - 0.4 * clampf(crouch, 0.0, 1.0)) \
+			* lerpf(0.15, 1.0, clampf(rise, 0.0, 1.0))
 		var coming: float = 0.0
 		if not airborne:
 			# The anticipation, measured from the girdle itself: what rises on

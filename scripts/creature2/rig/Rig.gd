@@ -143,6 +143,11 @@ class JointSpec extends RefCounted:
 
 
 var spec: BodySpec
+## Whether the last standing solve ran out of joints — the stop-correction
+## could not bring the low joint legal inside the middle joint's own annulus.
+## The anatomy's way of saying the planted toe can no longer be held: read by
+## the armature into the limb, and spent by the gait as the emergency it is.
+var cramped: bool = false
 ## The active posture — rest at build, re-pointed by the creature every tick
 ## (Attitude owns the blend). Read for the stand preferences, never written.
 var carriage: Carriage
@@ -294,6 +299,7 @@ func scapula_shift(foot_along: float) -> float:
 ## is what owns that honesty.
 func solve_limb(bones: PackedFloat32Array, socket_z: float, target: Vector2,
 		lead: float, fore: bool, standing: bool) -> PackedVector2Array:
+	cramped = false
 	var u: float = bones[0]
 	var l: float = bones[1]
 	var p: float = bones[2]
@@ -350,18 +356,72 @@ func solve_limb(bones: PackedFloat32Array, socket_z: float, target: Vector2,
 		-1.0, 1.0))
 	var mid: Vector2 = s + (wrist - s).normalized().rotated(side * gamma) * u
 
-	# The lower joint's own stop, checked on the solved pose. A planted paw is
-	# left alone unless the pose is illegal; a swinging one is folded to its
-	# nearest stop by rotating the paw about the wrist — the toe is in the air
-	# and may move.
+	# The lower joint's own stop, checked on the solved pose and held for every
+	# paw — differently per case, because what may move differs. A swinging paw
+	# folds to its nearest stop about the wrist: the toe is in the air. A
+	# planted paw's toe is support and may not be moved from here — what gives
+	# instead is the *pastern preference*: the hock lifts, the wrist rotating
+	# about the planted toe until the joint is back inside its own stop, spent
+	# against the middle joint's spare fold. That is what a real trailing leg
+	# does — the heel comes up long before the toe lets go — and it is why a
+	# gait that holds a foot one beat too long gets a lifted hock rather than a
+	# paw laid flat past its own tarsus. If the middle joint has no room left
+	# either, the pose stands as near as it got and the tear-off upstream owns
+	# the honesty a tick later.
 	var shank: Vector2 = wrist - mid
 	var paw: Vector2 = target - wrist
 	if shank.length_squared() > 0.000001 and paw.length_squared() > 0.000001:
 		var interior: float = PI - absf(wrapf(paw.angle() - shank.angle(), -PI, PI))
 		var legal: float = clampf(interior, rom_low.x, rom_low.y)
-		if absf(legal - interior) > 0.001 and not standing:
-			var swing_dir: float = signf(wrapf(paw.angle() - shank.angle(), -PI, PI))
-			target = wrist + paw.rotated(swing_dir * (interior - legal))
+		if absf(legal - interior) > 0.001:
+			if not standing:
+				var swing_dir: float = signf(wrapf(paw.angle() - shank.angle(), -PI, PI))
+				target = wrist + paw.rotated(swing_dir * (interior - legal))
+			else:
+				for _fix in 3:
+					var w: float = wrapf(paw.angle() - shank.angle(), -PI, PI)
+					# As much of the lift as the middle joint's own annulus
+					# will take — a full correction when there is room, half
+					# and half again when the stops are crowding each other.
+					var turn: float = -signf(w) * (interior - legal)
+					var spun: Vector2 = wrist
+					var d2: float = d
+					var placed: bool = false
+					for _sub in 4:
+						spun = target + (wrist - target).rotated(turn)
+						d2 = s.distance_to(spun)
+						if d2 <= d_hi + 0.001 \
+								and d2 >= maxf(d_lo, NEAR_MIN) - 0.001:
+							placed = true
+							break
+						turn *= 0.5
+					if not placed:
+						break
+					wrist = spun
+					d = d2
+					gamma = acos(clampf((u * u + d * d - l * l) / (2.0 * u * d),
+						-1.0, 1.0))
+					mid = s + (wrist - s).normalized().rotated(side * gamma) * u
+					shank = wrist - mid
+					paw = target - wrist
+					interior = PI - absf(wrapf(paw.angle() - shank.angle(),
+						-PI, PI))
+					legal = clampf(interior, rom_low.x, rom_low.y)
+					if absf(legal - interior) <= 0.001:
+						break
+				# Still illegal after everything the annulus allowed: the leg
+				# has no pose left that holds both stops and the toe. Say so —
+				# and hold the stop anyway, the paw folding to it about the
+				# wrist with the toe arriving short, exactly as an
+				# out-of-reach limb lays at its stops and arrives short. The
+				# gait reads `cramped` and tears the anchor next tick; what it
+				# may not read is a paw standing outside its own anatomy for
+				# even the one tick in between.
+				cramped = absf(legal - interior) > 0.01
+				if cramped:
+					var give: float = signf(wrapf(paw.angle() - shank.angle(),
+						-PI, PI))
+					target = wrist + paw.rotated(give * (interior - legal))
 
 	var out := PackedVector2Array()
 	out.resize(4)
@@ -370,6 +430,26 @@ func solve_limb(bones: PackedFloat32Array, socket_z: float, target: Vector2,
 	out[2] = wrist
 	out[3] = target
 	return out
+
+
+## The longest a limb can actually stand, at its own extension stops, as a
+## share of its summed bones. Geometric straight is not anatomy: the stifle
+## stops at 170° and the tarsus at 168°, so a hind leg's true maximum reach is
+## a few percent short of its bone length — and an anchor held past it is an
+## anchor the joints have already let go, whatever the ruler says. The gait's
+## tear-off quotes this instead of a share of ideal length, which is what
+## keeps a trailing paw's last legal pose exactly at the stops rather than
+## laid flat beyond them.
+func reach_share(fore: bool) -> float:
+	var shares: PackedFloat32Array = spec.fore_leg_shares if fore \
+		else spec.hind_leg_shares
+	var total: float = shares[0] + shares[1] + shares[2]
+	var mid_gap: float = PI - (_elbow.y if fore else _stifle.y)
+	# The carpus hyperextends past geometric straight (245°): a gap below zero
+	# is a paw that can lay fully along the reach.
+	var low_gap: float = maxf(PI - (_carpus.y if fore else _tarsus.y), 0.0)
+	return (shares[0] + shares[1] * cos(mid_gap)
+		+ shares[2] * cos(mid_gap + low_gap)) / maxf(total, 0.0001)
 
 
 ## The middle joint's stops (elbow or stifle), radians of interior angle.

@@ -194,7 +194,10 @@ func _physics_process(delta: float) -> void:
 	if vitals.arrested and not armature.collapsed:
 		armature.collapse()
 		maw.release()
-	alive = not armature.collapsed and not vitals.arrested
+	# Death is a stopped heart and nothing else: a body knocked off its feet is
+	# down, not dead — the loop's review owns getting it back up — and `alive`
+	# stopped meaning "standing" the day falling stopped being a death.
+	alive = not vitals.arrested
 	# The bake is revision-keyed: an ordinary tick bakes nothing, a wound re-bakes
 	# once and the weight genuinely moves.
 	poise.bake(corpus, armature)
@@ -356,7 +359,7 @@ func toggle_collapsed() -> void:
 		vitals.arrested = true
 		armature.collapse()
 		maw.release()
-	alive = not armature.collapsed and not vitals.arrested
+	alive = not vitals.arrested
 
 
 func drop(height: float) -> void:

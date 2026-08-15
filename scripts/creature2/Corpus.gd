@@ -106,6 +106,10 @@ var _com: Vector3 = Vector3.ZERO
 ## is not known until the end, and the parallel-axis shift is one subtraction
 ## afterward (`roll_inertia`).
 var _roll_moment: float = 0.0
+## The same accumulator about the lateral axis — Σ m·(x² + z²) at the origin.
+## How hard the body is to pitch, for `Keel`'s tilt: a long trunk resists a
+## nod far harder than a roll, and the ratio is counted, never authored.
+var _pitch_moment: float = 0.0
 var _compartments: Dictionary = {}
 ## Muscle a chain still has against the muscle it was built with, as
 ## (effective, built) volume. What "how much of this leg is answering" is, and
@@ -423,6 +427,16 @@ func roll_inertia() -> float:
 		MIN_MASS)
 
 
+## The same second moment about the lateral axis through the centre — what a
+## nod or a somersault works against. The long way of a body dominates it, so
+## it runs several times the roll inertia on any trunk-built animal, and that
+## ratio is the census's own answer, never a tuned one.
+func pitch_inertia() -> float:
+	_derive()
+	return maxf(_pitch_moment - _mass * (_com.x * _com.x + _com.z * _com.z),
+		MIN_MASS)
+
+
 ## Where the weight is between the girdles: 0 at the pelvis, 1 at the
 ## withers. "Are the legs under the weight" is this fraction against [0, 1].
 func along() -> float:
@@ -720,6 +734,7 @@ func _derive() -> void:
 	var total: float = 0.0
 	var moment := Vector3.ZERO
 	var roll_moment: float = 0.0
+	var pitch_moment: float = 0.0
 	var fore_g: float = 0.0
 	var hind_g: float = 0.0
 	var epaxial: float = 0.0
@@ -803,6 +818,7 @@ func _derive() -> void:
 					var at: Vector3 = centre + dir * rbar
 					moment += at * m
 					roll_moment += (at.y * at.y + at.z * at.z) * m
+					pitch_moment += (at.x * at.x + at.z * at.z) * m
 					st_mass += m
 					_layer_live[layer] += vol
 					_layer_mass[layer] += m
@@ -836,6 +852,7 @@ func _derive() -> void:
 	_mass = total
 	_com = moment / maxf(total, MIN_MASS)
 	_roll_moment = roll_moment
+	_pitch_moment = pitch_moment
 	_compartments = {
 		&"fore_girdle": fore_g,
 		&"hind_girdle": hind_g,

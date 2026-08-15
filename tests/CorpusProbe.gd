@@ -49,17 +49,22 @@ const TICK: float = 1.0 / 60.0
 ## the cells moved with them: half again the mass, the epaxial compartment up
 ## with the back it is authored on, the weight a touch further forward. The
 ## limbs and the tail were measuring right and were left alone.
+## Re-pinned 2026-08-15 with the neck re-authored to real anatomy (24 px was
+## half again a cat's cervical column on the 1.59 px/cm ruler; it is 15.5 now):
+## the neck compartment shrank, the head's share of the neck chain grew the
+## jaw, and the whole animal lightened and settled aft. The girdles and the
+## epaxial did not move — the engine is untouched.
 const PINS := {
-	"mass": 46128.100637,
-	"com_x": 31.983133,
+	"mass": 45046.671114,
+	"com_x": 30.483740,
 	"com_y": 0.000000,
-	"com_z": 33.469788,
-	"along": 0.515857,
+	"com_z": 33.070389,
+	"along": 0.491673,
 	"fore_girdle": 1119.393478,
 	"hind_girdle": 2242.158273,
 	"epaxial": 11985.778302,
-	"neck": 1773.094881,
-	"jaw": 416.954952,
+	"neck": 1095.329927,
+	"jaw": 588.853029,
 	"trunk_girth": 11.112390,
 }
 ## Six-decimal pins on quantities of very different magnitude: the tolerance

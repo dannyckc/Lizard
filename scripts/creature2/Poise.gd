@@ -349,6 +349,24 @@ func flanks(lat: Vector2) -> Vector2:
 	return Vector2(right + pad, left + pad)
 
 
+## The two feet a pitch turns about: the same measurement taken along the
+## heading instead of across it — how far the outermost planted paw reaches
+## ahead of the plumb line (x) and behind it (y), each grown by its own patch
+## of ground. Negative means the weight is already past that end's last foot —
+## a body with both forefeet over a brink is nose-heavy by exactly this
+## reading, and it is the state `Keel`'s tilt starts turning from.
+func saddles(along: Vector2) -> Vector2:
+	if feet == 0 or not posed:
+		return Vector2.ZERO
+	var ahead: float = -INF
+	var behind: float = -INF
+	for point in _prints:
+		var off: float = (point - centre).dot(along)
+		ahead = maxf(ahead, off)
+		behind = maxf(behind, -off)
+	return Vector2(ahead + pad, behind + pad)
+
+
 ## The support as a shape: the planted prints, walked in hull order, which is
 ## the polygon `clearance` was measured against and never a second opinion about
 ## it. Two prints come back as the two ends of the capsule and one as itself —

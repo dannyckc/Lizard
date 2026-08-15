@@ -28,8 +28,10 @@ extends RefCounted
 
 ## The reference cat's locomotor muscle (fore + hind + epaxial compartments)
 ## over its body mass — the datum `power` divides by, pinned beside
-## CorpusProbe's constants so the default build is exactly 1.000.
-const SPECIFIC_REF: float = 0.332711077
+## CorpusProbe's constants so the default build is exactly 1.000. Re-pinned
+## with the 2026-08-15 neck re-author: the compartments did not move, the
+## body they push got lighter.
+const SPECIFIC_REF: float = 0.340698428
 
 ## What power-one legs press at, standing square with everything fresh, px/s².
 ## The one propulsion scale in v2: every other term is a derived multiplier on

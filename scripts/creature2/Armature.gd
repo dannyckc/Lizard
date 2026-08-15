@@ -103,6 +103,10 @@ class Chain extends RefCounted:
 	## toe rolls the ankle up off the ground, and it is not on the ground at all on a
 	## limb the animal is merely carrying.
 	var grounded: bool = false
+	## Whether the last placement ran out of joints holding this foot's anchor
+	## (Rig.cramped): the pose is at its stops and still short. The gait reads
+	## it as the emergency a torn anchor is, one seam earlier.
+	var cramped: bool = false
 	## How far the free end hangs below its carry line — the droop readout.
 	var tip_sag: float = 0.0
 
@@ -217,6 +221,21 @@ var roll: float = 0.0
 ## What it was when the limbs were last settled — the tumble's carry is the
 ## difference, and nothing else reads it.
 var _rolled: float = 0.0
+
+## How far the body is tilted about its lateral axis, radians, nose-down
+## positive — Keel's other axis, written by Travel on exactly the terms `roll`
+## is: assigned, never integrated here. What the Z channel does with it is
+## *express* it — the dipping end's carry folds toward the feet it is pivoting
+## over, and the neck and tail carry lines tilt with the trunk they hang off,
+## so a body pitching over a brink genuinely goes down nose first.
+var pitch: float = 0.0
+
+## How much the tail is streaming with travel, 0..1 — at speed a tail floats
+## out near level behind the hips instead of hanging at its rest droop, the
+## counterweight carried rather than a pose. Written by the mover on the same
+## assigned-only law; the droop walk still sags tissue below whatever carry
+## line this asks for.
+var tail_stream: float = 0.0
 
 ## Where the mouth is being carried this tick, world height — NAN when nothing
 ## is reaching and the neck rides its rest carry line. Written by the strike
@@ -448,6 +467,8 @@ func _layout(at: Vector2, heading: float) -> void:
 	pinned.fill(0)
 	roll = 0.0
 	_rolled = 0.0
+	pitch = 0.0
+	tail_stream = 0.0
 	arch = 0.0
 	fore_carry = fore_stance
 	hind_carry = hind_stance
@@ -653,12 +674,18 @@ func settle(delta: float, surface: float = 0.0) -> void:
 func _wave(delta: float, speed_norm: float, gain: float) -> void:
 	wave_clock += delta * spec.wave_speed * (0.35 + 0.65 * clampf(speed_norm, 0.0, 1.0))
 	var n: int = axial.size()
+	var tail_n: int = _tail.nodes.size() if _tail != null else 0
 	for k in n:
 		var i: int = axial[k]
 		if pinned[i] != 0:
 			continue
 		var t: float = float(k) / float(maxi(n - 1, 1))
 		var envelope: float = sin(t * PI)
+		if k < tail_n:
+			# The tail is a free end, not a fixed one: the wave runs out
+			# through it and the tip carries the most of it, not the least.
+			# The envelope's zero stays at the head, where the drive is.
+			envelope = maxf(envelope, 1.0 - float(k) / float(maxi(tail_n, 1)))
 		var phase: float = sin(wave_clock * TAU - t * spec.wave_frequency * TAU)
 		var target: Vector2 = perp[i] * (phase * spec.body_wave * gain
 			* clampf(speed_norm, 0.0, 1.0) * envelope)
@@ -866,8 +893,16 @@ func _solve_heights(surface: float) -> void:
 	# exactly and not one number moves.
 	var heel: float = cos(roll)
 	var over: float = absf(sin(roll))
-	var pelvis_z: float = clearance + hind_carry * heel + hind_half * over
-	var withers_z: float = clearance + fore_carry * heel + fore_half * over
+	# The tilt, expressed the same way the heel is: the dipping end's carry
+	# folds toward the feet it is pivoting over. A body going nose-down over a
+	# brink turns about its last planted feet — the hind pair — so the withers
+	# come down while the pelvis stays at what its own legs deliver, and a body
+	# reared the other way is the same statement mirrored. Level, both cosines
+	# are one and not a number moves.
+	var dip_f: float = cos(maxf(pitch, 0.0))
+	var dip_h: float = cos(maxf(-pitch, 0.0))
+	var pelvis_z: float = clearance + hind_carry * heel * dip_h + hind_half * over
+	var withers_z: float = clearance + fore_carry * heel * dip_f + fore_half * over
 	var n_trunk: int = _trunk.nodes.size()
 	# The gather: a crouched back rounds over the loins. The rig's arch
 	# profile lifts the interior stations off the straight carry line — most
@@ -882,8 +917,12 @@ func _solve_heights(surface: float) -> void:
 		pos[i] = Vector3(pos[i].x, pos[i].y, z)
 		prev[i] = Vector3(prev[i].x, prev[i].y, z)
 	var tone: float = 1.0 - CARRIAGE
-	_droop_chain(_neck, withers_z, surface, tone, head_reach_z)
-	_droop_chain(_tail, pelvis_z, surface, tone)
+	# The carry lines tilt with the trunk they hang off: a pitching body takes
+	# its head down with its own nose and its tail up over its own hips. The
+	# tail also streams: at pace the carry eases from its rest droop toward
+	# floating out near level behind the hips — the mover writes how much.
+	_droop_chain(_neck, withers_z, surface, tone, head_reach_z, -pitch)
+	_droop_chain(_tail, pelvis_z, surface, tone, NAN, pitch, tail_stream)
 	_grade_roll()
 
 
@@ -913,7 +952,7 @@ func _grade_roll() -> void:
 ## on the carry line and only ever falls away from it, and no station may
 ## push itself back up through the floor.
 func _droop_chain(chain: Chain, start_z: float, floor_z: float, tone: float,
-		tip_z: float = NAN) -> void:
+		tip_z: float = NAN, tilt: float = 0.0, stream: float = 0.0) -> void:
 	var count: int = chain.nodes.size()
 	# Weight still to come at each station, tip-backward, the node's own
 	# weight included — it hangs off the stick that leads into it.
@@ -924,7 +963,11 @@ func _droop_chain(chain: Chain, start_z: float, floor_z: float, tone: float,
 		running += mass[chain.nodes[j]]
 		beyond[j] = running
 
-	var carry: float = tan(chain.carry_rad)
+	# The rest carry, tilted with the trunk it hangs off — and, for a tail at
+	# pace, streamed toward level: the carry line the tissue then sags below.
+	var carry: float = tan(chain.carry_rad + tilt)
+	if stream > 0.0:
+		carry = lerpf(carry, 0.08, clampf(stream, 0.0, 1.0))
 	# A reach re-aims the carry line at where the tip is being taken — clamped
 	# to a slope a neck can actually be held at, so an illegal ask degrades to
 	# the nearest legal carry rather than folding the chain through itself.
@@ -1035,6 +1078,7 @@ func _place_limbs(surface: float) -> void:
 				- step_out * step_out, 0.01))
 		var target := Vector2((target_plan - socket_plan).dot(axis), target_z)
 		limb.sag = rig.solve_limb(flat, socket_z, target, lead, fore, standing)
+		limb.cramped = rig.cramped and standing and limb.foot_driven
 		# Which way in plan is outboard of this limb's own plane.
 		var n_plan := Vector2(-axis.y, axis.x)
 		var out_sign: float = signf(n_plan.dot(perp[p]) * limb.side)

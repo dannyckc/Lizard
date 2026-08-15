@@ -485,15 +485,22 @@ func _check_brink(c: Creature2) -> void:
 	worst_bend = maxf(worst_bend, a.worst_bend_excess())
 	worst_bone = maxf(worst_bone, a.worst_bone_error())
 	_check(fell, "shoved past the brink, the body never fell")
-	# Arrived on the plane below, not still up on the mesa. Not "flat at zero"
-	# any more: a body pushed off an edge goes over the edge, and one lying on
-	# its flank rests its spine a body-radius off the floor. The claim is the
-	# height it came down to; the pose it came down in is TippingProbe's.
+	# Arrived on the plane below, not still up on the mesa. The claim is the
+	# height it came down to — and since a fall stopped being a death, a body
+	# given four hundred ticks has usually finished the rest of the story too:
+	# collapsed at the bottom, rolled sternal, and pushed itself back up. So
+	# "arrived below" is either pose at the plane's own heights — lying (a
+	# body-radius off the floor) or re-standing (its own stance off it) — and
+	# both are well under the mesa the body left. Still collapsed above the
+	# lying line, or standing at mesa height, is the failure.
 	var z: float = a.pos[a.pelvis_index()].z
-	_check(z < top * 0.33,
-		"went over the brink but never arrived below (pelvis z %.1f)" % z)
-	notes.append("balks %.0f px short of a 60 px brink; shoved over, it falls and arrives below at z %.1f, heeled %.0f°"
-		% [stopped_short, z, rad_to_deg(absf(c.travel.keel.roll))])
+	var arrived: bool = z < top * 0.33 \
+		or (not a.collapsed and z < top * 0.8)
+	_check(arrived,
+		"went over the brink but never arrived below (pelvis z %.1f, %s)"
+		% [z, "collapsed" if a.collapsed else "standing"])
+	notes.append("balks %.0f px short of a 60 px brink; shoved over, it falls, arrives below (z %.1f) and is %s"
+		% [stopped_short, z, "down" if a.collapsed else "back on its feet"])
 	main.terrain.clear()
 
 

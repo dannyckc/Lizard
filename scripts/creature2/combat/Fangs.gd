@@ -64,7 +64,11 @@ const REF_DEPTH: float = 2.6
 ## The reference build's jaw compartment (masseter volume off the census),
 ## pinned beside CorpusProbe's constants. Bite force is the living jaw over
 ## this — a chewed or shrunken masseter closes softer, nothing is told.
-const JAW_REF: float = 416.954952
+## Re-pinned with the 2026-08-15 neck re-author: a shorter cervical run gives
+## the head a larger share of the neck chain, so more of the same flesh now
+## counts as jaw — the datum moves with it and the default bite stays worth
+## exactly REF_DEPTH.
+const JAW_REF: float = 588.853029
 
 ## Bounds on the pressure ratio and on how much further a long tooth reaches
 ## than a short one — both ends past which a bite stops being a bite.

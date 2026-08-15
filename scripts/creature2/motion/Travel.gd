@@ -85,6 +85,47 @@ const ABSORB_RATE: float = 3.0
 const FALL_SHARE: float = 0.9
 const FALL_PATIENCE: float = 0.35
 
+## The friction under a downed body, as the share of gravity a flank on dirt
+## decelerates at — Coulomb, not viscous, and the distinction is load-bearing
+## twice over. A knocked-over animal keeps the momentum it fell with and
+## genuinely slides out on it (1.4× flat-out arrives ~11 px from where it
+## went down), because a constant deceleration spends a real velocity over a
+## real distance. And the same constant *zeroes* the sub-pixel velocities the
+## contact seams drip into a lying body every tick — a carcass being leaned
+## on by another animal is pressed, not set adrift, where an exponential
+## decay left every drip alive and a held carcass crawled across the floor
+## under its own bite.
+const SLIDE_GRIP: float = 0.6
+
+## The get-up. `REGATHER` is the beat a downed animal takes before it starts
+## working — a breath, not a stopwatch on physics — and `RISE_RATE` prices the
+## push-up at power one: the actual rise is it times the census's own
+## power and what is left of the limbs, so a heavy, weak or chewed body
+## genuinely takes longer to stand and one without enough limb never does.
+const REGATHER: float = 0.45
+const RISE_RATE: float = 1.5
+## Sternal enough to start pushing up, radians of remaining heel.
+const STERNAL: float = 0.12
+
+## The bound's flight is only taken off the gait when the gathered beat is
+## developed enough to mean it — under this the four-off moment is a stumble,
+## not a suspension.
+const BOUND_FLOOR: float = 0.25
+## The stride hop's muscle cap, as a share of a full standing jump's peak: the
+## legs at a gallop spend their extension through the stride, not gathered
+## under a charge.
+const BOUND_PEAK_SHARE: float = 0.25
+
+## How quickly the spine's stride share follows the measured gait, per second —
+## an easing on a measurement, so the back rounds through the stride instead of
+## snapping between poses.
+const SPINE_EASE: float = 10.0
+## What a full gather folds and a full drive extends the back by, as `bunch`
+## shares of the trunk's plan rests. The flexion is the bigger half — a
+## galloping cat's lumbar spine rounds far more than it hollows.
+const BUNCH_FLEX: float = 0.18
+const BUNCH_EXT: float = 0.08
+
 ## The most turn rate a glancing contact may put into the body in one tick,
 ## rad/s — a cap on the lever arithmetic, not a second physics.
 const GLANCE_MAX: float = 2.0
@@ -153,6 +194,27 @@ var _absorb: float = 0.0
 var _debt: float = 0.0
 var _wobble: float = 0.0
 
+## Whether the body is in a stride's own flight — the gallop's suspension, as
+## distinct from a leap: the swings that were already going keep going, and the
+## first foot to arrive catches the body.
+var _stride_flight: bool = false
+
+## The spine's stride share, eased off the measured gait: how gathered the back
+## is (the hind pair swinging under the body) and how hard it is driving (the
+## delivered thrust against its own ceiling). Both are measurements of the
+## loop, never clocks.
+var _gather: float = 0.0
+var _drive: float = 0.0
+
+## Where a downed body is in coming back: still toppling, settled, rolling
+## sternal, or pushing up. UP is a body that is not down.
+enum Down {UP, TOPPLING, SETTLED, RIGHTING, RISING}
+var _down: int = Down.UP
+var _down_wait: float = 0.0
+## The push-up's progress, 0..1 — what scales the carries and the press
+## through `Footwork.rise`.
+var _rise: float = 0.0
+
 
 func build(p_creature: Creature2) -> void:
 	creature = p_creature
@@ -176,11 +238,19 @@ func reset() -> void:
 	_absorb = 0.0
 	_debt = 0.0
 	_wobble = 0.0
+	_stride_flight = false
+	_gather = 0.0
+	_drive = 0.0
+	_down = Down.UP
+	_down_wait = 0.0
+	_rise = 0.0
+	footwork.rise = 1.0
 	# Whatever was recorded happened to a body that is no longer standing where
 	# this one is — see MotionReadout.clear.
 	readout.clear()
 	if creature != null:
 		creature.armature.roll = 0.0
+		creature.armature.pitch = 0.0
 		if not creature.armature.collapsed:
 			footwork.build(creature, outlook, rhythm)
 
@@ -195,7 +265,19 @@ func steer(delta: float, ground: float) -> void:
 	var a: Armature = creature.armature
 	impetus.derive(creature.corpus)
 	if a.collapsed:
-		impetus.halt()
+		# A downed body is not parked by fiat: whatever plan momentum it fell
+		# with is kept, spent as a slide, and shed by the ground the way a
+		# flank on dirt sheds it — a constant friction off the one pull, so a
+		# hard topple slides out over real distance and a small press dies
+		# where it lands. The whole chain goes with it; the feet went with the
+		# body the moment it stopped being a stance.
+		var slide: float = impetus.velocity.length()
+		var shed: float = SLIDE_GRIP * Gravity.PULL * delta
+		if slide > shed:
+			impetus.velocity *= (slide - shed) / slide
+			a.shift(impetus.velocity * delta)
+		else:
+			impetus.halt()
 		ask_speed = 0.0
 		headroom = 1.0
 		_publish(Vector2.RIGHT.rotated(creature.heading))
@@ -345,6 +427,29 @@ func steer(delta: float, ground: float) -> void:
 	lean = (-impetus.thrust / Gravity.PULL * high * LEAN_SHARE) \
 		.limit_length(LEAN_MAX)
 
+	# The spine's share of the stride, measured off the gait it is carrying:
+	# the back rounds as the hind pair swings under the body (the gather) and
+	# extends as the planted hinds drive (the thrust against its own ceiling),
+	# scaled by how developed the bound is — a walking back stays quiet. Set
+	# here, before the plan solve, so the rests the solver satisfies this tick
+	# are the rests the body is claiming this tick; the measurements are last
+	# tick's feet and press, which is the loop's ordinary one-frame lag. The
+	# crouch keeps its own claim on the arch: a charge and a landing still
+	# sink and round the same body.
+	var gather_now: float = footwork.gather_of(false) * rhythm.bound
+	var drive_now: float = 0.0
+	if impetus.ceiling > 1.0:
+		drive_now = clampf(impetus.thrust.length() / impetus.ceiling, 0.0, 1.0) \
+			* rhythm.bound * (1.0 - gather_now)
+	_gather = lerpf(_gather, gather_now, 1.0 - exp(-SPINE_EASE * delta))
+	_drive = lerpf(_drive, drive_now, 1.0 - exp(-SPINE_EASE * delta))
+	a.arch = maxf(crouch, _gather)
+	a.bunch(BUNCH_FLEX * _gather - BUNCH_EXT * _drive)
+	# ...and the tail streams out with the pace instead of hanging at its rest
+	# droop — the counterweight carried, not a pose.
+	a.tail_stream = clampf(creature.speed_norm * 0.7 + rhythm.bound * 0.3,
+		0.0, 1.0)
+
 	_publish(dir)
 
 
@@ -428,12 +533,25 @@ func tip(delta: float) -> void:
 	# on an animal that is simply in the air.
 	var footed: bool = not a.fall.is_airborne() and not a.collapsed and p.posed
 	var count: int = maxi(footwork.feet.size(), 1)
+	# The pitch axis balances against the same feet measured the other way, and
+	# fights back with the girdles' own spacing for a base — which is why a
+	# quadruped nods where it would have rolled, and nothing was told.
+	var stride_base: float = maxf(p.girdle_x.x - p.girdle_x.y, 1.0) * 0.5
+	# A live downed body gets its limbs handed to the keel as righting: what is
+	# left of them pressing the ground, under the same clamped-muscle law as
+	# standing balance. A corpse hands over nothing and lies as it fell.
+	var right: float = 0.0
+	if a.collapsed and creature.alive and _down == Down.RIGHTING:
+		right = _limb_press()
 	keel.tick(delta,
 		p.flanks(_lateral()) if footed else Vector2.ZERO,
+		p.saddles(Vector2.RIGHT.rotated(creature.heading)) if footed else Vector2.ZERO,
 		p.height if footed else 0.0,
 		_stance_hold(footwork.planted(), count) if footed else 0.0,
-		(a.fore_half + a.hind_half) * 0.5, impetus.power, a.collapsed)
+		(a.fore_half + a.hind_half) * 0.5, stride_base,
+		impetus.power, a.collapsed, right)
 	a.roll = keel.roll
+	a.pitch = keel.pitch
 
 
 ## The most the front of this animal may be steered ahead of its own hips,
@@ -463,19 +581,46 @@ func support(delta: float, _ground: float) -> void:
 	if a.collapsed:
 		return
 	if a.fall.landed:
-		footwork.touchdown()
+		# A leap's feet were gathered toward the landing and all arrive with
+		# the body; a stride flight's are each on their own beat, and only the
+		# ones far enough through come down — the gallop lands staggered.
+		footwork.touchdown(0.5 if _stride_flight else 0.0)
 		_absorb = maxf(_absorb, clampf(a.fall.impact / ABSORB_SCALE, 0.0, 0.8))
 		# The feet have the body again: from here the carries quote them, so
 		# the fall's frame is spent — the arc is over, whatever ground it ended
 		# on, and the legs absorb the rest. Also why a body never bounces: it
 		# is meat with knees, not rubber.
 		a.fall.absorb_landing(0.0)
-	# The crouch is also the gather: the same state the carries sink under
-	# rounds the back over the loins, expressed by the Z channel through the
-	# rig's arch profile.
-	a.arch = crouch
+		_stride_flight = false
 	footwork.tick(delta, creature, impetus.velocity, lean, crouch,
-		creature.speed_norm, a.fall.is_airborne())
+		creature.speed_norm, a.fall.is_airborne(), _stride_flight)
+
+	# A swing that completed mid-flight has caught the body: the suspension is
+	# over the moment a foot is under the weight again, not when the arc says —
+	# the forefoot catching the gallop is exactly this line.
+	if _stride_flight and footwork.stride_landed:
+		_absorb = maxf(_absorb, clampf(absf(a.fall.rate) / ABSORB_SCALE, 0.0, 0.5))
+		a.fall.absorb_landing(0.0)
+		_stride_flight = false
+
+	# The bound's take-off. At the gathered beat the last foot leaves while
+	# others are still mid-swing, and a body whose whole support is in the air
+	# is in the air: it is committed to a flight exactly as long as its own
+	# next landing — a measured time, the first swing to arrive — and the hop
+	# that spans it is priced by ballistics and capped by what the hind girdle
+	# has left. Below the bound this never fires, and a walk's stumble stays a
+	# stumble on the ground.
+	if not a.fall.is_airborne() and not _stride_flight \
+			and footwork.planted() == 0 and rhythm.bound > BOUND_FLOOR:
+		var t_need: float = footwork.first_landing_in()
+		if t_need > 0.02 and t_need < 0.6:
+			var hind: float = creature.corpus.girdle_soundness(false)
+			var rate: float = minf(0.5 * Gravity.PULL * t_need,
+				Gravity.launch_rate(JUMP_PEAK * BOUND_PEAK_SHARE
+					* impetus.power * hind))
+			a.launch(rate)
+			_stride_flight = true
+
 
 
 ## The sockets have just been carried — hand each limb the height the body is
@@ -498,11 +643,32 @@ func perch() -> void:
 ## reach around, the body has gone, and it goes *the way it was going*.
 func review(delta: float) -> void:
 	var a: Armature = creature.armature
-	if a.collapsed or a.fall.is_airborne():
+	if a.collapsed:
+		_debt = 0.0
+		_wobble = 0.0
+		_recover(delta)
+		return
+	if a.fall.is_airborne():
 		_debt = 0.0
 		_wobble = 0.0
 		return
 	var p: Poise = creature.poise
+
+	# A body still pushing itself up is not reviewed as a stance: its carries
+	# are wherever the rise has them and its legs are folded under it. The
+	# push-up itself is priced here — the census's engine and what is left of
+	# the limbs, so a heavy or half-chewed body genuinely takes longer — and a
+	# shove mid-rise meets a body with almost nothing in hand, which is what a
+	# get-up being a vulnerable moment means.
+	if _down == Down.RISING:
+		_rise = minf(_rise + delta * RISE_RATE
+			* clampf(impetus.power * _limb_press(), 0.1, 2.0), 1.0)
+		footwork.rise = _rise
+		if _rise >= 1.0:
+			_down = Down.UP
+		elif _rise < 0.6:
+			return
+
 	# A grounded body with no planted feet at all is not "free of deficit" —
 	# it is a body whose every foot has been torn off its footing (a cliff
 	# edge, a floor that vanished), and it gets the fall's own patience, not
@@ -512,9 +678,30 @@ func review(delta: float) -> void:
 		if _debt > FALL_PATIENCE:
 			_fell(a)
 		return
-	if keel.going_over():
+
+	# The commitment, derived, per axis: a body is past saving when the pivot
+	# a rescue step could still build — the farthest print the legs can reach,
+	# plus the base the body already stands on — can no longer stand under the
+	# weight at this angle, and the muscle holding it is already outmatched and
+	# still losing. `tan θ` of the un-heeled weight height against that reach
+	# is the whole test; nobody authors the angle, and it moves with the body's
+	# own legs, stance and wounds. Keel's caps are only the backstops.
+	var reachable: float = creature.attitude.active.plan_reach(
+		creature.body.hind_leg_length)
+	var half_base: float = (a.fore_half + a.hind_half) * 0.5
+	var stride_base: float = maxf(p.girdle_x.x - p.girdle_x.y, 1.0) * 0.5
+	var h0: float = p.height / maxf(cos(keel.roll), 0.2)
+	var gone_roll: bool = keel.strained and keel.spill > 0.0 \
+		and keel.rate * keel.side > 0.0 \
+		and tan(absf(keel.roll)) > (reachable + half_base) / maxf(h0, 1.0)
+	var h0p: float = p.height / maxf(cos(keel.pitch), 0.2)
+	var gone_pitch: bool = keel.tilt_strained and keel.tilt_spill > 0.0 \
+		and keel.pitch_rate * keel.tilt_side > 0.0 \
+		and tan(absf(keel.pitch)) > (reachable + stride_base) / maxf(h0p, 1.0)
+	if gone_roll or gone_pitch or keel.going_over() or keel.pitching_over():
 		_fell(a)
 		return
+
 	var deficit: bool = p.posed and p.feet > 0 \
 		and p.clearance < -WOBBLE_SHARE * maxf(p.span, 1.0)
 	if deficit:
@@ -524,14 +711,12 @@ func review(delta: float) -> void:
 		_wobble += delta
 		if _wobble >= WOBBLE_PATIENCE:
 			footwork.rescue(p.centre, p.overhang)
-		var reachable: float = creature.attitude.active.plan_reach(
-			creature.body.hind_leg_length)
 		if p.overhang.length() > reachable * FALL_SHARE:
 			_debt += delta
 			if _debt > FALL_PATIENCE:
 				_fell(a)
 			return
-	elif not keel.strained:
+	elif not keel.strained and not keel.tilt_strained:
 		_wobble = 0.0
 		footwork.calm()
 	# The heel's own demand, and it is not held for a beat: a body whose legs
@@ -542,10 +727,92 @@ func review(delta: float) -> void:
 	# itself there without noticing, and rescuing that was the churn that ate
 	# the support it was rescuing. The step is asked for when the muscle is
 	# beaten, which is the honest moment a leg has to move instead of press.
-	if keel.strained and keel.side != 0.0 and p.posed:
-		footwork.rescue(p.centre,
-			_lateral() * (keel.side * maxf(keel.spill, p.pad)))
+	# The two axes ask as one: the weight is only ever going over in one
+	# combined direction, and two rescues marking two different feet in the
+	# same tick was a body lifting the support it was rescuing. The heel's
+	# share is across the body, the nod's along it, and the step goes where
+	# their sum says.
+	var spill_out: Vector2 = Vector2.ZERO
+	if keel.strained and keel.side != 0.0:
+		spill_out += _lateral() * (keel.side * maxf(keel.spill, p.pad))
+	if keel.tilt_strained and keel.tilt_side != 0.0:
+		spill_out += Vector2.RIGHT.rotated(creature.heading) \
+			* (keel.tilt_side * maxf(keel.tilt_spill, p.pad))
+	if spill_out != Vector2.ZERO and p.posed:
+		footwork.rescue(p.centre, spill_out)
 	_debt = maxf(_debt - 2.0 * delta, 0.0)
+
+
+## What is left of the limbs, as a share — the census's soundness times the
+## nerves still asking, averaged over the four. What a get-up pushes with.
+func _limb_press() -> float:
+	var a: Armature = creature.armature
+	var sum: float = 0.0
+	for limb in a.limbs:
+		sum += creature.corpus.soundness(limb.name) \
+			* creature.vitals.numbness(limb.name)
+	return sum / maxf(float(a.limbs.size()), 1.0)
+
+
+## A downed body coming back — or not. The topple runs itself out on Keel's own
+## physics, the body takes a beat, rolls sternal on what its limbs can press
+## (`tip` hands the keel that strength while the state says RIGHTING), and
+## pushes up through `RISING`. A corpse never leaves TOPPLING: recovery is a
+## property of being alive, not of the pose.
+func _recover(delta: float) -> void:
+	if not creature.alive:
+		_down = Down.TOPPLING
+		_rise = 0.0
+		return
+	match _down:
+		Down.UP:
+			# Downed from outside the review — a scenario's K, a probe: adopt it.
+			_down = Down.TOPPLING
+		Down.TOPPLING:
+			# Settled means the whole tumble is over: the heel has stopped
+			# running out *and* the drop underneath it has finished arriving —
+			# a body knocked off a ledge does not start gathering itself in
+			# mid-air.
+			if absf(keel.rate) < 0.15 and not creature.armature.fall.is_airborne():
+				_down = Down.SETTLED
+				_down_wait = REGATHER
+		Down.SETTLED:
+			_down_wait -= delta
+			if _down_wait <= 0.0:
+				_down = Down.RIGHTING
+		Down.RIGHTING:
+			# Keel is being handed the limbs' press (see `tip`); the body is
+			# sternal when the heel is nearly out, and only then can legs be
+			# legs again. A body whose righting cannot beat its own flank's
+			# settle simply stays here, working — which is what a downed animal
+			# that cannot rise looks like.
+			if absf(keel.roll) < STERNAL:
+				_arise()
+		Down.RISING:
+			# Handled in the grounded review; reaching here means the body
+			# collapsed again mid-rise and starts over.
+			_down = Down.TOPPLING
+			_rise = 0.0
+
+
+## Sternal to standing: the armature is un-collapsed where it lies, the feet
+## re-adopt under the body, and the push-up begins — the carries travel from
+## chest height to stance height through `Footwork.rise`, not by teleport. The
+## body stands up facing the way its shoulders actually lie: the fall owned the
+## heading while it was down.
+func _arise() -> void:
+	var a: Armature = creature.armature
+	a.revive()
+	_rise = 0.0
+	footwork.rise = 0.0
+	creature.heading = a.fwd[a.withers_index()].angle()
+	_asked = 0.0
+	_spin = 0.0
+	creature.ang_vel = 0.0
+	footwork.build(creature, outlook, rhythm)
+	creature.head_pos = a.plan(a.head_index())
+	a.take_head(creature.head_pos)
+	_down = Down.RISING
 
 
 ## The loop, written down — the last thing the tick does, and the only thing in
@@ -569,12 +836,16 @@ func observe(delta: float) -> void:
 func _state_word() -> StringName:
 	var a: Armature = creature.armature
 	if a.collapsed:
-		return &"COLLAPSED"
+		if not creature.alive:
+			return &"COLLAPSED"
+		return &"RIGHTING" if _down == Down.RIGHTING else &"DOWNED"
+	if _down == Down.RISING:
+		return &"RISING"
 	if a.fall.is_airborne():
-		return &"AIRBORNE"
+		return &"BOUNDING" if _stride_flight else &"AIRBORNE"
 	if creature.poise.posed and creature.poise.feet == 0:
 		return &"FALLING"
-	if _wobble >= WOBBLE_PATIENCE or keel.strained:
+	if _wobble >= WOBBLE_PATIENCE or keel.strained or keel.tilt_strained:
 		return &"RESCUE"
 	if headroom <= 0.0 and absf(creature.command.throttle) > 0.01:
 		return &"BALKED"
@@ -583,14 +854,20 @@ func _state_word() -> StringName:
 	return &"STANDING"
 
 
-## The body goes down, however it got there — the same collapse a death is. Keel
-## keeps whatever heel it arrived with, so a creature knocked over lands on that
-## flank and one whose heart stopped lands on its belly.
+## The body goes down, however it got there. The same *pose* a death is — limp
+## limbs, the trunk dropped, the constraints loosened — and emphatically not a
+## death: falling over is something that happens to a living animal, and the
+## review picks the body back up through `_recover`. Keel keeps whatever heel
+## and rate it arrived with and integrates them out, so a creature knocked over
+## finishes rolling onto that flank with the momentum it was given, and the
+## plan momentum it fell with slides out through the ground (`steer`). Nothing
+## is halted and nothing is killed: the ground does not care why a body
+## arrives, and the body does not stop being alive by arriving.
 func _fell(a: Armature) -> void:
 	a.collapse()
-	creature.vitals.arrested = true
-	creature.alive = false
-	impetus.halt()
+	_down = Down.TOPPLING
+	_rise = 0.0
+	footwork.rise = 1.0
 
 
 # -------------------------------------------------------------- the pieces ----
@@ -664,7 +941,12 @@ func twist(dv: Vector2, at: Vector3) -> void:
 	var footed: bool = not creature.armature.fall.is_airborne()
 	var high: float = creature.poise.height if footed else 0.0
 	var axis: float = 0.0 if footed else creature.poise.height
-	keel.strike(dv.dot(_lateral()), at.z - axis, high)
+	# One decomposition: the across-the-body half of the push rolls the animal
+	# and the down-its-length half pitches it, each about the same axis with
+	# the same lever. A ram taken square on the chest rears the body exactly as
+	# the flattened seam could not say.
+	keel.strike(dv.dot(_lateral()), at.z - axis, high,
+		dv.dot(Vector2.RIGHT.rotated(creature.heading)))
 
 
 ## Across the body, on the plan — the axis a heel is measured about, and the

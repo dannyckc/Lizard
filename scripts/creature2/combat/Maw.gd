@@ -147,6 +147,14 @@ const STRAIN_PATIENCE: float = 0.30
 ## as jaws shutting and slow enough that nothing snaps.
 const GRIP: float = 16.0
 
+## The most a grip may reel bodies together at, px/s — the cap on the rate
+## above, sized at a slow walk: jaws shut across their last pixels exactly as
+## before, and a mouthful that moved (a re-seat, a body pressed back) is
+## gathered in over a few tenths rather than in one snatch. The strain clock
+## still runs while the gap is open, so a mouthful that keeps outrunning the
+## reel is torn free exactly as it should be.
+const REEL_MAX: float = 45.0
+
 ## The frontal cone a strike must address its target inside, radians off the
 ## heading. A mouth does not bite what is behind the animal wearing it.
 ##
@@ -854,7 +862,14 @@ func _tick_hold(delta: float) -> void:
 	var mine: float = creature.corpus.mass()
 	var theirs: float = target.corpus.mass()
 	var share: float = theirs / maxf(mine + theirs, Corpus.MIN_MASS)
-	var close: Vector2 = gap * (1.0 - exp(-GRIP * delta))
+	# The rate, and a ceiling on it. The exponential alone closes a share of
+	# *any* gap per tick, which on the last pixel is the intended jaws-shutting
+	# and on a re-seated mouthful (`_work_in` sliding to standing flesh) was a
+	# quarter of the jump in one frame — two bodies yanked at speeds no neck
+	# reels at, hard enough to panic the contact seam between them. A neck
+	# folds at a finite rate; the reel is capped at one.
+	var close: Vector2 = (gap * (1.0 - exp(-GRIP * delta))) \
+		.limit_length(REEL_MAX * delta)
 	creature.head_pos += close * share
 	target.armature.shift(-close * (1.0 - share))
 	if not target.armature.collapsed:

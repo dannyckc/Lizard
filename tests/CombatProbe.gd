@@ -112,7 +112,7 @@ func _stand(at: Vector2, heading: float) -> Creature2:
 ## Both bodies rebuilt standing where the scenario wants them, settled a beat.
 func _settle(cat: Creature2, prey: Creature2,
 		cat_at: Vector2 = Vector2.ZERO, cat_heading: float = 0.0,
-		prey_at: Vector2 = Vector2(115.0, -25.0),
+		prey_at: Vector2 = Vector2.INF,
 		prey_heading: float = PI / 2.0) -> void:
 	main.terrain.clear()
 	cat.command.throttle = 0.0
@@ -124,6 +124,12 @@ func _settle(cat: Creature2, prey: Creature2,
 	if prey.armature.collapsed:
 		prey.toggle_collapsed()
 	cat.build(cat_at, cat_heading)
+	if prey_at.x == INF:
+		# A strike's-length stand-off, quoted off this cat's own jaw rather
+		# than pinned: these scenarios once stood the prey at 115 px, which
+		# was really "the old neck's jaw plus a lunge" — scaffolding that went
+		# red the day the neck was re-authored to real anatomy.
+		prey_at = Vector2(cat.maw.jaw_point().x + 24.0, cat_at.y - 25.0)
 	prey.build(prey_at, prey_heading)
 	cat.maw.release()
 	_tick_both(cat, prey, 10)
@@ -294,7 +300,11 @@ func _check_airborne_clears_what_plan_overlaps(cat: Creature2,
 func _check_bite_anchors_at_the_jaws(cat: Creature2, prey: Creature2) -> void:
 	main.terrain.clear()
 	cat.build(Vector2.ZERO, 0.0)
-	prey.build(Vector2(97.0, -25.0), PI / 2.0)
+	# The prey stands so its near flank covers the cat's jaw — placed off the
+	# cat's own measured jaw point rather than at a pinned distance, so the
+	# scenario is about the anchoring mechanism and survives a proportion
+	# re-author (it was pinned at 97 px once, which was the *old* neck).
+	prey.build(Vector2(cat.maw.jaw_point().x + 7.0, -25.0), PI / 2.0)
 	# Carry the head down into the prey's height band, where its trunk is —
 	# straight through the Z channel, with no tick for the bodies to press
 	# each other back out of the overlap first.
@@ -383,7 +393,7 @@ func _check_the_lunge_is_the_body_moving(cat: Creature2, prey: Creature2) -> voi
 	_settle(cat, prey)
 	var pelvis_was: Vector2 = cat.armature.plan(cat.armature.pelvis_index())
 	var neck_before: float = _neck_span(cat)
-	var went: bool = cat.bite(prey, Vector2(115.0, 5.0))
+	var went: bool = cat.bite(prey, Vector2(prey.centre().x, 5.0))
 	_check(went, "a committed strike inside the purse refused to go")
 	var throw: float = cat.maw._throw
 	_check(throw > 2.0, "the lunge scenario asked for no body at all (%.1f px)" % throw)
@@ -455,7 +465,7 @@ func _check_a_bite_dents_what_it_bit(cat: Creature2, prey: Creature2) -> void:
 	_settle(cat, prey, Vector2(-6.0, 0.0))
 	var corpus: Corpus = prey.corpus
 	var hp_was: PackedFloat32Array = corpus.hp.duplicate()
-	var went: bool = cat.bite(prey, Vector2(115.0, 5.0))
+	var went: bool = cat.bite(prey, Vector2(prey.centre().x, 5.0))
 	_check(went, "the flank bite refused to go")
 	_tick_both(cat, prey, 40)
 
@@ -615,7 +625,11 @@ func _check_feeding_is_possession(cat: Creature2, prey: Creature2) -> void:
 	_tick_both(cat, prey, 90)
 	cat.command.throttle = 0.0
 	var towed: float = prey.centre().distance_to(carcass_at)
-	_check(towed > 3.0, "a held carcass was towed only %.1f px" % towed)
+	# The claim is that the carcass *follows* — a hold that towed nothing would
+	# read a few tenths. The old 3.0 was calibrated to the long-necked build's
+	# stand-off; the re-authored neck holds the pair closer, the contact press
+	# eats more of each step, and the same mechanism tows a shorter distance.
+	_check(towed > 1.2, "a held carcass was towed only %.1f px" % towed)
 
 	# The tear: haul hard and the hold parts through the flesh.
 	var still_held: bool = not cat.maw.holding.is_empty()

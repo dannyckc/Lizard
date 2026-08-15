@@ -153,8 +153,11 @@ func _check_planted_exact(c: Creature2) -> void:
 			if not limb.foot_driven or not limb.grounded:
 				continue
 			# A foot being torn off its anchor is honestly short of it — the
-			# claim here is about support the leg can actually span.
-			if _stretched(a, limb):
+			# claim here is about support the leg can actually span. `cramped`
+			# is the same honesty one seam earlier: the rig has declared every
+			# stop taken and the anchor undeliverable, and the gait tears it
+			# on the next measurement.
+			if _stretched(a, limb) or limb.cramped:
 				continue
 			worst = maxf(worst, a.pos[limb.nodes[3]].distance_to(limb.foot_target))
 	c.command.throttle = 0.0

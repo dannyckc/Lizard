@@ -64,8 +64,15 @@ class ChainSpec extends RefCounted:
 @export var trunk_bend_deg: float = 26.0
 
 ## Four cervical stations and a head node carrying the jaw frame.
+##
+## The length is real anatomy on the body's own 1.59 px/cm ruler: a domestic
+## cat's cervical column runs about 9–10 cm occiput to withers, which is
+## 15–16 px here. It was authored at 24 for a long while — a neck half again
+## too long, read instantly as "not a cat" — and nothing else changes with it:
+## the tissue knots are relative to the chain, the joint limits are per
+## station, and the census re-pins.
 @export var neck_nodes: int = 4
-@export var neck_length: float = 24.0
+@export var neck_length: float = 15.5
 @export var neck_radius: float = 2.4
 @export var neck_bend_deg: float = 30.0
 @export var neck_carry_deg: float = 26.0
