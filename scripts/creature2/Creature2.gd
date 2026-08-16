@@ -298,19 +298,20 @@ func motion_readout() -> MotionReadout:
 
 
 ## The speed this creature walks at flat out without sprinting — the denominator
-## every pace in the game is quoted against. Deliberately the request: delivery
-## has no closed form in the new loop (it emerges from press, drift and swing
-## tempo), so the ask is the stable ruler and `speed_norm` reports honestly
+## every pace in the game is quoted against. Deliberately the request: it is a
+## choice of tempo (how fast this animal travels when it is merely going
+## somewhere), so the ask is the stable ruler and `speed_norm` reports honestly
 ## against it — a body whose legs cannot keep up simply never reaches 1.
 func cruise_speed() -> float:
 	return maxf(body.move_speed, 1.0)
 
 
-## The speed it would travel at with everything open — deliberately the request
-## alone, where `cruise_speed` takes the lower of the two once there are legs to
-## take it against. Effort has to mean the same thing from one tick to the next.
+## The speed it can actually reach with everything open — the legs' own derived
+## ceiling (Footwork.deliverable: stride over swing tempo, off the rest anatomy
+## and the census's power), never an authored number. Floored at the cruise ask
+## so effort ratios stay sane on a body too broken to outrun its own walk.
 func flat_out() -> float:
-	return maxf(body.move_speed * body.sprint_multiplier, 1.0)
+	return maxf(travel.footwork.deliverable(self), cruise_speed())
 
 
 func centre() -> Vector2:

@@ -95,6 +95,23 @@ const SWING_MAX: float = 0.50
 ## leaning and by pace. A climb adds its own rise on top.
 const STEP_H: float = 3.0
 
+## How high the gathered beat carries a swinging paw over the walk's own
+## clearance, as a share of that limb's length at a fully developed bound.
+## Anatomy-scaled, not authored per gait: a galloping cat snaps its forearms
+## up toward its chest and its hocks toward its hips, and how much paw that
+## lifts is how much leg there is to fold. The fore folds higher — the reach
+## phase of a gallop carries the paws up past the elbow — and both fade to
+## exactly nothing as `Rhythm.bound` does, so a walk keeps its low, economical
+## step.
+const BOUND_LIFT_FORE: float = 0.32
+const BOUND_LIFT_HIND: float = 0.22
+
+## Share of a limb's plan capacity the striding disc spends — the rest is the
+## margin the tear-off, the stretch ramp and a mispredicted landing live in.
+## The capacity itself is anatomy (reach at the stops, minus the carry
+## height); this is the one policy number between it and the stride.
+const STRIDE_SHARE: float = 0.85
+
 ## How far ahead of its landing home a foot is set down, as a share of the
 ## stride it is about to be walked over (spec.foot_lead scales it).
 ## The landing prediction, not a drive: the body travels over the foot.
@@ -109,13 +126,21 @@ const RESCUE_REACH: float = 0.9
 ## whatever the drift says. Quoted on the plan and not on the bare span
 ## because a standing leg is mostly vertical: the fore leg spends nine tenths
 ## of its reach just standing, and a span-quoted ask would fire from the
-## stance itself. The ramp ends at the tear-off, and it starts early enough
-## that a *standing* body whose whole support is creeping toward the edge —
-## every anchor stretching in step, because the trunk slides as one piece —
-## can renew its four legs one at a time before the anatomy binds: a walk's
-## serial queue takes most of a second to turn three legs over, and an ask
-## that fired closer to the tear had all three torn off together instead.
-const STRETCH_ASK: float = 0.90
+## stance itself. The ramp starts early enough that a *standing* body whose
+## whole support is creeping toward the edge — every anchor stretching in
+## step, because the trunk slides as one piece — can renew its four legs one
+## at a time before the anatomy binds: a walk's serial queue takes most of a
+## second to turn three legs over, and an ask that fired closer to the tear
+## had all three torn off together instead.
+const STRETCH_ASK: float = 0.85
+## ...and it reaches undeniable *before* the tear-off, not at it. Mapping the
+## ramp's top onto the tear itself meant a queued foot only outranked the
+## walk's single seat at the exact stretch where its anchor was already gone —
+## so a creeping stand drained nothing early, three legs arrived at the cliff
+## together, and the body stood on one foot while all of them re-planted. At
+## 0.95 a near-torn foot goes desperate with capacity still in hand, the
+## queue drains two at a time, and the mass tear never assembles.
+const STRETCH_DESPERATE: float = 0.95
 
 ## The lateral-sequence seed, per foot in armature order (FL, FR, HL, HR):
 ## how far behind its own rhythm each anchor starts, as a phase. Only read at
@@ -181,8 +206,20 @@ class Foot extends RefCounted:
 ## Per-girdle geometry re-measured each tick off the active carriage — the
 ## anatomy the steps are constrained by.
 class Span extends RefCounted:
-	## Fore-aft excursion radius of the pair's foot, px.
+	## Fore-aft excursion radius of the pair's foot, px — the striding disc,
+	## quoted at the joint's lock because a stride reaches.
 	var excursion: float = 10.0
+	## The same radius at the joint's stand — the disc a body at rest is
+	## comfortable holding its feet inside. A standing animal's drift is
+	## quoted against this: parked feet are held near their stance, not out
+	## at the full reach a stride is entitled to, so a shove that skews the
+	## stance gets tidied by a step instead of being braced forever.
+	var comfort: float = 8.0
+	## The disc's *lateral* radius — the bare leg's plan capacity, without
+	## the scapula. The blade glides fore and aft only, so a fore disc that
+	## spent the glide sideways plotted landings the leg could not span and
+	## tore them off the moment they arrived.
+	var lateral: float = 10.0
 	## What the pair holds its girdle at above its feet, px.
 	var clearance: float = 20.0
 	## Swing speed, px/s.
@@ -227,16 +264,28 @@ var _hind_ground: float = 0.0
 ## not inflate the regime), cached at build because it cannot move in life.
 var _rest_hip: float = 30.0
 
+## The carriage of the stance the body is built in, for `deliverable` — the
+## rest anatomy, deliberately, so the speed the legs quote cannot chase the
+## pose the speed produced.
+var _rest_carriage: Carriage
+
 var _outlook: Outlook
 var _rhythm: Rhythm
 
 
 ## Adopts the armature's limbs, planted exactly where the layout stood them,
-## with the lateral-sequence seed staggering their rhythm.
-func build(creature: Creature2, outlook: Outlook, rhythm: Rhythm) -> void:
+## with the lateral-sequence seed staggering their rhythm. `seeded` is the
+## spawn's privilege: a body standing back up mid-life adopts its feet exactly
+## where its toes actually lie — its limbs were already solved this tick, and
+## an anchor seeded away from a placed toe is a toe measurably off its own
+## support for the one tick before the next solve. The walk re-finds its
+## stagger from drift on its own.
+func build(creature: Creature2, outlook: Outlook, rhythm: Rhythm,
+		seeded: bool = true) -> void:
 	_outlook = outlook
 	_rhythm = rhythm
 	_rest_hip = creature.body.stance_height(false)
+	_rest_carriage = Carriage.new(creature.body, creature.body.posture)
 	rise = 1.0
 	stride_landed = false
 	feet.clear()
@@ -252,8 +301,9 @@ func build(creature: Creature2, outlook: Outlook, rhythm: Rhythm) -> void:
 		var toe: Vector3 = a.pos[limb.nodes[limb.nodes.size() - 1]]
 		var reach: Span = _fore if f.fore else _hind
 		var phase: float = SEED_PHASE[i] if i < SEED_PHASE.size() else 0.0
-		f.anchor = Vector2(toe.x, toe.y) \
-			+ dir * ((phase - 0.5) * SEED_SHARE * reach.excursion)
+		f.anchor = Vector2(toe.x, toe.y)
+		if seeded:
+			f.anchor += dir * ((phase - 0.5) * SEED_SHARE * reach.excursion)
 		f.anchor_z = _outlook.surface(f.anchor)
 		f.stood_z = f.anchor_z
 		f.home = f.anchor
@@ -369,11 +419,15 @@ func tick(delta: float, creature: Creature2, velocity: Vector2, lean: Vector2,
 			# standing *ahead* of its home is support the body is about to walk
 			# over, and asking it to step is what turned a walk into a scramble.
 			var need: float = drift.length()
+			# A travelling body spends the striding disc; one standing still is
+			# only comfortable inside the stance's own — see Span.comfort.
+			var room: float = reach.comfort
 			if travel_dir != Vector2.ZERO:
 				var along: float = maxf(drift.dot(travel_dir), 0.0)
 				var lat: float = drift.dot(Vector2(-travel_dir.y, travel_dir.x))
 				need = Vector2(along, lat).length()
-			f.urgency = need / maxf(TRIGGER * reach.excursion, 0.001)
+				room = reach.excursion
+			f.urgency = need / maxf(TRIGGER * room, 0.001)
 			# ...and the anatomy has its own voice: the drift is measured to the
 			# foot's *preferred* spot, and a lean can park the preference right
 			# next to the anchor while the leg itself is quietly running out of
@@ -385,7 +439,8 @@ func tick(delta: float, creature: Creature2, velocity: Vector2, lean: Vector2,
 			# stretch arrives.
 			if f.stretch > STRETCH_ASK:
 				f.urgency = maxf(f.urgency, 1.0 + (f.stretch - STRETCH_ASK)
-					/ maxf(1.0 - STRETCH_ASK, 0.001) * (Rhythm.DESPERATE - 1.0))
+					/ maxf(STRETCH_DESPERATE - STRETCH_ASK, 0.001)
+					* (Rhythm.DESPERATE - 1.0))
 			if absf(f.anchor_z - f.stood_z) > GROUND_SHIFT:
 				# The world moved under the anchor — the ground gone from under a
 				# foot (or risen through it) is a step nothing may deny.
@@ -563,11 +618,20 @@ func _predict(a: Armature, f: Foot, velocity: Vector2, lean: Vector2,
 	var plan: Vector2 = home_then + dir * lead
 	if f.rescue_at.x < INF:
 		plan = f.rescue_at
-	# Anatomy last: a foot cannot land past its own excursion.
+	# Anatomy last: a foot cannot land past its own excursion — and the disc
+	# is an ellipse, because the scapula's share of the fore radius exists
+	# fore and aft only (Span.lateral is the bare leg's sideways capacity).
 	var socket_then: Vector2 = socket + velocity * left
 	var out: Vector2 = plan - socket_then
-	if out.length() > reach.excursion:
-		plan = socket_then + out.normalized() * reach.excursion
+	var fwd_p: Vector2 = a.fwd[f.limb.parent_node]
+	var out_along: float = out.dot(fwd_p)
+	var out_lat: float = out.dot(Vector2(-fwd_p.y, fwd_p.x))
+	var over: float = sqrt(
+		pow(out_along / maxf(reach.excursion, 0.001), 2.0)
+		+ pow(out_lat / maxf(reach.lateral, 0.001), 2.0))
+	if over > 1.0:
+		plan = socket_then + (fwd_p * out_along
+			+ Vector2(-fwd_p.y, fwd_p.x) * out_lat) / over
 	# ...and the world answers with the surface the landing is actually on.
 	var leg: float = spec.limb_length(f.fore)
 	return _outlook.reach_along(Vector2(f.lift.x, f.lift.y), plan, f.lift.z, leg)
@@ -626,11 +690,33 @@ func _measure(creature: Creature2) -> void:
 		var reach: Span = _fore if fore else _hind
 		var joint: Carriage.Joint = carriage.of(fore)
 		var leg: float = spec.limb_length(fore)
-		reach.excursion = maxf(carriage.fore_aft_reach(leg, joint.stand,
-			spec.stance_width), 2.0)
 		reach.clearance = carriage.stance_clearance(leg, joint.stand,
 			spec.stance_width,
 			spec.front_foot_bias if fore else spec.rear_foot_bias)
+		# The striding disc is a share of the limb's *plan capacity*: what its
+		# true anatomical reach (the joints' own extension stops) leaves
+		# across the ground once the carry height is spent — the same quantity
+		# the tear-off measures, quoted one seam earlier so a stride and its
+		# own honesty rule cannot disagree. Quoting the stand's annulus here
+		# was a mincing stride that never used the reach the leg had; quoting
+		# the lock's was worse — a disc wider than the leg can span at its
+		# own standing height, so landings were plotted outside anatomy and
+		# torn off the moment they arrived, over and over. The fore adds the
+		# scapula: the glenoid follows the working foot by the rig's glide,
+		# the blade acting as the first segment of the limb, and that travel
+		# is most of why the strutted fore strides anything like the hind.
+		var span_max: float = leg * creature.armature.rig.reach_share(fore)
+		var plan_cap: float = sqrt(maxf(span_max * span_max
+			- reach.clearance * reach.clearance, 4.0))
+		reach.lateral = maxf(STRIDE_SHARE * plan_cap, 2.0)
+		if fore:
+			plan_cap += minf(Rig.SCAP_FOLLOW * plan_cap,
+				Rig.SCAP_TRAVEL * spec.scapula_len)
+		reach.excursion = maxf(STRIDE_SHARE * plan_cap, 2.0)
+		# At a stand the comfortable disc is the stance's own annulus — never
+		# wider than the striding disc, which is a capacity, not a taste.
+		reach.comfort = clampf(carriage.fore_aft_reach(leg, joint.stand,
+			spec.stance_width), 2.0, reach.excursion)
 		reach.sweep = SWING_RATE * leg \
 			* (TWITCH_FLOOR + TWITCH_SPAN * spec.fast_twitch) * joint.gear \
 			* engine
@@ -697,7 +783,9 @@ func _write(creature: Creature2) -> void:
 			var carriage: Carriage = creature.attitude.active
 			var rise: float = STEP_H * carriage.step_height_gain \
 				* (0.6 + 0.8 * clampf(creature.speed_norm, 0.0, 1.5)) \
-				+ maxf(f.land.z - f.lift.z, 0.0) * 0.35
+				+ maxf(f.land.z - f.lift.z, 0.0) * 0.35 \
+				+ _rhythm.bound * creature.body.limb_length(f.fore) \
+				* (BOUND_LIFT_FORE if f.fore else BOUND_LIFT_HIND)
 			var plan: Vector2 = Vector2(f.lift.x, f.lift.y).lerp(
 				Vector2(f.land.x, f.land.y), s)
 			var z: float = lerpf(f.lift.z, f.land.z, s) + sin(t * PI) * rise
@@ -781,3 +869,56 @@ func clearance(fore: bool) -> float:
 
 func sweep(fore: bool) -> float:
 	return (_fore if fore else _hind).sweep
+
+
+## The speed these legs can actually deliver flat out, px/s — the anatomical
+## ceiling every ask is ultimately spent against, derived and never authored.
+##
+## The arithmetic is the stride cycle read backwards. A swinging foot must
+## regain, against the ground, the stride it just spent: its own excursion plus
+## the trigger's share of drift, minus what the scapula's glide hands the fore
+## pair for free. It regains it at the margin between how fast the leg can
+## sweep (the same tempo law `_measure` prices swings with, at the haste the
+## gait tops out at) and how fast the body is carrying its socket away — and it
+## has at most `SWING_MAX` to do it in, because past that a swing is a limp.
+## Solve that for the body's speed and each girdle quotes a ceiling; the animal
+## travels at the slower girdle, which for the cat is the short-strutted fore —
+## exactly the anatomy that binds a real gallop.
+##
+## Every term is the body's own: leg length, twitch, tendon gearing, the rest
+## stance's reach, the census's power (wounds genuinely slow the sprint). The
+## rest carriage deliberately — quoting the live pose would let the speed chase
+## the crouch the speed produced. Nothing here reads the solved gait.
+func deliverable(creature: Creature2) -> float:
+	var spec: BodySpec = creature.body
+	if _rest_carriage == null:
+		_rest_carriage = Carriage.new(spec, spec.posture)
+	var engine: float = sqrt(clampf(creature.travel.impetus.power, 0.05, 4.0))
+	# The quickest beat the gait ever asks for — `_lift`'s haste at its own
+	# pace cap.
+	var haste: float = 1.0 + 0.6 * 1.5
+	var least: float = INF
+	for fore in [true, false]:
+		var joint: Carriage.Joint = _rest_carriage.of(fore)
+		var leg: float = spec.limb_length(fore)
+		# The same striding disc `_measure` quotes, off the rest carriage.
+		var span_max: float = leg * creature.armature.rig.reach_share(fore)
+		var clear_h: float = _rest_carriage.stance_clearance(leg, joint.stand,
+			spec.stance_width,
+			spec.front_foot_bias if fore else spec.rear_foot_bias)
+		var plan_cap: float = sqrt(maxf(span_max * span_max
+			- clear_h * clear_h, 4.0))
+		var glide: float = 0.0
+		if fore:
+			glide = minf(Rig.SCAP_FOLLOW * plan_cap,
+				Rig.SCAP_TRAVEL * spec.scapula_len)
+			plan_cap += glide
+		var exc: float = maxf(STRIDE_SHARE * plan_cap, 2.0)
+		var sweep_rate: float = SWING_RATE * leg \
+			* (TWITCH_FLOOR + TWITCH_SPAN * spec.fast_twitch) * joint.gear \
+			* engine
+		# What the foot must regain against the ground each cycle — the blade's
+		# travel is regained for free, the glenoid moving with the foot.
+		var stride: float = maxf((1.0 + TRIGGER) * exc - 2.0 * glide, 0.0)
+		least = minf(least, sweep_rate * haste - stride / SWING_MAX)
+	return maxf(least, 1.0)

@@ -20,8 +20,13 @@ class_name MotionScenario
 extends RefCounted
 
 ## The ask a scenario cruises at, as a share of flat out — the handoff's warm
-## start, and the throttle the drive slider opens on.
-const CRUISE: float = 0.61
+## start, and the throttle the drive slider opens on. Flat out stopped being
+## an authored 100 px/s the day the legs started quoting their own ceiling
+## (`Footwork.deliverable`, ~157 px/s on the reference cat), so the share is
+## re-pinned to keep the scenarios' working pace where it was tuned: a fast
+## walk of ~60 px/s, quick enough to be worth watching and slow enough that
+## the ledge run is still on its pad when the probe looks.
+const CRUISE: float = 0.38
 
 ## The shove, as a multiple of this animal's own flat out, and when it lands.
 ##
@@ -33,7 +38,11 @@ const CRUISE: float = 0.61
 ## biggest one that leaves the animal standing, with room under the threshold.
 ## At 1.15 it staggers ~12 px across its own line, heels ~13° and steps to catch
 ## itself (`tests/PhysicsHudProbe.gd` pins exactly that).
-const SHOVE_SHARE: float = 1.15
+## Re-pinned with `CRUISE` when flat out became the legs' derived ceiling:
+## the scenario's calibrated stimulus is ~115 px/s on the reference cat —
+## hard enough to demand rescue steps, short of the topple the collapse
+## scenario owns — and the share moves so the stimulus does not.
+const SHOVE_SHARE: float = 0.73
 const SHOVE_AT: float = 1.6
 const COLLAPSE_AT: float = 1.6
 

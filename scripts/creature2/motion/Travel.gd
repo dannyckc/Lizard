@@ -113,8 +113,11 @@ const STERNAL: float = 0.12
 const BOUND_FLOOR: float = 0.25
 ## The stride hop's muscle cap, as a share of a full standing jump's peak: the
 ## legs at a gallop spend their extension through the stride, not gathered
-## under a charge.
-const BOUND_PEAK_SHARE: float = 0.25
+## under a charge. A quarter was a suspension you had to squint for; at 0.35
+## the hind pair's push-off buys a flight long enough to read as one — the
+## airborne share of a stride is most of what separates a gallop's silhouette
+## from a fast trot's, and it is also free stride length no leg has to sweep.
+const BOUND_PEAK_SHARE: float = 0.35
 
 ## How quickly the spine's stride share follows the measured gait, per second —
 ## an easing on a measurement, so the back rounds through the stride instead of
@@ -122,9 +125,14 @@ const BOUND_PEAK_SHARE: float = 0.25
 const SPINE_EASE: float = 10.0
 ## What a full gather folds and a full drive extends the back by, as `bunch`
 ## shares of the trunk's plan rests. The flexion is the bigger half — a
-## galloping cat's lumbar spine rounds far more than it hollows.
-const BUNCH_FLEX: float = 0.18
-const BUNCH_EXT: float = 0.08
+## galloping cat's lumbar spine rounds far more than it hollows. 0.18/0.08 was
+## anatomically defensible and visually mute: the gather barely shortened the
+## picture and the gallop read as legs on a plank. A quarter of the trunk's
+## rests folded away at full gather is what a photographed cat's rounded back
+## actually costs its own length, and the drive's hollow grew with it so the
+## extended half of the stride opens as visibly as the gathered half closes.
+const BUNCH_FLEX: float = 0.26
+const BUNCH_EXT: float = 0.13
 
 ## The most turn rate a glancing contact may put into the body in one tick,
 ## rad/s — a cap on the lever arithmetic, not a second physics.
@@ -296,8 +304,11 @@ func steer(delta: float, ground: float) -> void:
 	# down, and it is this floor that lets it stand *at* a brink instead of
 	# creeping over one it can no longer see.
 	var throttle: float = clampf(cmd.throttle, -1.0, 1.0)
-	var request: float = spec.move_speed \
-		* (spec.sprint_multiplier if cmd.sprint else 1.0)
+	# The walk is a request — how fast this animal chooses to travel when it is
+	# merely going somewhere. The sprint is not: it asks for everything, and
+	# "everything" is the legs' own derived ceiling (Footwork.deliverable), so
+	# nobody authors a top speed and the push's fade decides what is reached.
+	var request: float = creature.flat_out() if cmd.sprint else spec.move_speed
 	var ask: float = throttle * request \
 		* (spec.reverse_speed_factor if throttle < 0.0 else 1.0)
 	var motion: Vector2 = impetus.velocity * Outlook.HORIZON
@@ -341,7 +352,7 @@ func steer(delta: float, ground: float) -> void:
 
 	# The middle of the loop: desire → demand → delivery → the real velocity.
 	impetus.propel(delta, dir * ask, dir, creature.attitude.active.drive,
-		footwork.grip, airborne)
+		footwork.grip, airborne, creature.flat_out())
 
 	var dtheta: float = creature.ang_vel * delta
 	# Which end is leading. A body going forward is *pulled*: the head is the
@@ -809,7 +820,7 @@ func _arise() -> void:
 	_asked = 0.0
 	_spin = 0.0
 	creature.ang_vel = 0.0
-	footwork.build(creature, outlook, rhythm)
+	footwork.build(creature, outlook, rhythm, false)
 	creature.head_pos = a.plan(a.head_index())
 	a.take_head(creature.head_pos)
 	_down = Down.RISING

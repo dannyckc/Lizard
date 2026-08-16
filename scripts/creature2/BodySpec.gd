@@ -162,8 +162,16 @@ class ChainSpec extends RefCounted:
 @export var hind_foot_lead: float = -2.0
 ## How far ahead of its rest point a foot is aimed, as a share of the stride.
 @export var foot_lead: float = 0.45
-## How readily a limb is pulled onto a beat its partner has just taken.
-@export var beat_coupling: float = 0.55
+## How readily a limb is pulled onto a beat its diagonal partner has just
+## taken. 0.55 reached an invitation to partners three quarters of the way to
+## their own ask — enough to *hold* a trot that already existed, and not
+## enough to capture one out of a walk's lateral sequence once the strides
+## lengthened: partners were arriving at the beat two thirds ready, reading
+## the invitation's floor from just underneath, and the cruise ran as a pace
+## of accidental overlaps. A cat is a strongly trotting animal; at 0.75 the
+## invitation reaches those partners and the diagonal lock re-forms within a
+## stride of the speed asking for it.
+@export var beat_coupling: float = 0.75
 
 # ---------------------------------------------------------------- travel ----
 # What the animal asks for. Requests, not promises: the legs answer with a
@@ -183,7 +191,11 @@ class ChainSpec extends RefCounted:
 ## same stride comes out near 1.5 Hz, the swing has time to be a swing, and the
 ## pacing is the walk it always claimed to be.
 @export var move_speed: float = 54.0
-@export var sprint_multiplier: float = 1.85
+## There is deliberately no sprint speed here. A sprint asks for everything,
+## and what "everything" comes to is derived from the legs themselves —
+## stride over swing tempo, off the rest anatomy and the census's power
+## (`Footwork.deliverable`) — so the top speed is the body's own and cannot
+## be authored past what its anatomy quotes.
 ## The ceiling on how fast the body comes round, deg/s, before the stance's
 ## `agility` and the pace's `turn_speed_falloff` have taken their share of it.
 ##
@@ -199,28 +211,35 @@ class ChainSpec extends RefCounted:
 ## 90 was where the second problem went away — the body tracked its own heading
 ## through both the standstill pivot and the walking arc, and what lag was left
 ## had the sign of the *steer* rather than of a heading running away from the
-## body. 58 is the same number asked of a cat rather than of a mechanism: on the
-## crouched carriage this animal stands in it comes out at 75 deg/s on the spot
-## and delivers about 48, so a full turn takes the better part of three seconds
-## and every degree of it is a body being walked round by its feet. The gap
-## between 90 and 58 is entirely what made the turn read as a pivot rather than
-## as an animal changing its mind about where it was going.
-@export var turn_speed_deg: float = 58.0
+## body. 58 kept that and read as deliberate — and too deliberate: a full turn
+## took the better part of three seconds, which is a cat being careful, not a
+## cat. 72 sits between the two lessons: on the crouched carriage this animal
+## stands in it comes out near 94 deg/s on the spot, so an about-face is a bit
+## over two seconds of the body walking itself round — quick enough to read as
+## nimble, still slow enough that the trunk tracks its own heading and no
+## degree of it is a sprite rotating.
+@export var turn_speed_deg: float = 72.0
 ## How quickly the turn rate answers the key, as an easing rate: the body reaches
 ## its turn over about `1 / this` seconds and gives it up again as gradually.
 ##
 ## Weight, and the only place the controls have any. v1's 14 is a 71 ms constant,
 ## which is a body with no rotational inertia at all — the turn is simply on
 ## while the key is down and off when it is not, and tapping A and D alternately
-## makes the animal shudder rather than pick a way to go. At 4 the rate builds
-## over a quarter of a second and coasts out over the same, so a stab at the key
-## is a lean rather than a jerk, a held key is a committed turn, and letting go is
-## an animal settling out of one. It cannot overshoot — the ease only ever
-## approaches the rate the key is asking for — so what this buys is entirely the
-## absence of sudden changes, which is the whole of what a heavy animal has and a
-## sprite has not.
-@export var turn_responsiveness: float = 4.0
-@export var turn_speed_falloff: float = 0.50
+## makes the animal shudder rather than pick a way to go. At 4 the rate built
+## over a quarter of a second, which read as weighted and *felt* like wading: a
+## cat answers its own decision to turn inside a stride, not across one. 6 is
+## the cat's number — the rate arrives over about 170 ms and coasts out over the
+## same, so a stab at the key is still a lean rather than a jerk, but a held key
+## is answered while the paw that asked for it is still in the air. It cannot
+## overshoot — the ease only ever approaches the rate the key is asking for — so
+## the weight survives the quickening: what changed is how soon the animal
+## commits, not whether it snaps.
+@export var turn_responsiveness: float = 6.0
+## How much of the turn rate survives at full pace. 0.5 halved it, and a
+## sprinting cat that could only nose through a bend was half of what read as
+## sluggish; 0.62 keeps the arc honest — a gallop still turns wider than a
+## walk — while leaving the sprint enough rudder to be steered.
+@export var turn_speed_falloff: float = 0.62
 @export var reverse_speed_factor: float = 0.60
 ## How far behind the head the body turns about, px.
 @export var turn_pivot: float = 38.0

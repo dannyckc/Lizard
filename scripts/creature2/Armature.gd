@@ -1036,11 +1036,30 @@ func girdle_of(limb: Chain) -> Vector3:
 
 ## Places every limb: the socket rides its girdle, the foot reaches for the
 ## ground, and the rig's constrained solve folds the bones between the two in
-## the limb's own vertical plane (x along the socket→foot run, y absolute
-## height) — deterministic, symmetric, digitigrade, and stopped at each
-## joint's anatomical range. The elbow and stifle stand a little out of that
-## plane (the lateral bow); the in-plane lengths are pre-shrunk by exactly
-## the bow's cost, so bone lengths stay exact in 3D.
+## the girdle's own *sagittal* plane (x signed along the body's forward from
+## the socket, y absolute height) — deterministic, symmetric, digitigrade, and
+## stopped at each joint's anatomical range.
+##
+## The plane is the anatomy's, never the foot's. The elbow, carpus, stifle and
+## tarsus are hinges: their one degree of freedom is flexion/extension in the
+## limb's working plane, and that plane is fixed to the trunk. Solving instead
+## in the vertical plane through socket and foot — the old rule — let the plane
+## *yaw* freely about the socket: every stance the body walked over its anchor
+## swung the plane half a turn, every swing wound it back, and a leg whose
+## joints ended each cycle exactly where they began had visibly rotated through
+## a full revolution on the way — the unwinding-limb artefact. With the plane
+## pinned, a foot fore or aft of its socket is a signed x and the hinges only
+## ever fold and unfold.
+##
+## What the foot keeps of its third dimension is the socket's to give: the
+## ball joint *abducts* — the whole working plane rolls about the body's
+## fore-aft axis through the socket until it contains the foot, and the hinges
+## fold inside the rolled plane exactly as they fold inside the level one. A
+## rigid rotation, so the solve never sees it: it is handed the same
+## two-dimensional problem with the plane's own down standing in for the
+## vertical, and every bone length survives to the digit. The authored bow
+## (the elbow standing a little proud of the plane) rides the plane's normal
+## and keeps its own pre-shrunk in-plane lengths, exactly as before.
 ## A walking limb is placed, not integrated — prev mirrors pos so a mode
 ## switch hands the ragdoll no phantom velocity.
 func _place_limbs(surface: float) -> void:
@@ -1052,43 +1071,55 @@ func _place_limbs(surface: float) -> void:
 		var socket_z: float = seat.z
 		var target_plan: Vector2 = socket_plan + fwd[p] * limb.foot_lead
 		var target_z: float = surface
-		var axis: Vector2 = fwd[p]
 		var standing: bool = true
 		if limb.foot_driven:
-			# The gait owns the foot and the corner this leg is holding up. The solve
-			# plane is the vertical one containing the socket and the foot — which is
-			# what makes a sprawled elbow fold across the floor and a columnar knee
-			# fold through the air beneath the body without anything choosing between
-			# them, because the plane tilts up as the limb does.
+			# The gait owns the foot and the corner this leg is holding up.
 			socket_z = limb.socket_rise
 			target_plan = Vector2(limb.foot_target.x, limb.foot_target.y)
 			target_z = limb.foot_target.z
 			standing = limb.grounded
-			var run: Vector2 = target_plan - socket_plan
-			axis = run.normalized() if run.length_squared() > 0.000001 else limb.plane
+		var axis: Vector2 = fwd[p]
 		limb.plane = axis
-		var lead: float = signf(fwd[p].dot(axis))
+		var n_plan: Vector2 = perp[p]
+		var run: Vector2 = target_plan - socket_plan
+		# The foot in the socket's frame: fore-aft is the hinges' business —
+		# signed, a trailing foot is a negative x, never a flipped plane —
+		# and everything off the sagittal line is the ball joint's abduction.
+		var along: float = run.dot(axis)
+		var abduct: float = run.dot(n_plan)
+		var rise: float = socket_z - target_z
+		# The roll of the working plane: its own down is `rho` of drop toward
+		# the foot, of which `tilt_down` is world height and `tilt_lat` is
+		# lateral lean. Level (a foot on the sagittal line) this is exactly
+		# the vertical plane and the two shares are 1 and 0.
+		var rho: float = sqrt(rise * rise + abduct * abduct)
+		var tilt_down: float = 1.0
+		var tilt_lat: float = 0.0
+		if rho > 0.001:
+			tilt_down = rise / rho
+			tilt_lat = abduct / rho
 		var bow: float = spec.fore_bow if fore else spec.hind_bow
-		var offs := PackedFloat32Array([0.0, bow, bow * 0.4, 0.0])
+		var bows := PackedFloat32Array([0.0, bow, bow * 0.4, 0.0])
 		var flat := PackedFloat32Array()
 		flat.resize(3)
 		for j in 3:
-			var step_out: float = offs[j + 1] - offs[j]
+			var step_out: float = bows[j + 1] - bows[j]
 			flat[j] = sqrt(maxf(limb.bones[j] * limb.bones[j]
 				- step_out * step_out, 0.01))
-		var target := Vector2((target_plan - socket_plan).dot(axis), target_z)
-		limb.sag = rig.solve_limb(flat, socket_z, target, lead, fore, standing)
+		var target := Vector2(along, socket_z - rho)
+		limb.sag = rig.solve_limb(flat, socket_z, target, 1.0, fore, standing)
 		limb.cramped = rig.cramped and standing and limb.foot_driven
-		# Which way in plan is outboard of this limb's own plane.
-		var n_plan := Vector2(-axis.y, axis.x)
-		var out_sign: float = signf(n_plan.dot(perp[p]) * limb.side)
-		if out_sign == 0.0:
-			out_sign = 1.0
+		# Out of the plane and back into the world: in-plane drop maps onto
+		# the plane's rolled down, the bow onto its normal — an orthobasis, so
+		# the placement is the rigid rotation the abduction claims to be.
 		for j in limb.nodes.size():
 			var i: int = limb.nodes[j]
+			var drop: float = socket_z - limb.sag[j].y
+			var out: float = limb.side * bows[j]
 			var plan: Vector2 = socket_plan + axis * limb.sag[j].x \
-				+ n_plan * (out_sign * offs[j])
-			pos[i] = Vector3(plan.x, plan.y, limb.sag[j].y)
+				+ n_plan * (drop * tilt_lat + out * tilt_down)
+			pos[i] = Vector3(plan.x, plan.y,
+				socket_z - drop * tilt_down + out * tilt_lat)
 			prev[i] = pos[i]
 
 

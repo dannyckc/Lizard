@@ -98,9 +98,11 @@ func derive(corpus: Corpus) -> void:
 ## One tick of the middle of the loop: desired velocity in, actual velocity
 ## moved as far toward it as the feet allow. `along` is the body's facing, for
 ## the grip's sense of sideways; `drive` is the stance's leaning
-## (Carriage.drive); `grip` is Footwork's press measurement, 0..1.
+## (Carriage.drive); `grip` is Footwork's press measurement, 0..1; `flat_out`
+## is what the legs can deliver (Footwork.deliverable) — the anatomical speed
+## ceiling the push fades toward.
 func propel(delta: float, desired_v: Vector2, along: Vector2, drive: float,
-		grip: float, airborne: bool) -> void:
+		grip: float, airborne: bool, flat_out: float = INF) -> void:
 	if airborne:
 		# Ballistic: the plan velocity is whatever the take-off left, until the
 		# ground is back under the feet. The vertical belongs to Gravity.Fall.
@@ -115,6 +117,14 @@ func propel(delta: float, desired_v: Vector2, along: Vector2, drive: float,
 	# Braking is any demand that takes speed out of the body.
 	if want.dot(velocity) < 0.0:
 		ceiling *= BRAKE
+	elif is_finite(flat_out) and flat_out > 0.0:
+		# The v1 effort law, back where it belongs: a leg moving at the speed
+		# of its own swing has nothing left to press with, so the push fades
+		# linearly to zero at the legs' derived flat-out. Top speed is the
+		# solution of this fade, never a number anyone set — a fresh body
+		# saturates just under what its own stride and tempo quote, a wounded
+		# one under the slower ceiling its shrunken engine re-derives.
+		ceiling *= clampf(1.0 - velocity.length() / flat_out, 0.0, 1.0)
 	demand = want
 	thrust = want.limit_length(ceiling)
 	velocity += thrust * delta

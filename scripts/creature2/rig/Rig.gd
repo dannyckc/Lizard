@@ -68,8 +68,11 @@ const TAIL_LATERAL_REF: float = 26.0
 # stand at what the legs deliver. APPROX: the rise is expressed as a bump on
 # the carried heights (the Z channel's law: assigned, never integrated).
 const TRUNK_ARCH: Array[float] = [0.0, 0.55, 0.95, 1.0, 0.75, 0.45, 0.18, 0.0]
-## Peak arch rise at full crouch, as a share of trunk length.
-const ARCH_RISE: float = 0.10
+## Peak arch rise at full crouch, as a share of trunk length. 0.10 was under-
+## expressed against the mid-gallop photographs (the lumbar rise on a gathered
+## cat is nearer an eighth of the trunk than a tenth); the gait's gather and
+## the crouch both spend it, so both round more visibly now.
+const ARCH_RISE: float = 0.13
 
 # ------------------------------------------------------------- the limbs ----
 # Interior-angle stops, degrees. These are *passive* anatomical stops — what
@@ -102,11 +105,16 @@ const HIP_ROM := Vector2(40.0, 162.0)
 # Boczek-Funcke et al. 1996 X-ray kinematics: scapula ~40° off horizontal in
 # late swing, 45°±7° at touchdown). APPROX — modelled as a fore-aft glide of
 # the glenoid: the socket follows the working foot by SCAP_FOLLOW of its
-# fore-aft excursion, capped to SCAP_TRAVEL of the scapula's own length.
+# fore-aft excursion, capped to SCAP_TRAVEL of the scapula's own length. The
+# cap is sized to the kinematics above: a blade sweeping tens of degrees
+# carries its glenoid most of its own length fore and aft, and this glide is
+# the whole of why the strutted fore leg strides anything like its hind —
+# the fore's plan capacity at stance height is barely 15 px and the blade's
+# travel is how the anatomy spends reach it does not have in its bones.
 ## How much of the foot's fore-aft excursion the shoulder socket follows.
-const SCAP_FOLLOW: float = 0.35
+const SCAP_FOLLOW: float = 0.45
 ## Cap on that glide, as a share of scapula length either way.
-const SCAP_TRAVEL: float = 0.45
+const SCAP_TRAVEL: float = 0.60
 
 # FACT — cats stabilise the head against trunk motion (vestibular righting;
 # the beam-perturbation work that shows the trunk organising itself around a
@@ -281,13 +289,15 @@ func scapula_shift(foot_along: float) -> float:
 	return clampf(foot_along * SCAP_FOLLOW, -cap, cap)
 
 
-## The constrained limb solve, in the limb's own vertical plane. `bones` are
-## the in-plane bone lengths (the armature pre-shrinks them for the lateral
-## bow so 3D lengths stay exact), `socket_z` the solved socket height, `target`
-## the toe in plane coordinates (x along the plane's axis from the socket,
-## y world height), `lead` which way the animal's forward points along x,
-## `standing` whether the paw is bearing (a planted paw stands at its pastern
-## angle; a swinging one folds toward the shank).
+## The constrained limb solve, in the limb's own working plane — the sagittal
+## plane its hinges flex and extend in. `bones` are the in-plane bone lengths
+## (the armature pre-shrinks them for the lateral bow and the socket's
+## abduction so 3D lengths stay exact), `socket_z` the solved socket height,
+## `target` the toe in plane coordinates (x *signed* along the plane's axis
+## from the socket — a foot behind its socket is a negative x, not a flipped
+## plane), `lead` which way the animal's forward points along x, `standing`
+## whether the paw is bearing (a planted paw stands at its pastern angle; a
+## swinging one folds toward the shank).
 ##
 ## Deterministic and symmetric: the same inputs give the same limb, left and
 ## right, tick after tick — no seed, no history. Angular stops are the
@@ -340,11 +350,21 @@ func solve_limb(bones: PackedFloat32Array, socket_z: float, target: Vector2,
 		var met: Array = _circle_circle(s, floor_d, target, p)
 		if met.is_empty():
 			# The toe is being asked inside the folded limb's own core — hold
-			# the wrist at the stop along the asked direction and let the paw
-			# arrive where it can. A crush, and it reads as one.
+			# the wrist at the stop along the asked direction and fold the paw
+			# toward the ask at its own full length, arriving wherever that
+			# lands it. A crush, and it reads as one — but a bone is never the
+			# thing that gives: the toe moves off the ask, `cramped` says so,
+			# and the gait tears the impossible anchor a tick later. Leaving
+			# the toe on the ask instead left a paw bone up to its whole
+			# length short, which is a pose the skeleton cannot make.
 			var dir: Vector2 = (wrist - s).normalized() if d > 0.001 \
 				else Vector2(-lead, 0.0)
 			wrist = s + dir * floor_d
+			var paw_dir: Vector2 = target - wrist
+			paw_dir = paw_dir.normalized() \
+				if paw_dir.length_squared() > 0.0001 else -dir
+			target = wrist + paw_dir * p
+			cramped = true
 		else:
 			wrist = _pick(met, wrist)
 		d = floor_d
@@ -417,8 +437,9 @@ func solve_limb(bones: PackedFloat32Array, socket_z: float, target: Vector2,
 				# gait reads `cramped` and tears the anchor next tick; what it
 				# may not read is a paw standing outside its own anatomy for
 				# even the one tick in between.
-				cramped = absf(legal - interior) > 0.01
-				if cramped:
+				var stuck: bool = absf(legal - interior) > 0.01
+				cramped = cramped or stuck
+				if stuck:
 					var give: float = signf(wrapf(paw.angle() - shank.angle(),
 						-PI, PI))
 					target = wrist + paw.rotated(give * (interior - legal))
