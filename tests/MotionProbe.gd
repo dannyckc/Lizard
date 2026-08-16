@@ -377,6 +377,15 @@ func _check_ledge(c: Creature2) -> void:
 				fore_up = true
 		if not fore_up:
 			pre_lift = maxf(pre_lift, c.armature.fore_carry - rest_fore)
+	# Settle on the ledge before reading the steady carry: a walking body now
+	# breathes vertically (Footwork's vault bob), so a carry sampled mid-stride
+	# is the ledge height less the dip. The claim is that the body stands up on
+	# the ledge — its carry once it stops walking — not that it never dips while
+	# crossing onto it.
+	c.command.throttle = 0.0
+	for i in 45:
+		c._physics_process(TICK)
+		fell = fell or c.armature.collapsed
 	var a: Armature = c.armature
 	worst_stick = maxf(worst_stick, a.worst_stick_error())
 	worst_bend = maxf(worst_bend, a.worst_bend_excess())

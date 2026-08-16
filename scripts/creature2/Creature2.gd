@@ -53,18 +53,18 @@ const HEIGHT_LIFT: float = 0.006
 
 
 ## What is being asked of the animal this tick. The lab writes it from the
-## keyboard; nothing in the body cares where it came from — and, until the
-## locomotion is rewritten, nothing in the body reads it either.
+## keyboard; the loop in `Travel` reads it — throttle, turn, sprint, jump — and
+## delivers what the feet can, so what the animal gets is never the ask itself.
 class Command extends RefCounted:
 	var throttle: float = 0.0
 	var turn: float = 0.0
 	var sprint: bool = false
 	var jump: bool = false
 	## Where the cursor is, and whether it is saying anything. Purely aim: the
-	## head tracks it and — through `Gaze.lead` — the walk follows the head, but
-	## nothing device-specific reaches the body and no other axis is touched, so
-	## an animal crossing the paddock while the pointer is over a slider keeps
-	## going exactly where it was pointed.
+	## head tracks it (`Gaze`) and a strike is thrown along it, but it steers
+	## nothing — mouse-look and body steering are separate, and only A and D write
+	## `heading`, so an animal crossing the paddock while the pointer is over a
+	## slider keeps going exactly where it was pointed.
 	var aim_world: Vector2 = Vector2.ZERO
 	var aim_active: bool = false
 
@@ -411,12 +411,6 @@ func press_out(push: Vector2) -> void:
 	armature.shift(push)
 	if not maw.latched():
 		head_pos += push
-
-
-## Asks the jaws whether flesh at `at` on `target` is takeable from here —
-## the hover's preview, commitment-free.
-func aim_bite(target: Creature2, at: Vector2) -> Dictionary:
-	return maw.aim(target, at)
 
 
 ## Commits the strike: the lunge is the body moving, the jaws close on where

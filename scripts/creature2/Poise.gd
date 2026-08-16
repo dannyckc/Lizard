@@ -297,35 +297,6 @@ func carriage_deg(ahead: float) -> float:
 	return rad_to_deg(acos(clampf(ahead / maxf(lever, 0.0001), 0.0, 1.0)))
 
 
-## Where a girdle standing on its own has to put its feet — under the weight,
-## every time — as a share of the fore-and-aft reach they are placed out of.
-## `carried` is the angle the trunk is actually held at, because a reared body is
-## a foreshortened one and it has to be the same cosine `carriage_deg` inverts.
-func stand_under(reach: float, carried: float) -> float:
-	if reach <= 0.0001:
-		return 0.0
-	return clampf((maxf(built_com, 0.0) - girdle_x.y) * cos(carried) / reach,
-		-1.0, 1.0)
-
-
-## The least a girdle's resting feet have to be placed out from their own sockets
-## for the weight to be inside them, in the same share of the fore-and-aft reach
-## the foot bias is quoted in.
-##
-## A floor and never a replacement: on any build whose centre already sits
-## between its girdles — every ordinary quadruped — both answers are zero and not
-## one foot moves. It bites on exactly the builds it should, and neither case is
-## a rule about a species; both are the same subtraction.
-func bias_floor(reach: float, fore: bool) -> float:
-	if reach <= 0.0001:
-		return 0.0
-	var past: float = (com_x - girdle_x.x) if fore else (girdle_x.y - com_x)
-	if past <= 0.0:
-		return 0.0
-	# Out past the girdle, and then past it by the margin a stance keeps in hand.
-	return past / reach + KEEP
-
-
 ## The two feet a roll turns about: how far the outermost planted paw reaches to
 ## each side of the plumb line along `lat`, right in x and left in y, each grown
 ## by its own patch of ground.

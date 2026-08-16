@@ -147,9 +147,6 @@ class ChainSpec extends RefCounted:
 ## How much of the foot is a toe to push off from. A digitigrade cat is already
 ## standing on its toes and there is real push there.
 @export var toe_push: float = 0.50
-## The angle a trunk with nothing under its shoulders is carried at, degrees.
-## Zero on a quadruped, which has a second girdle and no question to answer.
-@export var trunk_lift_deg: float = 0.0
 ## Where each pair's foot rests fore-and-aft, as a share of what is left of its
 ## own disc once the lateral stance is spent. Front a little forward, rear a
 ## little back — which is what puts the feet at the corners of the weight.

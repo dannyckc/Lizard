@@ -444,13 +444,6 @@ func along() -> float:
 	return _com.x / maxf(trunk_length, 0.001)
 
 
-## What the animal would weigh whole. Only the readouts want this — nothing in
-## the body may be sized against a body that no longer exists.
-func built_mass() -> float:
-	_derive()
-	return _built_mass
-
-
 ## How much of its own tissue the creature still has, by weight — exactly 1.0
 ## on an intact animal. The whole-body counterpart of `soundness`, and it is a
 ## reading rather than a state: nothing is stored anywhere saying a creature is

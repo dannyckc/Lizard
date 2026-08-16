@@ -50,6 +50,14 @@ extends RefCounted
 ## nothing in reserve at all.
 const TRIGGER: float = 0.78
 
+## Least press a still-planted foot is quoted as having, whatever its drift —
+## the floor under `_press`. A foot on the ground is pressing until it lifts, so
+## its share of `grip` may thin as it trails its home but must not vanish while
+## it is still bearing weight. Without the floor two feet near their trigger at
+## once (an ordinary walk cycle) drove `grip` — and with it the whole engine —
+## to zero for a few ticks, the body between feet with nothing to press against.
+const PRESS_FLOOR: float = 0.5
+
 ## Swing speed, in limb lengths per second at the twitch datum. The one
 ## tempo scale: a longer leg swings a longer arc in the same time, a
 ## fast-twitch body sweeps quicker, and the tendon lever gears it (a tendon
@@ -162,6 +170,16 @@ const GROUND_SHIFT: float = 2.0
 ## the ground it is actually standing on.
 const ANTICIPATE: float = 0.45
 const ANTICIPATE_CAP: float = 4.0
+
+## How far a girdle dips between steps, px at full pace — the inverted-pendulum
+## bob a walking body has and v2 did not. The carries were a flat measurement of
+## the feet plus a constant clearance, so the weight glided at one height and the
+## walk read as a hover. This dips the carry below the stance clearance at double
+## support and lets it back up to the clearance at single support, off the pair's
+## own swing phase (`gather_of`), so the highest point of the bob is the ordinary
+## standing height and the leg only ever folds further for it — never reaches
+## past its stance, which is what tore the feet off when the bob was a rise.
+const VAULT: float = 6.0
 
 
 ## One foot: the world anchor, the swing, and the measurements between.
@@ -752,7 +770,16 @@ func _press(creature: Creature2) -> void:
 		if f.swinging:
 			continue
 		var reach: Span = _fore if f.fore else _hind
-		var left: float = clampf(1.0 - maxf(f.urgency, 0.0) * TRIGGER, 0.0, 1.0)
+		# A planted foot presses less the further it trails its home, but never
+		# nothing: it is still flat on the ground until the tick it actually
+		# lifts. The bare `1 − urgency·TRIGGER` reached zero a beat before a foot
+		# stepped, and with two feet near their trigger at once (every walk cycle)
+		# the whole engine went to nothing for a few ticks — the body between feet
+		# with no ground to press. Flooring the share keeps the traction a still-
+		# planted foot genuinely has while leaving the fade that makes a shoved,
+		# trailing foot give way (the rescue step) exactly as it was.
+		var left: float = clampf(1.0 - maxf(f.urgency, 0.0) * TRIGGER,
+			PRESS_FLOOR, 1.0)
 		# Soundness is the muscle still answering; numbness is the nerve still
 		# asking. A leg with either gone presses with that much less — a cut
 		# sciatic takes its leg out of the engine without touching the flesh.
@@ -838,6 +865,27 @@ func _carry(creature: Creature2, crouch: float, velocity: Vector2,
 			var girdle: Vector2 = a.plan(a.withers_index() if fore else a.pelvis_index())
 			coming = _outlook.rise_ahead(girdle, velocity * Outlook.HORIZON, ground)
 			carry += clampf(coming * ANTICIPATE, 0.0, ANTICIPATE_CAP)
+			# ...and the vault: a walking body rides highest as it passes over its
+			# own standing leg and settles between steps, so the weight breathes
+			# vertically instead of gliding. Written as a dip from the stance
+			# clearance at double support (this girdle's pair both down, nothing
+			# mid-swing) back up to it at single support (one foot swinging, its
+			# partner bearing the body) — downward only, so the leg folds into the
+			# bob and never has to reach past its own stance height for it, which
+			# is what tore the feet off when the vault was written as a rise.
+			# Scaled by pace, so a standing body does not bob and a brisk walk
+			# breathes most, and handed to the gallop's ballistic suspension as
+			# the bound develops, so the two never stack.
+			# Suppressed under the crouch: a body gathering for a jump or sinking
+			# into a landing has its feet planted, which reads as double support
+			# and would spend the full dip on a body that is deliberately low for
+			# a different reason — the crouch owns the vertical there, not the
+			# walk's bob, and without this the extra sink dropped a charged leap
+			# low enough to clip the lip of what it was jumping onto.
+			var support_phase: float = clampf(gather_of(fore) * 2.0, 0.0, 1.0)
+			carry -= VAULT * clampf(creature.speed_norm, 0.0, 1.0) \
+				* (1.0 - support_phase) * (1.0 - clampf(_rhythm.bound, 0.0, 1.0)) \
+				* (1.0 - clampf(crouch, 0.0, 1.0))
 		if fore:
 			fore_rise = coming
 			a.fore_carry = carry

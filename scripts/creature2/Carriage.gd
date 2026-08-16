@@ -243,14 +243,6 @@ class Joint extends RefCounted:
 			- 2.0 * upper * lower * cos(angle)
 		return clampf(sqrt(maxf(across, 0.0)), 0.0, 1.0)
 
-	## The inverse: what angle a chain measuring `share` of itself is folded to.
-	## A reading of a solved limb, never an input to one.
-	func angle_at(share: float) -> float:
-		var s: float = clampf(share, absf(upper - lower), 1.0)
-		return acos(clampf((upper * upper + lower * lower - s * s)
-			/ maxf(2.0 * upper * lower, 0.000001), -1.0, 1.0))
-
-
 var spec: BodySpec
 var kind: int = SEMI_UPRIGHT
 ## The trait, radians.
@@ -374,23 +366,6 @@ func clearance(limb_length: float) -> float:
 ## a sprawled one spends it standing wide.
 func track(limb_length: float) -> float:
 	return plan_reach(limb_length) * cos(tilt)
-
-
-## How far inboard of its own socket a foot may be set down, as a share of the
-## socket's offset from the spine. Nothing on a sprawled limb, which cannot bring
-## its foot under the shoulder at all; most of the way to the midline on a
-## columnar one, whose whole stance is standing underneath itself.
-func adduction() -> float:
-	return 1.0 - cos(tilt)
-
-
-## How much of itself the limb measures on the screen — the plan reach across,
-## plus whatever the perspective makes of the height. Used only to normalise,
-## never to decide where a foot goes.
-func drawn_reach(limb_length: float) -> float:
-	var flat: float = cos(tilt)
-	var up: float = sin(tilt) * PERSPECTIVE
-	return limb_length * sqrt(flat * flat + up * up)
 
 
 ## How high a limb of `bone`, standing at `extension` of itself, holds the body

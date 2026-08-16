@@ -36,7 +36,6 @@ extends RefCounted
 ## the count it takes away, so extending the axis is appending, not renumbering.
 const QUADRUPEDAL: int = 0
 const BIPEDAL: int = 1
-const MODE_COUNT: int = 2
 
 const MODE_NAMES: Array[String] = ["quadrupedal", "bipedal"]
 
@@ -243,13 +242,6 @@ func _keeps(rule: Dictionary, pace: float, sprinting: bool) -> bool:
 	return (not bool(rule["sprint"]) or sprinting) and pace >= float(rule["exit"])
 
 
-## Whether the forelimbs are on the ground: the measurement, and then the mode.
-## An arm that cannot reach the floor is carried whatever the stance says, and an
-## arm the stance has lifted is carried however well it could reach.
-func forelimbs_bear() -> bool:
-	return bears_on_forelimbs(spec) and mode() == QUADRUPEDAL
-
-
 ## Whether a body of these proportions walks on its forelimbs at all. Static
 ## because it is a question about a *build* — the creation menu can ask it of an
 ## animal nobody has grown yet and get the answer the simulation will.
@@ -267,10 +259,6 @@ func mode() -> int:
 
 func posture_kind() -> int:
 	return current.x if _blend >= 0.5 else _from.x
-
-
-func supports(p_posture: int, p_mode: int) -> bool:
-	return Vector2i(p_posture, p_mode) in supported
 
 
 func transitioning() -> bool:
