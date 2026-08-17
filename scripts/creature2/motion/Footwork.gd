@@ -19,11 +19,25 @@
 ##     there. The prediction is re-taken every tick, so a turning body lands
 ##     its feet where it is now going, not where it was going when they lifted.
 ##
-## Steps are *triggered by need* — drift past a share of the limb's own
-## fore-aft excursion (Carriage's projection, so anatomy is the constraint),
-## the ground gone from under an anchor, or a balance rescue — and *granted by
-## Rhythm*, which owns coordination and nothing else. Which is the design's
-## split: need is shared physics, company is the gait.
+## Steps are *triggered by need* — drift past the step trigger, the ground
+## gone from under an anchor, or a balance rescue — and *granted by Rhythm*,
+## which owns coordination and nothing else. Which is the design's split:
+## need is shared physics, company is the gait.
+##
+## What the trigger *is* is the flow law, and it is the whole of the rhythm.
+## A leg's swing takes what a driven pendulum takes (`Span.span_time` — the
+## root of the leg's length, driven by twitch, gear and engine), so at any
+## speed there is exactly one stride cycle at which the four swings tile it
+## continuously at the occupancy the regime owes (`Rhythm.flow`): cycle =
+## the four swing times over the occupancy. The drift a foot may spend
+## before it is due is priced from that — the ground the body covers over
+## one stance of that cycle — clamped to the anatomy's own wall (the disc a
+## stride cannot exceed because the leg ends). So a slow walk takes short,
+## frequent, unhurried steps; a cruise strides longer at a quicker beat; and
+## the anatomical maximum is reached exactly where the legs run out of cycle
+## to spend, which is the flat-out `deliverable` prices. Every term is the
+## body's own; the beat is arithmetic, never a clock — a body that stops
+## drifting stops stepping wherever it is in the cycle.
 ##
 ## The girdle carries are measured here, off the planted anchors: each girdle
 ## rides at its own feet's ground plus the stance clearance, so a foot set
@@ -33,21 +47,21 @@
 class_name Footwork
 extends RefCounted
 
-## Share of a limb's fore-aft excursion the drift may spend before the foot
-## must ask to step. What is left past the trigger is the margin desperate
-## steps and prediction error live in.
+## Share of a limb's fore-aft excursion a stride may spend at the most — the
+## anatomical ceiling on the step trigger, and what is left past it is the
+## margin desperate steps and prediction error live in.
 ##
-## This is one of the two numbers a stride length is made of and the only one
-## that is not anatomy. A foot lifts about `TRIGGER` of its excursion behind its
-## home and lands at the far edge of that same excursion, so a step covers about
-## `(1 + TRIGGER)` of the disc — and how often the animal takes one is that
-## divided into how fast it is going. At 0.60 the cat covered the ground of a
-## walk in the steps of a trot; the extra fifth here is a longer, more deliberate
-## step for exactly the same ground, which is the difference between a body
-## walking and a body scurrying. It is not free — what is left over is the room a
-## desperate step and a mispredicted landing have to live in — so it stops well
-## short of the 1.0 that would leave the leg trailing at full stretch with
-## nothing in reserve at all.
+## This used to be the trigger itself, and that was the beat's whole disease:
+## quoted as a fixed share of the *anatomy*, every step was near-maximal
+## whatever the pace, so the stride never changed with speed (35 px at a
+## stroll and 35 px at a cruise, measured) and every bit of pace adaptation
+## was dumped into the wait between steps — a walk of isolated, near-tearing
+## strides with the whole body parked four-square between them. The everyday
+## trigger is now the *flow's* (see `tick`): the drift a foot may spend is
+## priced from the body's own speed and swing tempo so the swings tile the
+## cycle, and this share is only the wall it may never be priced past — the
+## stride a leg cannot take because the leg ends. `deliverable` still quotes
+## it, because flat out is exactly the speed at which the flow arrives here.
 const TRIGGER: float = 0.78
 
 ## Least press a still-planted foot is quoted as having, whatever its drift —
@@ -58,31 +72,58 @@ const TRIGGER: float = 0.78
 ## to zero for a few ticks, the body between feet with nothing to press against.
 const PRESS_FLOOR: float = 0.5
 
-## Swing speed, in limb lengths per second at the twitch datum. The one
-## tempo scale: a longer leg swings a longer arc in the same time, a
-## fast-twitch body sweeps quicker, and the tendon lever gears it (a tendon
-## inserted close to the joint trades press for sweep — Carriage.Joint.gear).
+## Swing speed, in limb lengths per second at the twitch datum. The muscle's
+## ceiling on a swing, not its price: a longer leg swings a longer arc in the
+## same time, a fast-twitch body sweeps quicker, and the tendon lever gears it
+## (a tendon inserted close to the joint trades press for sweep —
+## Carriage.Joint.gear).
 ##
-## 5.5 was a leg sweeping five and a half of its own lengths every second, which
-## is faster than any of these legs ever has to move: priced against the strides
-## this anatomy actually takes it made every swing come out under the floor
-## below, so the scale decided nothing, the *clamp* decided everything, and every
-## step of every gait was the same 100 ms flick — a foot that teleports and a
-## body that reads as sped-up film. At 2.4 the arithmetic is live again: a stroll
-## swings in about three tenths of a second, a sprint in a fifth, and the
-## difference between them is the pace rather than a constant.
-##
-## It is also the floor of what the legs can be asked to keep up with. A swing is
-## time a foot is not supporting anything, so the duty factor is what is left of
-## the cycle after it — set the sweep much slower than this and a sprinting body
-## has three feet in the air at once, no grip to press with, and comes to a dead
-## stop while its legs windmill. The cat's fore leg is the binding one: it is
-## shorter than the hind and geared level with the reference tendon, so it sweeps
-## the same stride the slowest, and this is the rate at which *it* still lands in
-## time.
+## The history of this number is the history of the beat looking wrong. At 5.5
+## every swing priced under the pendulum floor and the clamp decided
+## everything; at 2.4 pricing the swing *by* it still collapsed every gait's
+## swing onto whichever bound was nearer — a stroll's short arc swung in a
+## flick, a sprint's clamped to the floor (129 ms, measured: the fore's own
+## pendulum floor to the digit), and a foot crossing ninety pixels in eight
+## frames is a cut, not a step. The lesson, twice learned: arc-over-rate is
+## the wrong law for a rhythm, because a leg is a driven pendulum whose swing
+## time is nearly a property of the leg (see SWING_SPAN below). So the rate
+## now prices only what it honestly can: the ceiling an *emergency* swing may
+## be hurried at (a rescue is a flick, and should be), the wall an ordinarily
+## priced swing may never need more time than, and the flat-out arithmetic in
+## `deliverable`, which is where a leg's sweep genuinely binds.
 const SWING_RATE: float = 2.4
 const TWITCH_FLOOR: float = 0.6
 const TWITCH_SPAN: float = 0.8
+
+## The swing itself, seconds — the reference hind leg's unhurried step at the
+## twitch datum, the one pin the whole tempo hangs off. A leg is a driven
+## pendulum: its swing time goes with the root of its length (`SWING_MIN_LEG`
+## is the datum leg) and with the drive swinging it — fast twitch, the
+## tendon's gearing and the census's engine all shorten it, exactly the terms
+## that scale the sweep, and every one an exact no-op on the reference build.
+## Pace compresses it a little (`SWING_HASTE`): a galloping cat's swing is a
+## quarter shorter than its walking one, not a half — the observed near-
+## invariance of swing time is *why* animals change duty factor with speed at
+## all, and it is the anatomy this whole file's rhythm now derives from.
+const SWING_SPAN: float = 0.33
+const SWING_HASTE: float = 0.25
+
+## Least of the stance's own annulus a step is worth taking over — the floor
+## under the flow's stride budget, so a body creeping at a few px/s takes
+## occasional deliberate steps (the stalk) rather than churning its feet over
+## drifts too small to matter.
+const BUDGET_MIN_SHARE: float = 0.3
+
+## How much of the anatomy's wall the bound's stride budget spends. Under one
+## because the wall is the tear-off itself — the gallop strides as long as
+## the legs genuinely allow, and this margin is why an ordinary galloping
+## stance ends with a lift instead of an anchor torn off its footing.
+const BOUND_BUDGET: float = 0.9
+
+## How much quicker a fully developed bound carries its swings than the pace
+## alone buys — the gathered beat's spine recoil driving the legs. Scaled by
+## `Rhythm.bound`, which already carries the spine's own freedom.
+const GALLOP_SNAP: float = 0.4
 
 ## A swing is never over before or after these, seconds — the floor is the
 ## fast-twitch law's old truth (limbs stop blurring), the ceiling is a limp
@@ -216,6 +257,12 @@ class Foot extends RefCounted:
 	## spending, 0..1 — 1.0 is the tear-off. A readout of the tear measurement,
 	## kept because the urgency reads it.
 	var stretch: float = 0.0
+	## How much of the *anatomical* room the drift has spent, 0..1 — what the
+	## press fades by. Deliberately not the urgency: the flow's trigger moves
+	## with speed, but how much push a trailing leg has left is a fact about
+	## the leg, and quoting the engine against a rhythm was a grip that
+	## weakened whenever the beat quickened.
+	var spent: float = 0.0
 	## A standing balance demand: where the next step must land, or INF for
 	## none. Set by `rescue`, spent by the next lift.
 	var rescue_at: Vector2 = Vector2.INF
@@ -240,10 +287,20 @@ class Span extends RefCounted:
 	var lateral: float = 10.0
 	## What the pair holds its girdle at above its feet, px.
 	var clearance: float = 20.0
-	## Swing speed, px/s.
+	## Swing speed, px/s — the muscle's ceiling, for emergencies and walls.
 	var sweep: float = 200.0
+	## What this pair's swing actually takes, seconds — the driven pendulum,
+	## paced (see SWING_SPAN). The tempo the whole beat is derived from.
+	var span_time: float = 0.26
 	## The pendulum floor under this pair's swing, seconds — see SWING_MIN_LEG.
 	var floor_time: float = 0.14
+	## The stance's travel budget at this speed, split where the stride spends
+	## it: `lead` ahead of the landing home, `threshold` of drift behind it
+	## before the foot is due. Re-priced every tick off the flow (see `tick`);
+	## `budget_max` is the anatomy's wall on the whole of it.
+	var lead: float = 5.0
+	var threshold: float = 10.0
+	var budget_max: float = 30.0
 	## The pair's share of the body's press, per foot.
 	var press: float = 0.25
 
@@ -380,6 +437,39 @@ func tick(delta: float, creature: Creature2, velocity: Vector2, lean: Vector2,
 		_carry(creature, crouch, velocity, true)
 		return
 
+	# The beat's price, before any foot is measured against it. The four legs'
+	# swing times over the occupancy the regime owes (`Rhythm.flow`) is the one
+	# cycle at which the swings tile continuously — the flow — and each pair's
+	# stance budget is the ground the body covers over one stance of that
+	# cycle. Clamped to the anatomy's wall (`budget_max` — the stride a leg
+	# cannot exceed because the leg ends), floored at a step worth taking (a
+	# creeping body stalks, it does not churn), and handed back to the wall as
+	# the bound develops, because a gallop spends full strides and buys the
+	# rest with flight. The budget is then split where the stride spends it:
+	# the landing leads its home by the spec's share, and the rest is the
+	# drift a planted foot may spend before it is due. Nothing here is a
+	# clock — a body that stops drifting stops stepping mid-cycle — but at a
+	# steady speed the arithmetic *is* a beat, which is what a rhythm being
+	# derived rather than authored means.
+	var speed: float = velocity.length()
+	var flow_S: float = _rhythm.flow(speed, _rest_hip)
+	var cycle: float = 2.0 * (_fore.span_time + _hind.span_time) \
+		/ maxf(flow_S, 0.5)
+	var lead_share: float = 2.0 * creature.body.foot_lead \
+		/ (1.0 + 2.0 * creature.body.foot_lead)
+	for g in [_fore, _hind]:
+		var pair: Span = g
+		var budget: float = clampf(speed * (cycle - pair.span_time),
+			BUDGET_MIN_SHARE * TRIGGER * pair.comfort, pair.budget_max)
+		# The bound spends full strides — but full stops a step short of the
+		# wall itself: a budget priced *at* the tear-off had every galloping
+		# stance end torn, and a gait whose every stride is an emergency is
+		# the teleporting feet again, wearing physics as an excuse.
+		budget = lerpf(budget, pair.budget_max * BOUND_BUDGET,
+			clampf(_rhythm.bound, 0.0, 1.0))
+		pair.lead = budget * lead_share
+		pair.threshold = maxf(budget - pair.lead, 0.001)
+
 	# The measurements: where each planted foot stands against where its body
 	# now wants it.
 	var urgency := PackedFloat32Array()
@@ -428,6 +518,7 @@ func tick(delta: float, creature: Creature2, velocity: Vector2, lean: Vector2,
 				f.stretch = span.length() / plan_max
 		if f.swinging:
 			f.urgency = 0.0
+			f.spent = 0.0
 			f.drift = Vector2.ZERO
 		else:
 			var drift: Vector2 = f.home - f.anchor
@@ -437,15 +528,22 @@ func tick(delta: float, creature: Creature2, velocity: Vector2, lean: Vector2,
 			# standing *ahead* of its home is support the body is about to walk
 			# over, and asking it to step is what turned a walk into a scramble.
 			var need: float = drift.length()
-			# A travelling body spends the striding disc; one standing still is
-			# only comfortable inside the stance's own — see Span.comfort.
-			var room: float = reach.comfort
+			# A travelling body is due at the flow's own trigger — the drift
+			# its stance budget prices at this speed, so the steps tile the
+			# cycle — and one standing still is only comfortable inside the
+			# stance's own annulus (see Span.comfort). `spent` quotes the same
+			# drift against the anatomy instead, because how much push the leg
+			# has left is a fact about the leg, not about the beat.
+			var need_room: float = reach.comfort
+			var gate: float = TRIGGER * reach.comfort
 			if travel_dir != Vector2.ZERO:
 				var along: float = maxf(drift.dot(travel_dir), 0.0)
 				var lat: float = drift.dot(Vector2(-travel_dir.y, travel_dir.x))
 				need = Vector2(along, lat).length()
-				room = reach.excursion
-			f.urgency = need / maxf(TRIGGER * room, 0.001)
+				need_room = reach.excursion
+				gate = reach.threshold
+			f.spent = need / maxf(need_room, 0.001)
+			f.urgency = need / maxf(gate, 0.001)
 			# ...and the anatomy has its own voice: the drift is measured to the
 			# foot's *preferred* spot, and a lean can park the preference right
 			# next to the anchor while the leg itself is quietly running out of
@@ -600,6 +698,15 @@ func gather_of(fore: bool) -> float:
 
 ## A foot leaves the ground: remember where it was, aim it at where its
 ## support will be needed, and price the swing off the limb's own tempo.
+##
+## The tempo is the pair's `span_time` — the driven pendulum — and not the
+## arc over the sweep: a leg's swing takes what a leg's swing takes, and
+## pricing it by distance was what collapsed every gait's step onto a clamp
+## (a short arc flicked, a long one pinned at the floor, and both read as
+## cuts). The sweep still has its two honest words: an ordinary swing whose
+## arc genuinely outruns the muscle takes the longer time, and a *desperate*
+## step — a rescue, a tear-off — is hurried at the muscle's full rate,
+## because a stumble recovery is a flick and should be.
 func _lift(a: Armature, f: Foot, velocity: Vector2, lean: Vector2,
 		pace: float) -> void:
 	var reach: Span = _fore if f.fore else _hind
@@ -607,18 +714,19 @@ func _lift(a: Armature, f: Foot, velocity: Vector2, lean: Vector2,
 	f.swing = 0.0
 	f.lift = Vector3(f.anchor.x, f.anchor.y, f.anchor_z)
 
-	# First guess at the swing time from the drift it has to cover; the arc is
-	# re-priced once the landing is known.
-	var guess: float = clampf(f.urgency * TRIGGER * reach.excursion / reach.sweep,
-		reach.floor_time, SWING_MAX)
-	f.land = _predict(a, f, velocity, lean, guess)
+	f.land = _predict(a, f, velocity, lean, reach.span_time)
 	var arc: float = Vector2(f.land.x - f.lift.x, f.land.y - f.lift.y).length() \
 		+ absf(f.land.z - f.lift.z)
-	# A quicker beat at pace — the same leg sweeps the same arc harder — but
-	# never under the leg's own pendulum floor: limbs do not blur.
 	var haste: float = 1.0 + 0.6 * clampf(pace, 0.0, 1.5)
-	f.swing_time = clampf(arc / maxf(reach.sweep * haste, 1.0),
-		reach.floor_time, SWING_MAX)
+	var sweep_time: float = arc / maxf(reach.sweep * haste, 1.0)
+	if f.torn or f.rescue_at.x < INF:
+		# A genuine emergency — footing gone, or the balance demanding a print
+		# somewhere now. Merely being overdue at pace is not one: hurrying
+		# every deep-drifted swing was the sprint's teleporting feet.
+		f.swing_time = clampf(sweep_time, reach.floor_time, SWING_MAX)
+	else:
+		f.swing_time = clampf(maxf(reach.span_time, sweep_time),
+			reach.floor_time, SWING_MAX)
 
 
 ## Where this foot should land: its home carried forward by the body's own
@@ -630,7 +738,11 @@ func _predict(a: Armature, f: Foot, velocity: Vector2, lean: Vector2,
 	var socket: Vector2 = _socket(a, f)
 	var home_then: Vector2 = _home(a, f, lean) + velocity * left
 	var spec: BodySpec = a.spec
-	var lead: float = spec.foot_lead * 2.0 * TRIGGER * reach.excursion
+	# The landing leads its home by the flow's own share of the coming stance
+	# (Span.lead, priced in `tick`): a short quick stride is led a little, a
+	# full one more, and the lead can never promise ground the stance budget
+	# has not priced.
+	var lead: float = reach.lead
 	var dir: Vector2 = velocity.normalized() if velocity.length_squared() > 1.0 \
 		else Vector2.ZERO
 	var plan: Vector2 = home_then + dir * lead
@@ -735,10 +847,31 @@ func _measure(creature: Creature2) -> void:
 		# wider than the striding disc, which is a capacity, not a taste.
 		reach.comfort = clampf(carriage.fore_aft_reach(leg, joint.stand,
 			spec.stance_width), 2.0, reach.excursion)
-		reach.sweep = SWING_RATE * leg \
-			* (TWITCH_FLOOR + TWITCH_SPAN * spec.fast_twitch) * joint.gear \
-			* engine
+		var twitch_drive: float = (TWITCH_FLOOR + TWITCH_SPAN * spec.fast_twitch) \
+			* joint.gear * engine
+		reach.sweep = SWING_RATE * leg * twitch_drive
 		reach.floor_time = SWING_MIN * sqrt(maxf(leg, 1.0) / SWING_MIN_LEG)
+		# The driven pendulum: what this pair's swing takes. The root-of-length
+		# law the floor already states, driven by the same terms the sweep is
+		# (twitch, the tendon's gear, the census's engine — each an exact no-op
+		# on the reference build), and compressed a little by pace: a swing is
+		# nearly a property of the leg, which is exactly why the *cycle* must
+		# be derived from it and not the other way round.
+		# ...compressed by pace, and snapped up harder by the bound: the
+		# gathered beat's spine recoil drives the legs, so a galloping swing
+		# is quicker than the pace alone buys — `Rhythm.bound` already
+		# carries the spine's own freedom, so a stiff back gets none of it.
+		reach.span_time = clampf(
+			SWING_SPAN * sqrt(maxf(leg, 1.0) / SWING_MIN_LEG)
+				/ maxf(twitch_drive, 0.05)
+				/ (1.0 + SWING_HASTE * clampf(creature.speed_norm, 0.0, 1.5))
+				/ (1.0 + GALLOP_SNAP * clampf(_rhythm.bound, 0.0, 1.0)),
+			reach.floor_time, SWING_MAX)
+		# The anatomy's wall on a whole stance's travel — the old fixed stride,
+		# kept as the ceiling the flow prices under: trigger's share of the
+		# disc behind the home plus the spec's lead ahead of it.
+		reach.budget_max = TRIGGER * reach.excursion \
+			* (1.0 + 2.0 * spec.foot_lead)
 		reach.press = (fore_pair if fore else hind_pair) / total
 
 
@@ -754,9 +887,19 @@ func _socket(a: Armature, f: Foot) -> Vector2:
 
 ## The foot's comfortable spot: out from its socket by the rest lead, shifted
 ## by the body's lean. Everything is measured against this point.
+##
+## The lean lands girdle by girdle, weighted by each pair's own share of the
+## press (the census's muscle through the stance's advantage — `Span.press`,
+## ×2 because the two girdles' shares sum to one). An accelerating quadruped
+## is not shifted evenly off its feet: the girdle with the engine trails its
+## homes further and drives from behind its own weight, the other stays under
+## the mass it is about to catch — on the cat, hind drives and fore catches,
+## and neither was told to.
 func _home(a: Armature, f: Foot, lean: Vector2) -> Vector2:
 	var p: int = f.limb.parent_node
-	return _socket(a, f) + a.fwd[p] * f.limb.foot_lead + lean
+	var reach: Span = _fore if f.fore else _hind
+	return _socket(a, f) + a.fwd[p] * f.limb.foot_lead \
+		+ lean * (2.0 * reach.press)
 
 
 ## How much press the planted feet have left, for Impetus: each foot counts
@@ -772,14 +915,13 @@ func _press(creature: Creature2) -> void:
 		var reach: Span = _fore if f.fore else _hind
 		# A planted foot presses less the further it trails its home, but never
 		# nothing: it is still flat on the ground until the tick it actually
-		# lifts. The bare `1 − urgency·TRIGGER` reached zero a beat before a foot
-		# stepped, and with two feet near their trigger at once (every walk cycle)
-		# the whole engine went to nothing for a few ticks — the body between feet
-		# with no ground to press. Flooring the share keeps the traction a still-
-		# planted foot genuinely has while leaving the fade that makes a shoved,
-		# trailing foot give way (the rescue step) exactly as it was.
-		var left: float = clampf(1.0 - maxf(f.urgency, 0.0) * TRIGGER,
-			PRESS_FLOOR, 1.0)
+		# lifts. The fade quotes `spent` — drift against the *anatomy's* room,
+		# not against the flow's trigger, because how much push a trailing leg
+		# has left is a fact about the leg and the beat quickening must not
+		# thin the engine. The floor keeps the traction a still-planted foot
+		# genuinely has while leaving the fade that makes a shoved, trailing
+		# foot give way (the rescue step) exactly as it was.
+		var left: float = clampf(1.0 - maxf(f.spent, 0.0), PRESS_FLOOR, 1.0)
 		# Soundness is the muscle still answering; numbness is the nerve still
 		# asking. A leg with either gone presses with that much less — a cut
 		# sciatic takes its leg out of the engine without touching the flesh.

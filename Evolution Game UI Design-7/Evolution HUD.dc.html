@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #F3F1EC; }
+  * { box-sizing: border-box; }
+  a { color: #14140F; text-decoration: none; border-bottom: 1px solid rgba(20,20,15,0.3); }
+  a:hover { color: rgba(20,20,15,0.55); }
+  ::selection { background: #14140F; color: #F3F1EC; }
+  .om-scroll::-webkit-scrollbar { width: 3px; }
+  .om-scroll::-webkit-scrollbar-thumb { background: rgba(20,20,15,0.22); }
+  .om-scroll::-webkit-scrollbar-track { background: transparent; }
+  @keyframes om-breathe { 0%,100% { opacity: 0.25; } 50% { opacity: 0.6; } }
+</style>
+</helmet>
+<div style="position:relative;width:100%;height:100vh;min-height:560px;overflow:hidden;background:#F3F1EC;color:#14140F;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;touch-action:none;cursor:crosshair">
+
+  <canvas ref="{{ canvasRef }}" style="position:absolute;inset:0;width:100%;height:100%;display:block"></canvas>
+
+  <div style="position:absolute;inset:0;pointer-events:none;background:radial-gradient(120% 90% at 50% 45%, rgba(243,241,236,0) 40%, rgba(20,20,15,0.05) 100%)"></div>
+  <div style="position:absolute;inset:0;pointer-events:none;opacity:0.035;mix-blend-mode:multiply;background-image:url(&quot;data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/></filter><rect width='140' height='140' filter='url(%23n)'/></svg>&quot;)"></div>
+  <div style="position:absolute;inset:14px;pointer-events:none;border:1px solid rgba(20,20,15,0.10)"></div>
+
+  <div style="position:absolute;top:30px;left:32px;display:flex;flex-direction:column;gap:16px;pointer-events:none;max-width:40vw">
+    <div style="display:flex;align-items:center;gap:11px">
+      <div style="width:7px;height:7px;border-radius:50%;background:#14140F"></div>
+      <div style="font-size:11px;letter-spacing:0.34em;text-transform:uppercase;line-height:1">Evolution</div>
+      <div style="width:22px;height:1px;background:rgba(20,20,15,0.22)"></div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.16em;color:rgba(20,20,15,0.42);line-height:1">PROTO&nbsp;&nbsp;0.1</div>
+    </div>
+    <div style="display:grid;grid-template-columns:auto auto;gap:4px 22px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.1em;line-height:1.4">
+      <span style="color:rgba(20,20,15,0.40)">STATE</span><span>{{ stateName }}</span>
+      <span style="color:rgba(20,20,15,0.40)">SPEED</span><span>{{ speedText }}</span>
+      <span style="color:rgba(20,20,15,0.40)">AIRBORNE</span><span>{{ airborneText }}</span>
+      <span style="color:rgba(20,20,15,0.40)">SEGMENTS</span><span>{{ segmentsText }}</span>
+    </div>
+  </div>
+
+  <div style="position:absolute;top:30px;right:32px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+    <sc-for list="{{ speciesList }}" as="sp" hint-placeholder-count="4">
+      <div onClick="{{ sp.pick }}" style="position:relative;display:flex;align-items:center;gap:7px;padding:7px 12px;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;min-height:32px" style-hover="opacity:1">
+        <div style="width:4px;height:4px;border-radius:50%;background:{{ sp.dot }};transition:background 260ms ease"></div>
+        <div style="font-size:9.5px;letter-spacing:0.22em;text-transform:uppercase;line-height:1;color:{{ sp.ink }};transition:color 260ms ease">{{ sp.name }}</div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:1px;background:{{ sp.rule }};transition:background 260ms ease"></div>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="position:absolute;left:32px;bottom:30px;display:flex;flex-direction:column;gap:20px;pointer-events:none">
+    <div style="display:flex;flex-direction:column;gap:9px;width:min(300px,42vw)">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.12em">
+        <span style="color:rgba(20,20,15,0.40)">BIOMASS</span>
+        <span>{{ sizeText }}</span>
+      </div>
+      <div style="position:relative;height:9px">
+        <div style="position:absolute;inset:0;display:flex;align-items:center;gap:5px">
+          <sc-for list="{{ pipTrack }}" as="p" hint-placeholder-count="24">
+            <div style="width:3px;height:3px;border-radius:50%;background:rgba(20,20,15,0.20);flex:none"></div>
+          </sc-for>
+        </div>
+        <div style="position:absolute;inset:0;overflow:hidden;width:{{ growthPct }};transition:width 420ms cubic-bezier(.2,.7,.2,1)">
+          <div style="display:flex;align-items:center;gap:5px;height:100%">
+            <sc-for list="{{ pipTrack }}" as="p" hint-placeholder-count="24">
+              <div style="width:3px;height:3px;border-radius:50%;background:#14140F;flex:none"></div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:baseline;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.12em;color:rgba(20,20,15,0.40)">
+        <span>{{ foodText }}</span>
+        <span>{{ nextText }}</span>
+      </div>
+    </div>
+
+    <sc-if value="{{ legend }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;align-items:center;gap:22px;flex-wrap:wrap;max-width:min(560px,52vw)">
+        <div style="display:flex;align-items:center;gap:7px">
+          <div style="display:flex;gap:3px">
+            <div style="min-width:19px;height:19px;padding:0 4px;border:1px solid rgba(20,20,15,0.22);border-radius:3px;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.04em">W</div>
+            <div style="min-width:19px;height:19px;padding:0 4px;border:1px solid rgba(20,20,15,0.22);border-radius:3px;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.04em">A</div>
+            <div style="min-width:19px;height:19px;padding:0 4px;border:1px solid rgba(20,20,15,0.22);border-radius:3px;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.04em">S</div>
+            <div style="min-width:19px;height:19px;padding:0 4px;border:1px solid rgba(20,20,15,0.22);border-radius:3px;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.04em">D</div>
+          </div>
+          <span style="font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(20,20,15,0.48)">Move</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:7px">
+          <div style="min-width:19px;height:19px;padding:0 6px;border:1px solid rgba(20,20,15,0.22);border-radius:3px;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.04em">LMB</div>
+          <span style="font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(20,20,15,0.48)">Steer</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:7px">
+          <div style="min-width:19px;height:19px;padding:0 6px;border:1px solid rgba(20,20,15,0.22);border-radius:3px;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.04em">⇧</div>
+          <span style="font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(20,20,15,0.48)">Sprint</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:7px">
+          <div style="min-width:19px;height:19px;padding:0 5px;border:1px solid rgba(20,20,15,0.22);border-radius:3px;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.04em">F1</div>
+          <span style="font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(20,20,15,0.48)">Tuning</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:7px">
+          <div style="min-width:19px;height:19px;padding:0 5px;border:1px solid rgba(20,20,15,0.22);border-radius:3px;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.04em">F2</div>
+          <span style="font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(20,20,15,0.48)">Debug</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:7px">
+          <div style="min-width:19px;height:19px;padding:0 5px;border:1px solid rgba(20,20,15,0.22);border-radius:3px;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.04em">R</div>
+          <span style="font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(20,20,15,0.48)">Reset</span>
+        </div>
+      </div>
+    </sc-if>
+  </div>
+
+  <div onClick="{{ togglePanel }}" style="position:absolute;right:32px;bottom:30px;display:flex;align-items:center;gap:9px;padding:9px 14px;min-height:36px;cursor:pointer;user-select:none;background:rgba(243,241,236,0.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(20,20,15,0.13);border-radius:2px;box-shadow:0 1px 2px rgba(20,20,15,0.03),0 14px 34px -18px rgba(20,20,15,0.30)" style-hover="border-color:rgba(20,20,15,0.30)">
+    <div style="width:4px;height:4px;border-radius:50%;background:{{ panelDot }};transition:background 220ms ease"></div>
+    <span style="font-size:9.5px;letter-spacing:0.22em;text-transform:uppercase;line-height:1">Tuning</span>
+    <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(20,20,15,0.38);line-height:1">F1</span>
+  </div>
+
+  <div style="position:absolute;top:76px;right:32px;bottom:82px;width:clamp(304px,26vw,336px);max-width:calc(100vw - 64px);display:flex;flex-direction:column;background:rgba(243,241,236,0.80);backdrop-filter:blur(14px) saturate(0.9);-webkit-backdrop-filter:blur(14px) saturate(0.9);border:1px solid rgba(20,20,15,0.13);border-radius:2px;box-shadow:0 1px 2px rgba(20,20,15,0.03),0 26px 60px -30px rgba(20,20,15,0.38);transition:opacity 300ms ease,transform 380ms cubic-bezier(.2,.7,.2,1);opacity:{{ panelOpacity }};transform:{{ panelTransform }};pointer-events:{{ panelEvents }}">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;padding:16px 18px 13px;border-bottom:1px solid rgba(20,20,15,0.11)">
+      <div style="display:flex;align-items:center;gap:9px">
+        <div style="width:5px;height:5px;background:#14140F"></div>
+        <div style="font-size:10px;letter-spacing:0.28em;text-transform:uppercase;line-height:1">Tuning</div>
+      </div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.12em;color:rgba(20,20,15,0.38)">{{ speciesShort }}</div>
+    </div>
+
+    <div class="om-scroll" style="flex:1;overflow-y:auto;overflow-x:hidden;padding:4px 18px 20px">
+      <sc-for list="{{ groups }}" as="g" hint-placeholder-count="4">
+        <div style="padding-top:18px">
+          <div style="display:flex;align-items:center;gap:10px;padding-bottom:9px">
+            <div style="font-size:9px;letter-spacing:0.26em;text-transform:uppercase;color:rgba(20,20,15,0.40);line-height:1">{{ g.name }}</div>
+            <div style="flex:1;height:1px;background:rgba(20,20,15,0.11)"></div>
+          </div>
+          <sc-for list="{{ g.rows }}" as="row" hint-placeholder-count="6">
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) 76px 38px;align-items:center;gap:9px;height:26px">
+              <div style="font-size:10.5px;letter-spacing:0.01em;color:rgba(20,20,15,0.78);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ row.label }}</div>
+              <sc-if value="{{ row.isSlider }}" hint-placeholder-val="{{ true }}">
+                <div onPointerDown="{{ row.onDown }}" style="position:relative;height:26px;display:flex;align-items:center;cursor:ew-resize;touch-action:none">
+                  <div style="position:absolute;left:0;right:0;height:1px;background:rgba(20,20,15,0.20)"></div>
+                  <div style="position:absolute;left:0;height:1px;background:#14140F;width:{{ row.pct }}"></div>
+                  <div style="position:absolute;left:{{ row.pct }};width:7px;height:7px;border-radius:50%;background:#14140F;transform:translateX(-50%);box-shadow:0 0 0 3px rgba(243,241,236,0.9)"></div>
+                </div>
+              </sc-if>
+              <sc-if value="{{ row.isToggle }}" hint-placeholder-val="{{ false }}">
+                <div onClick="{{ row.toggle }}" style="height:26px;display:flex;align-items:center;cursor:pointer">
+                  <div style="position:relative;width:26px;height:14px;border:1px solid rgba(20,20,15,0.28);border-radius:7px">
+                    <div style="position:absolute;top:2px;width:8px;height:8px;border-radius:50%;background:#14140F;left:{{ row.knobLeft }};opacity:{{ row.knobOpacity }};transition:left 220ms cubic-bezier(.2,.7,.2,1),opacity 220ms ease"></div>
+                  </div>
+                </div>
+              </sc-if>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.04em;text-align:right;color:rgba(20,20,15,0.62)">{{ row.display }}</div>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-top:1px solid rgba(20,20,15,0.11);font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(20,20,15,0.34)">
+      <span>SCHEMA · {{ rowCount }} ROWS</span>
+      <span onClick="{{ resetParams }}" style="cursor:pointer;color:rgba(20,20,15,0.55);border-bottom:1px solid rgba(20,20,15,0.22)" style-hover="color:#14140F">RESET</span>
+    </div>
+  </div>
+
+  <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;text-align:center;opacity:{{ hintOpacity }};transition:opacity 700ms ease">
+    <div style="font-size:9.5px;letter-spacing:0.3em;text-transform:uppercase;color:rgba(20,20,15,0.34);animation:om-breathe 3.4s ease-in-out infinite">Move to begin</div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900}}">
+class Component extends DCLogic {
+  canvasRef = React.createRef();
+  state = { panel: true, species: 'LIZARD', debug: false, stateName: 'IDLE', speed: 0, airborne: 0, food: 0, size: 1, moved: false, v: 0 };
+
+  SPECIES = {
+    LIZARD:     { segments: 14, segLength: 15, head: 13, chest: 15, waist: 10.5, hip: 12.5, tailTip: 1.5, armLen: 34, legLen: 40, stride: 26, widthScale: 1.00, wave: 6 },
+    GECKO:      { segments: 11, segLength: 13, head: 12, chest: 13, waist: 9,    hip: 11,   tailTip: 1.2, armLen: 30, legLen: 33, stride: 20, widthScale: 0.95, wave: 5 },
+    SALAMANDER: { segments: 19, segLength: 12, head: 10, chest: 12, waist: 10,   hip: 11,   tailTip: 1.0, armLen: 24, legLen: 27, stride: 17, widthScale: 1.05, wave: 10 },
+    KOMODO:     { segments: 16, segLength: 20, head: 18, chest: 22, waist: 16,   hip: 19,   tailTip: 2.0, armLen: 46, legLen: 54, stride: 36, widthScale: 1.25, wave: 5 }
+  };
+
+  SCHEMA = [
+    ['Spine', [
+      ['segments', 'Segment count', 6, 24, 1, 0],
+      ['segLength', 'Segment length', 6, 26, 0.5, 2],
+      ['iters', 'Constraint iters', 1, 10, 1, 0],
+      ['stiffness', 'Stiffness', 0.1, 1, 0.01, 2],
+      ['damping', 'Damping', 0, 1, 0.01, 2],
+      ['maxBend', 'Max bend', 5, 40, 1, 0],
+      ['wave', 'Undulation', 0, 20, 0.5, 2],
+      ['waveFreq', 'Wave frequency', 0.1, 3, 0.05, 2],
+      ['waveSpeed', 'Wave speed', 0, 4, 0.05, 2]
+    ]],
+    ['Body', [
+      ['widthScale', 'Width scale', 0.4, 2, 0.01, 2],
+      ['head', 'Head', 4, 24, 0.5, 2],
+      ['chest', 'Chest', 4, 30, 0.5, 2],
+      ['waist', 'Waist', 3, 24, 0.5, 2],
+      ['hip', 'Hip', 4, 26, 0.5, 2],
+      ['tailTip', 'Tail tip', 0.5, 8, 0.1, 2],
+      ['tail', 'Tail', null],
+      ['shoulderPos', 'Shoulder pos', 0.05, 0.4, 0.01, 2],
+      ['hipPos', 'Hip pos', 0.3, 0.8, 0.01, 2]
+    ]],
+    ['Limbs', [
+      ['armLen', 'Arm length', 10, 60, 1, 0],
+      ['legLen', 'Leg length', 10, 70, 1, 0],
+      ['stanceReach', 'Stance reach', 0.3, 0.85, 0.01, 2],
+      ['stanceWidth', 'Stance width', 0.4, 1.8, 0.01, 2],
+      ['swingFan', 'Swing fan', 10, 90, 1, 0],
+      ['fabrik', 'FABRIK iters', 1, 10, 1, 0]
+    ]],
+    ['Gait', [
+      ['stride', 'Stride distance', 8, 50, 1, 2],
+      ['stepHeight', 'Step height', 0, 20, 0.5, 2],
+      ['stepDur', 'Step duration', 0.08, 0.6, 0.01, 2],
+      ['coupling', 'Diagonal coupling', 0, 1, 0.01, 2]
+    ]]
+  ];
+
+  P = null;
+
+  componentDidMount() {
+    this.P = this.buildParams('LIZARD');
+    this.keys = {};
+    this.mouse = { x: 0, y: 0, down: false };
+    this.zoom = 1;
+    this.cam = { x: 0, y: 0 };
+    this.hudT = 0;
+    this.reset(true);
+
+    const cv = this.canvasRef.current;
+    this.onKey = (e) => {
+      const k = e.key.toLowerCase();
+      if (e.key === 'F1') { e.preventDefault(); this.setState(s => ({ panel: !s.panel })); return; }
+      if (e.key === 'F2') { e.preventDefault(); this.setState(s => ({ debug: !s.debug })); return; }
+      if (k === 'r') { this.reset(); return; }
+      this.keys[k] = true;
+      if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
+        e.preventDefault();
+        if (!this.state.moved) this.setState({ moved: true });
+      }
+    };
+    this.onKeyUp = (e) => { this.keys[e.key.toLowerCase()] = false; };
+    this.onMove = (e) => {
+      const r = cv.getBoundingClientRect();
+      this.mouse.x = e.clientX - r.left; this.mouse.y = e.clientY - r.top;
+    };
+    this.onDown = (e) => {
+      if (e.target !== cv) return;
+      this.mouse.down = true; this.onMove(e);
+      if (!this.state.moved) this.setState({ moved: true });
+    };
+    this.onUp = () => { this.mouse.down = false; };
+    this.onWheel = (e) => {
+      if (e.target !== cv) return;
+      e.preventDefault();
+      this.zoom = Math.max(0.5, Math.min(2.4, this.zoom * (e.deltaY > 0 ? 0.92 : 1.08)));
+    };
+    window.addEventListener('keydown', this.onKey);
+    window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('pointermove', this.onMove);
+    window.addEventListener('pointerdown', this.onDown);
+    window.addEventListener('pointerup', this.onUp);
+    cv.addEventListener('wheel', this.onWheel, { passive: false });
+
+    this.last = performance.now();
+    this.loop = (t) => {
+      const dt = Math.min(0.033, (t - this.last) / 1000); this.last = t;
+      this.step(dt); this.draw();
+      this.raf = requestAnimationFrame(this.loop);
+    };
+    this.raf = requestAnimationFrame(this.loop);
+  }
+
+  componentWillUnmount() {
+    cancelAnimationFrame(this.raf);
+    window.removeEventListener('keydown', this.onKey);
+    window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('pointermove', this.onMove);
+    window.removeEventListener('pointerdown', this.onDown);
+    window.removeEventListener('pointerup', this.onUp);
+    if (this.canvasRef.current) this.canvasRef.current.removeEventListener('wheel', this.onWheel);
+  }
+
+  buildParams(name) {
+    const s = this.SPECIES[name];
+    return Object.assign({
+      iters: 6, stiffness: 0.85, damping: 0.7, maxBend: 22, waveFreq: 0.8, waveSpeed: 1.6,
+      shoulderPos: 0.16, hipPos: 0.46, tail: true,
+      stanceReach: 0.78, stanceWidth: 1.0, swingFan: 62, fabrik: 6,
+      stepHeight: 9, stepDur: 0.26, coupling: 1
+    }, s);
+  }
+
+  reset(silent) {
+    const P = this.P;
+    this.head = { x: 0, y: 0, a: 0 };
+    this.vel = 0;
+    this.pts = [];
+    for (let i = 0; i < 26; i++) this.pts.push({ x: -i * P.segLength, y: 0 });
+    this.feet = [0, 1, 2, 3].map(i => ({ x: 0, y: 0, planted: true, t: 0, from: { x: 0, y: 0 }, to: { x: 0, y: 0 }, air: 0 }));
+    this.pellets = [];
+    for (let i = 0; i < 6; i++) this.pellets.push(this.spawnPellet());
+    this.carrion = [];
+    for (let i = 0; i < 3; i++) this.carrion.push(this.spawnCarrion());
+    this.sense = [];
+    this.senseT = 0;
+    this.sounds = [];
+    this.balls = [
+      { x: 210, y: -160, vx: 62, vy: 38, z: 90, vz: 0, r: 7, mass: 0.55 },
+      { x: -260, y: 190, vx: -48, vy: 54, z: 150, vz: 0, r: 17, mass: 1 }
+    ];
+    this.beat = 0;
+    this.cam = { x: 0, y: 0 };
+    this.time = 0;
+    if (!silent) this.setState({ food: 0, size: 1 });
+    else { this.sizeScale = 1; this.food = 0; }
+    this.sizeScale = 1; this.food = 0;
+  }
+
+  spawnPellet() {
+    const a = Math.random() * Math.PI * 2, r = 220 + Math.random() * 460;
+    return { x: (this.head ? this.head.x : 0) + Math.cos(a) * r, y: (this.head ? this.head.y : 0) + Math.sin(a) * r, ph: Math.random() * 6 };
+  }
+
+  spawnCarrion() {
+    const a = Math.random() * Math.PI * 2, r = 340 + Math.random() * 520;
+    const cx = (this.head ? this.head.x : 0) + Math.cos(a) * r;
+    const cy = (this.head ? this.head.y : 0) + Math.sin(a) * r;
+    const lobes = [];
+    for (let i = 0; i < 4; i++) {
+      const la = Math.random() * 6.284, ld = Math.random() * 9;
+      lobes.push({ dx: Math.cos(la) * ld, dy: Math.sin(la) * ld, r: 3.4 + Math.random() * 4.2 });
+    }
+    return { x: cx, y: cy, ph: Math.random() * 6, lobes };
+  }
+
+  // ── Perception, not emission ────────────────────────────────────────────────
+  // Nothing leaves the food. The creature's sense resolves marks in the air around
+  // whatever it has already detected: they appear on a beat, tighten while the read
+  // holds, and dissolve when it lapses. Weak reads are sparse, cool and scattered;
+  // sure reads cluster, warm toward the source's own hue, and occasionally resolve
+  // far enough to become legible.
+  G_FAR = ['·', '.', '˙', '·', ',', '·'];
+  G_MID = ['·', ':', '˙', '∶', '-', '/', '\\', '·', '·', '⁚'];
+  G_NEAR = [':', '⁚', '∷', '×', '+', '·', '≡', '//', '·', ':', '~', '='];
+  COOLS = [[126, 152, 204], [168, 150, 216], [111, 190, 190]];
+  WORDS_SEED = ['SEED', 'STARCH', 'TRACE', 'SWEET', 'FAINT'];
+  WORDS_CARRION = ['DECAY', 'IRON', 'WARM', 'MASS', 'CLOSE'];
+
+  spawnMark(o) {
+    if (this.sense.length > 400) this.sense.splice(0, 30);
+    o.cool = (Math.random() * 3) | 0;
+    this.sense.push(o);
+  }
+
+  pickGlyph(conf) {
+    const set = conf > 0.55 ? this.G_NEAR : conf > 0.24 ? this.G_MID : this.G_FAR;
+    return set[(Math.random() * set.length) | 0];
+  }
+
+  stepSense(dt) {
+    const R = 560 * this.sizeScale;
+    this.senseT += dt;
+    let burst = false;
+    if (this.senseT >= 0.58) { this.senseT -= 0.58; this.beat++; burst = true; }
+
+    if (burst) {
+      const srcs = [];
+      for (const p of this.pellets) srcs.push({ x: p.x, y: p.y, kind: 0, ph: p.ph });
+      for (const c of this.carrion) srcs.push({ x: c.x, y: c.y, kind: 1, ph: c.ph });
+
+      for (const s of srcs) {
+        const dx = s.x - this.head.x, dy = s.y - this.head.y;
+        const d = Math.hypot(dx, dy);
+        if (d > R) continue;
+        // Confidence is the creature's, not the object's: distance, plus a little
+        // for whatever it happens to be facing.
+        const rel = Math.cos(Math.atan2(dy, dx) - this.head.a);
+        let conf = (1 - d / R) * (0.74 + 0.26 * (0.5 + 0.5 * rel));
+        conf = Math.max(0, Math.min(1, Math.pow(conf, 1.3)));
+        if (conf < 0.05) continue;
+
+        // Each beat only samples part of the field, so density breathes rather than pours.
+        const wave = 0.5 + 0.5 * Math.sin(this.beat * 1.1 + s.ph);
+        const n = Math.round((1 + conf * (s.kind ? 8 : 6)) * (0.45 + wave));
+        const spread = 22 + (1 - conf) * 100;
+        for (let i = 0; i < n; i++) {
+          const a = Math.random() * 6.284;
+          const rr = spread * (0.3 + 0.7 * Math.sqrt(Math.random()));
+          this.spawnMark({
+            sx: s.x, sy: s.y, kind: s.kind, conf,
+            x: s.x + Math.cos(a) * rr, y: s.y + Math.sin(a) * rr,
+            age: 0, life: 0.8 + Math.random() * 1.4 + conf * 0.9,
+            seed: Math.random() * 6.284,
+            g: this.pickGlyph(conf),
+            sz: 6.4 + Math.random() * 3 + conf * 2.4,
+            pull: (conf > 0.48 ? 1 : -1) * (0.22 + Math.random() * 0.5),
+            txt: 0
+          });
+        }
+
+        // Rarely, and only when sure, the read resolves into something legible.
+        if (conf > 0.6 && this.beat % 3 === 0 && Math.random() < 0.45) {
+          const set = s.kind ? this.WORDS_CARRION : this.WORDS_SEED;
+          const a = Math.random() * 6.284, rr = spread * 0.8 + 24;
+          this.spawnMark({
+            sx: s.x, sy: s.y, kind: s.kind, conf,
+            x: s.x + Math.cos(a) * rr, y: s.y + Math.sin(a) * rr,
+            age: 0, life: 2 + Math.random(), seed: Math.random() * 6.284,
+            g: Math.random() < 0.35 ? conf.toFixed(2) : set[(Math.random() * set.length) | 0],
+            sz: 8, pull: 0.08, txt: 1
+          });
+        }
+      }
+
+      // The sense runs whether or not it finds anything: a thin grain of nothing-yet.
+      for (let i = 0; i < 3; i++) {
+        const a = Math.random() * 6.284, rr = 140 + Math.random() * R * 0.75;
+        this.spawnMark({
+          sx: this.head.x, sy: this.head.y, kind: 2, conf: 0.05,
+          x: this.head.x + Math.cos(a) * rr, y: this.head.y + Math.sin(a) * rr,
+          age: 0, life: 1.3 + Math.random() * 1.6, seed: Math.random() * 6.284,
+          g: '·', sz: 6 + Math.random() * 2, pull: -0.3, txt: 0
+        });
+      }
+    }
+
+    for (let i = this.sense.length - 1; i >= 0; i--) {
+      const m = this.sense[i];
+      m.age += dt;
+      if (m.age >= m.life) { this.sense.splice(i, 1); continue; }
+      // Drift is field-like, never a plume: a lazy curl plus a pull toward the thing
+      // being read (clustering) or away from it (a read losing its grip).
+      const cx = Math.sin(m.y * 0.006 + this.time * 0.28 + m.seed) * 7;
+      const cy = Math.cos(m.x * 0.006 - this.time * 0.24 + m.seed) * 7;
+      const dx = m.sx - m.x, dy = m.sy - m.y, d = Math.max(1, Math.hypot(dx, dy));
+      m.x += (cx + (dx / d) * 11 * m.pull) * dt;
+      m.y += (cy + (dy / d) * 11 * m.pull) * dt;
+    }
+  }
+
+  senseColor(m) {
+    const cool = m.kind === 2 ? [154, 160, 176] : this.COOLS[m.cool];
+    const warm = m.kind === 1 ? [226, 96, 158] : [236, 162, 44];
+    const t = Math.min(1, m.conf * 1.3);
+    return Math.round(cool[0] + (warm[0] - cool[0]) * t) + ',' +
+      Math.round(cool[1] + (warm[1] - cool[1]) * t) + ',' +
+      Math.round(cool[2] + (warm[2] - cool[2]) * t);
+  }
+
+  // Painted in screen space on a fixed reading lattice, so the marks never behave
+  // like objects in the habitat — they belong to the observer, not the world.
+  paintSense(L, w, h, S, dpr) {
+    const c = L.sense.ctx;
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, w, h);
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    const CELL = 9;
+    for (const m of this.sense) {
+      const t = m.age / m.life;
+      const env = Math.min(1, t / 0.22) * Math.min(1, (1 - t) / 0.4);
+      const fl = 0.74 + 0.26 * Math.sin(this.time * 6.5 + m.seed * 4);
+      let a = env * fl * (0.14 + m.conf * 0.74) * (m.txt ? 0.85 : 1);
+      a = Math.round(a * 6) / 6;
+      if (a <= 0.02) continue;
+      let sx = w / 2 + (m.x - this.cam.x) * S;
+      let sy = h / 2 + (m.y - this.cam.y) * S;
+      if (sx < -70 || sy < -70 || sx > w + 70 || sy > h + 70) continue;
+      sx = Math.round(sx / CELL) * CELL;
+      sy = Math.round(sy / CELL) * CELL;
+      c.fillStyle = 'rgba(' + this.senseColor(m) + ',' + a.toFixed(3) + ')';
+      c.font = (m.txt ? '500 ' : '400 ') + m.sz.toFixed(1) + "px 'IBM Plex Mono', monospace";
+      try { c.letterSpacing = m.txt ? '0.18em' : '0px'; } catch (e) {}
+      c.fillText(m.g, sx, sy);
+    }
+    try { c.letterSpacing = '0px'; } catch (e) {}
+  }
+
+  // ── Hearing ────────────────────────────────────────────────────────────────
+  // A sound is a wavefront, not an impact: particles hold a single thin ring that
+  // travels outward at an even pace, keeping its circle intact. Nothing moves
+  // radially on its own — the ring simply thins as its circumference grows, and
+  // individual dots quietly drop out until none are left.
+  emit(x, y, amp, kind) {
+    if (amp < 0.05) return;
+    amp = Math.min(1.2, amp);
+    if (this.sounds.length > 8) this.sounds.shift();
+    const blur = 4 + amp * 9;
+    const reach = 70 + amp * 175;
+    const count = Math.round(54 + amp * 86);
+    const pts = [];
+    for (let i = 0; i < count; i++) {
+      // Near-even angular spacing; jitter is a fraction of one step, so the line
+      // stays continuous rather than clumping.
+      const a = (i / count) * 6.2832 + (Math.random() - 0.5) * (0.45 / count) * 6.2832;
+      pts.push({
+        a,
+        jit: (Math.random() - 0.5) * 1.6,   // screen px — softens the line, no radial travel
+        fade: 0.34 + Math.random() * 0.66,  // fraction of life this dot survives
+        sz: 0.5 + Math.random() * 0.22
+      });
+    }
+    this.sounds.push({
+      x: x + (Math.random() - 0.5) * blur,
+      y: y + (Math.random() - 0.5) * blur,
+      amp, kind, age: 0,
+      life: 0.95 + amp * 0.95,
+      reach, pts,
+      quake: amp > 0.62 ? (amp - 0.62) / 0.58 : 0
+    });
+  }
+
+  stepSounds(dt) {
+    for (let i = this.sounds.length - 1; i >= 0; i--) {
+      const s = this.sounds[i];
+      s.age += dt;
+      if (s.age >= s.life) this.sounds.splice(i, 1);
+    }
+  }
+
+  stepBalls(dt) {
+    for (const b of this.balls) {
+      if (b.rest > 0) {
+        b.rest -= dt;
+        b.x += b.vx * dt * 0.25; b.y += b.vy * dt * 0.25;
+        if (b.rest <= 0) { b.vz = 300 + Math.random() * 260; b.rest = 0; }
+        continue;
+      }
+      b.x += b.vx * dt; b.y += b.vy * dt;
+      b.vz -= 620 * dt;
+      b.z += b.vz * dt;
+      // Loose containment so they stay near the observed field rather than wandering off.
+      const dx = b.x - this.cam.x, dy = b.y - this.cam.y;
+      if (Math.hypot(dx, dy) > 520) { b.vx -= dx * 0.0016; b.vy -= dy * 0.0016; }
+      if (b.z <= 0) {
+        const impact = Math.min(1, Math.abs(b.vz) / 520);
+        b.z = 0;
+        b.vz = Math.abs(b.vz) * 0.7;
+        // Rest, then a fresh drop — so impacts arrive as separate events, not a loop.
+        if (b.vz < 90) { b.vz = 0; b.rest = 0.9 + Math.random() * 2.6; }
+        if (impact > 0.2) this.emit(b.x, b.y, impact * (b.mass > 0.8 ? 0.95 : 0.34), 'impact');
+      }
+    }
+  }
+
+  // Radius of the wavefront: near-constant propagation speed, easing off only
+  // slightly so the ring never snaps to a stop.
+  soundR(s, t) {
+    const k = Math.min(1, (t === undefined ? s.age / s.life : t));
+    return s.reach * Math.pow(k, 0.82);
+  }
+
+  // Painted as particulate, never line work — every dot of a given sound sits on
+  // the same travelling radius, so the ring reads as one coherent wavefront.
+  paintHearing(L, w, h, S, dpr) {
+    const c = L.hear.ctx;
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, w, h);
+
+    for (const s of this.sounds) {
+      const t = s.age / s.life;
+      if (t >= 1) continue;
+      const rs = this.soundR(s) * S;
+      const cx = w / 2 + (s.x - this.cam.x) * S;
+      const cy = h / 2 + (s.y - this.cam.y) * S;
+      if (cx + rs < -20 || cy + rs < -20 || cx - rs > w + 20 || cy - rs > h + 20) continue;
+      // One envelope for the whole ring: eased in so nothing flashes, eased out
+      // so the wavefront dissolves rather than cutting.
+      const base = (0.24 + s.amp * 0.26) * Math.min(1, t / 0.12) * Math.pow(1 - t, 1.1);
+      for (const p of s.pts) {
+        if (t >= p.fade) continue;
+        const a = base * Math.min(1, (p.fade - t) / 0.22);
+        if (a <= 0.012) continue;
+        const rr = rs + p.jit;
+        c.fillStyle = 'rgba(20,20,15,' + a.toFixed(3) + ')';
+        c.beginPath();
+        c.arc(cx + Math.cos(p.a) * rr, cy + Math.sin(p.a) * rr, p.sz, 0, 6.284);
+        c.fill();
+      }
+    }
+  }
+
+  // Only heavy impacts reach the ground: a short, tight swell of the registration
+  // grid at the wavefront. Everything quieter leaves the paper undisturbed.
+  gridPush(x, y) {
+    let px = 0, py = 0, swell = 0;
+    for (const s of this.sounds) {
+      if (!s.quake) continue;
+      const r = this.soundR(s);
+      const dx = x - s.x, dy = y - s.y, d = Math.hypot(dx, dy);
+      if (d < 1 || Math.abs(d - r) > 40) continue;
+      const band = Math.exp(-Math.pow((d - r) / 20, 2));
+      const env = Math.pow(1 - s.age / s.life, 2) * s.quake;
+      const m = band * env * 5;
+      px += (dx / d) * m; py += (dy / d) * m;
+      swell += band * env * 0.5;
+    }
+    return [px, py, swell];
+  }
+
+  widthAt(u) {
+    const P = this.P;
+    const stops = [[0, P.head], [0.22, P.chest], [0.5, P.waist], [0.72, P.hip], [1, P.tail ? P.tailTip : P.hip * 0.55]];
+    for (let i = 0; i < stops.length - 1; i++) {
+      const [a, wa] = stops[i], [b, wb] = stops[i + 1];
+      if (u <= b) { const k = (u - a) / (b - a); return (wa + (wb - wa) * k) * P.widthScale * this.sizeScale; }
+    }
+    return stops[stops.length - 1][1];
+  }
+
+  step(dt) {
+    const P = this.P, k = this.keys;
+    this.time += dt;
+    const n = Math.round(P.segments);
+    const L = P.segLength * this.sizeScale;
+
+    let throttle = 0, turn = 0;
+    if (k['w'] || k['arrowup']) throttle += 1;
+    if (k['s'] || k['arrowdown']) throttle -= 0.6;
+    if (k['a'] || k['arrowleft']) turn -= 1;
+    if (k['d'] || k['arrowright']) turn += 1;
+    const sprint = k['shift'] ? 1.9 : 1;
+
+    if (this.mouse.down) {
+      const cv = this.canvasRef.current;
+      const wx = (this.mouse.x - cv.clientWidth / 2) / this.zoom + this.cam.x;
+      const wy = (this.mouse.y - cv.clientHeight / 2) / this.zoom + this.cam.y;
+      let d = Math.atan2(wy - this.head.y, wx - this.head.x) - this.head.a;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      turn = Math.max(-1, Math.min(1, d * 2.2));
+      throttle = Math.max(throttle, Math.hypot(wx - this.head.x, wy - this.head.y) > 24 * this.sizeScale ? 1 : 0);
+    }
+
+    const target = throttle * 150 * sprint * this.sizeScale;
+    this.vel += (target - this.vel) * Math.min(1, dt * 7);
+    const falloff = 1 - 0.55 * Math.min(1, Math.abs(this.vel) / (170 * this.sizeScale));
+    this.head.a += turn * 2.9 * falloff * dt;
+    this.head.x += Math.cos(this.head.a) * this.vel * dt;
+    this.head.y += Math.sin(this.head.a) * this.vel * dt;
+
+    this.pts[0].x = this.head.x; this.pts[0].y = this.head.y;
+    const maxBend = P.maxBend * Math.PI / 180;
+    for (let it = 0; it < Math.round(P.iters); it++) {
+      for (let i = 1; i < n; i++) {
+        const p = this.pts[i - 1], c = this.pts[i];
+        let ang = Math.atan2(c.y - p.y, c.x - p.x);
+        const parentAng = i === 1 ? this.head.a + Math.PI : Math.atan2(p.y - this.pts[i - 2].y, p.x - this.pts[i - 2].x);
+        let d = ang - parentAng;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        if (d > maxBend) ang = parentAng + maxBend;
+        if (d < -maxBend) ang = parentAng - maxBend;
+        const tx = p.x + Math.cos(ang) * L, ty = p.y + Math.sin(ang) * L;
+        const s = it === Math.round(P.iters) - 1 ? 1 : P.stiffness;
+        c.x += (tx - c.x) * s; c.y += (ty - c.y) * s;
+      }
+    }
+
+    this.rp = [];
+    const amp = P.wave * this.sizeScale * Math.min(1, Math.abs(this.vel) / 60);
+    for (let i = 0; i < n; i++) {
+      const p = this.pts[i];
+      const nx = this.pts[Math.min(n - 1, i + 1)], pv = this.pts[Math.max(0, i - 1)];
+      const ang = Math.atan2(nx.y - pv.y, nx.x - pv.x);
+      const off = Math.sin(i * P.waveFreq - this.time * P.waveSpeed * 4) * amp * (i / n);
+      this.rp.push({ x: p.x - Math.sin(ang) * off, y: p.y + Math.cos(ang) * off, a: ang });
+    }
+
+    const idx = (u) => this.rp[Math.max(0, Math.min(n - 1, Math.round(u * (n - 1))))];
+    const limbs = [
+      { s: idx(P.shoulderPos), side: -1, len: P.armLen * this.sizeScale, i: 0 },
+      { s: idx(P.shoulderPos), side: 1, len: P.armLen * this.sizeScale, i: 1 },
+      { s: idx(P.hipPos), side: -1, len: P.legLen * this.sizeScale, i: 2 },
+      { s: idx(P.hipPos), side: 1, len: P.legLen * this.sizeScale, i: 3 }
+    ];
+    this.limbs = limbs;
+    const stride = P.stride * this.sizeScale;
+    let air = 0;
+    const cand = [];
+    for (const lb of limbs) {
+      const a = lb.s.a + Math.PI;
+      const fwd = { x: Math.cos(a + Math.PI), y: Math.sin(a + Math.PI) };
+      const per = { x: -fwd.y, y: fwd.x };
+      const ideal = {
+        x: lb.s.x + fwd.x * lb.len * P.stanceReach * 0.55 + per.x * lb.side * lb.len * P.stanceWidth * 0.6,
+        y: lb.s.y + fwd.y * lb.len * P.stanceReach * 0.55 + per.y * lb.side * lb.len * P.stanceWidth * 0.6
+      };
+      lb.ideal = ideal;
+      const f = this.feet[lb.i];
+      if (f.planted && (f.x === 0 && f.y === 0)) { f.x = ideal.x; f.y = ideal.y; }
+      if (!f.planted) {
+        air++; f.t += dt / P.stepDur;
+        if (f.t >= 1) {
+          f.planted = true; f.x = f.to.x; f.y = f.to.y; f.air = 0;
+          // Only every other footfall registers, and only when actually moving:
+          // a quiet world stays quiet.
+          this.stepCount = (this.stepCount || 0) + 1;
+          if (this.stepCount % 2 === 0 && Math.abs(this.vel) > 30) {
+            this.emit(f.x, f.y, (0.07 + Math.min(0.11, Math.abs(this.vel) / 1600)) * this.sizeScale, 'step');
+          }
+        }
+      }
+      else {
+        const d = Math.hypot(f.x - ideal.x, f.y - ideal.y);
+        if (d > stride) cand.push({ lb, f, d, ideal });
+      }
+    }
+    cand.sort((a, b) => b.d - a.d);
+    for (const c of cand) {
+      const opp = this.feet[[3, 2, 1, 0][c.lb.i]];
+      if (P.coupling > 0.5 && !opp.planted) continue;
+      if (!this.feet[c.lb.i ^ 1].planted && Math.random() < P.coupling) continue;
+      c.f.planted = false; c.f.t = 0;
+      c.f.from = { x: c.f.x, y: c.f.y };
+      const fwd = { x: Math.cos(c.lb.s.a + Math.PI), y: Math.sin(c.lb.s.a + Math.PI) };
+      c.f.to = { x: c.ideal.x + fwd.x * stride * 0.45, y: c.ideal.y + fwd.y * stride * 0.45 };
+      break;
+    }
+    for (const f of this.feet) {
+      if (!f.planted) {
+        const t = f.t;
+        f.x = f.from.x + (f.to.x - f.from.x) * t;
+        f.y = f.from.y + (f.to.y - f.from.y) * t;
+        f.air = Math.sin(Math.PI * t) * P.stepHeight * this.sizeScale;
+      }
+    }
+
+    for (let i = this.pellets.length - 1; i >= 0; i--) {
+      const p = this.pellets[i];
+      if (Math.hypot(p.x - this.head.x, p.y - this.head.y) < 16 * this.sizeScale) {
+        this.pellets.splice(i, 1); this.pellets.push(this.spawnPellet());
+        this.food++; this.sizeScale = Math.min(1.9, this.sizeScale + 0.022);
+        this.emit(p.x, p.y, 0.42 * this.sizeScale, 'bite');
+      }
+    }
+
+    this.stepBalls(dt);
+    this.stepSounds(dt);
+    this.stepSense(dt);
+
+    this.cam.x += (this.head.x - this.cam.x) * Math.min(1, dt * 3.2);
+    this.cam.y += (this.head.y - this.cam.y) * Math.min(1, dt * 3.2);
+
+    this.hudT += dt;
+    if (this.hudT > 0.12) {
+      this.hudT = 0;
+      const sp = Math.abs(Math.round(this.vel));
+      const st = sp < 6 ? 'IDLE' : (this.keys['shift'] ? 'SPRINT' : 'WALK');
+      if (st !== this.state.stateName || sp !== this.state.speed || air !== this.state.airborne || this.food !== this.state.food) {
+        this.setState({ stateName: st, speed: sp, airborne: air, food: this.food, size: this.sizeScale });
+      }
+    }
+  }
+
+  ensureLayers(w, h, dpr) {
+    if (!this.L) {
+      const mk = () => { const el = document.createElement('canvas'); return { el, ctx: el.getContext('2d') }; };
+      this.L = { world: mk(), latent: mk(), periph: mk(), sharp: mk(), core: mk(), outer: mk(), fog: mk(), ghost: mk(), sense: mk(), hear: mk() };
+    }
+    const L = this.L;
+    const fit = (o, pw, ph) => { if (o.el.width !== pw || o.el.height !== ph) { o.el.width = pw; o.el.height = ph; } };
+    const pw = Math.max(1, Math.round(w * dpr)), ph = Math.max(1, Math.round(h * dpr));
+    fit(L.world, pw, ph); fit(L.latent, pw, ph); fit(L.periph, pw, ph); fit(L.sharp, pw, ph); fit(L.fog, pw, ph); fit(L.ghost, pw, ph); fit(L.sense, pw, ph); fit(L.hear, pw, ph);
+    L.mw = Math.max(1, Math.round(w * 0.5)); L.mh = Math.max(1, Math.round(h * 0.5));
+    fit(L.core, L.mw, L.mh); fit(L.outer, L.mw, L.mh);
+    return L;
+  }
+
+  // Soft organic field of sight: a chain of overlapping blobs cast from the head
+  // along the look direction, radii modulated by slow noise so no cone or circle reads.
+  paintSight(ctx, mw, mh, cx, cy, ang, reach, width, near, seed, tail) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, mw, mh);
+    ctx.globalCompositeOperation = 'lighter';
+    const fx = Math.cos(ang), fy = Math.sin(ang);
+    const px = -fy, py = fx;
+    const t0 = this.time;
+    const blob = (x, y, r, a) => {
+      if (r <= 0.5 || a <= 0.01) return;
+      const gr = ctx.createRadialGradient(x, y, 0, x, y, r);
+      gr.addColorStop(0, 'rgba(255,255,255,' + a + ')');
+      gr.addColorStop(0.5, 'rgba(255,255,255,' + a * 0.72 + ')');
+      gr.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = gr;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 6.284); ctx.fill();
+    };
+    blob(cx, cy, near, 0.95);
+    const steps = 15;
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const wob = 1
+        + 0.17 * Math.sin(t * 5.1 + t0 * 0.62 + seed)
+        + 0.10 * Math.sin(t * 11.7 - t0 * 0.41 + seed * 2.1);
+      const lat = width * (0.13 * Math.sin(t * 3.3 + t0 * 0.5 + seed) + 0.07 * Math.sin(t * 8.1 - t0 * 0.33));
+      const d = reach * (0.06 + 0.94 * t);
+      const r = width * (0.34 + 0.78 * Math.pow(Math.sin(Math.PI * (0.12 + 0.88 * t)), 0.75)) * wob;
+      const a = 0.95 * (1 - Math.pow(t, tail));
+      blob(cx + fx * d + px * lat, cy + fy * d + py * lat, r, a);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // Unseen space is not dark — it is *unresolved*. The world keeps its paper brightness
+  // everywhere; sight only restores contrast, colour and detail. Outside it the same
+  // habitat is blurred, desaturated and lifted toward a cool paper grey.
+  paintWash(L, w, h) {
+    const gf = L.fog.ctx, pw = L.fog.el.width, ph = L.fog.el.height;
+    gf.setTransform(1, 0, 0, 1, 0, 0);
+    gf.clearRect(0, 0, pw, ph);
+    gf.fillStyle = '#EEF0F2';
+    gf.fillRect(0, 0, pw, ph);
+    // Broad, feathered removal: a heavily blurred mask means the veil thins over a long
+    // distance instead of switching off at an edge.
+    gf.globalCompositeOperation = 'destination-out';
+    gf.filter = 'blur(' + Math.round(Math.max(26, w * 0.05)) + 'px)';
+    gf.globalAlpha = 0.55;
+    gf.drawImage(L.outer.el, 0, 0, pw, ph);
+    gf.filter = 'blur(' + Math.round(Math.max(14, w * 0.022)) + 'px)';
+    gf.globalAlpha = 0.85;
+    gf.drawImage(L.core.el, 0, 0, pw, ph);
+    gf.filter = 'none';
+    gf.globalAlpha = 1;
+    gf.globalCompositeOperation = 'source-over';
+  }
+
+  compositeVision(g, L, w, h, S) {
+    const hp = this.rp && this.rp[0] ? this.rp[0] : this.head;
+    const hx = (w / 2 + (hp.x - this.cam.x) * S) * 0.5;
+    const hy = (h / 2 + (hp.y - this.cam.y) * S) * 0.5;
+    const ang = this.head.a;
+    const sc = this.sizeScale * S * 0.5;
+    const gain = 1 + Math.min(1, Math.abs(this.vel) / 190) * 0.32;
+
+    this.paintSight(L.core.ctx, L.mw, L.mh, hx, hy, ang, 300 * sc * gain, 130 * sc, 52 * sc, 0.0, 1.7);
+    this.paintSight(L.outer.ctx, L.mw, L.mh, hx, hy, ang, 560 * sc * gain, 260 * sc, 130 * sc, 1.9, 2.9);
+
+    // Uncertain render of the whole habitat: soft, grey, detail dissolved but present.
+    const gg = L.ghost.ctx;
+    gg.setTransform(1, 0, 0, 1, 0, 0);
+    gg.clearRect(0, 0, L.ghost.el.width, L.ghost.el.height);
+    gg.filter = 'blur(' + Math.max(5, 9 * S) + 'px) grayscale(1) contrast(0.62) brightness(1.16)';
+    gg.drawImage(L.world.el, 0, 0);
+    gg.filter = 'none';
+
+    const gp = L.periph.ctx;
+    gp.setTransform(1, 0, 0, 1, 0, 0);
+    gp.clearRect(0, 0, L.periph.el.width, L.periph.el.height);
+    gp.filter = 'blur(' + Math.max(1.5, 2.6 * S) + 'px) grayscale(0.55) contrast(0.88)';
+    gp.drawImage(L.world.el, 0, 0);
+    gp.filter = 'none';
+    gp.globalCompositeOperation = 'destination-in';
+    gp.drawImage(L.outer.el, 0, 0, L.periph.el.width, L.periph.el.height);
+    gp.globalCompositeOperation = 'source-over';
+
+    const gs = L.sharp.ctx;
+    gs.setTransform(1, 0, 0, 1, 0, 0);
+    gs.clearRect(0, 0, L.sharp.el.width, L.sharp.el.height);
+    gs.drawImage(L.world.el, 0, 0);
+    gs.globalCompositeOperation = 'destination-in';
+    gs.drawImage(L.core.el, 0, 0, L.sharp.el.width, L.sharp.el.height);
+    gs.globalCompositeOperation = 'source-over';
+
+    // Survey grid persists everywhere as the paper's own texture.
+    g.globalAlpha = 0.3;
+    g.filter = 'blur(0.6px)';
+    g.drawImage(L.latent.el, 0, 0, w, h);
+    g.filter = 'none';
+
+    g.globalAlpha = 0.58;
+    g.drawImage(L.ghost.el, 0, 0, w, h);
+
+    this.paintWash(L, w, h);
+    g.globalAlpha = 0.5;
+    g.drawImage(L.fog.el, 0, 0, w, h);
+
+    g.globalAlpha = 0.8;
+    g.drawImage(L.periph.el, 0, 0, w, h);
+    g.globalAlpha = 1;
+    g.drawImage(L.sharp.el, 0, 0, w, h);
+  }
+
+  draw() {
+    const cv = this.canvasRef.current; if (!cv) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = cv.clientWidth, h = cv.clientHeight;
+    if (cv.width !== w * dpr || cv.height !== h * dpr) { cv.width = w * dpr; cv.height = h * dpr; }
+    const g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+
+    const S = this.zoom;
+    const L = this.ensureLayers(w, h, dpr);
+
+    const gl = L.latent.ctx;
+    gl.setTransform(dpr, 0, 0, dpr, 0, 0);
+    gl.clearRect(0, 0, w, h);
+    gl.save();
+    gl.translate(w / 2, h / 2); gl.scale(S, S); gl.translate(-this.cam.x, -this.cam.y);
+
+    const step = 90;
+    const x0 = Math.floor((this.cam.x - w / 2 / S) / step) * step, x1 = this.cam.x + w / 2 / S;
+    const y0 = Math.floor((this.cam.y - h / 2 / S) / step) * step, y1 = this.cam.y + h / 2 / S;
+    gl.fillStyle = 'rgba(20,20,15,0.34)';
+    for (let x = x0; x < x1; x += step) for (let y = y0; y < y1; y += step) {
+      const [px, py, sw] = this.gridPush(x, y);
+      gl.beginPath(); gl.arc(x + px, y + py, (1.15 + sw * 1.5) / S, 0, 6.284); gl.fill();
+    }
+    gl.restore();
+
+    const gw = L.world.ctx;
+    gw.setTransform(dpr, 0, 0, dpr, 0, 0);
+    gw.clearRect(0, 0, w, h);
+    gw.save();
+    gw.translate(w / 2, h / 2); gw.scale(S, S); gw.translate(-this.cam.x, -this.cam.y);
+    gw.fillStyle = 'rgba(20,20,15,0.15)';
+    for (let x = x0; x < x1; x += step) for (let y = y0; y < y1; y += step) {
+      const [px, py, sw] = this.gridPush(x, y);
+      gw.beginPath(); gw.arc(x + px, y + py, (1 + sw * 1.3) / S, 0, 6.284); gw.fill();
+    }
+    gw.restore();
+    gw.save();
+    gw.translate(w / 2, h / 2); gw.scale(S, S); gw.translate(-this.cam.x, -this.cam.y);
+
+    for (const p of this.pellets) {
+      const pu = 1 + Math.sin(this.time * 2 + p.ph) * 0.12;
+      gw.beginPath(); gw.arc(p.x, p.y, 8.5 * pu, 0, 6.284);
+      gw.strokeStyle = 'rgba(20,20,15,0.26)'; gw.lineWidth = 1 / S; gw.stroke();
+      gw.beginPath(); gw.arc(p.x, p.y, 2.6, 0, 6.284); gw.fillStyle = '#14140F'; gw.fill();
+    }
+    for (const b of this.balls) {
+      const lift = b.z * 0.42;
+      gw.beginPath();
+      gw.ellipse(b.x, b.y, b.r * (1.05 + b.z / 420), b.r * (0.66 + b.z / 620), 0, 0, 6.284);
+      gw.fillStyle = 'rgba(20,20,15,' + Math.max(0.05, 0.2 - b.z * 0.0007).toFixed(3) + ')';
+      gw.fill();
+      gw.beginPath(); gw.arc(b.x, b.y - lift, b.r, 0, 6.284);
+      gw.fillStyle = '#14140F'; gw.fill();
+      gw.beginPath(); gw.arc(b.x - b.r * 0.3, b.y - lift - b.r * 0.34, b.r * 0.22, 0, 6.284);
+      gw.fillStyle = '#F3F1EC'; gw.fill();
+    }
+    for (const c of this.carrion) {
+      gw.fillStyle = 'rgba(20,20,15,0.34)';
+      for (const lo of c.lobes) { gw.beginPath(); gw.arc(c.x + lo.dx, c.y + lo.dy, lo.r, 0, 6.284); gw.fill(); }
+      gw.fillStyle = 'rgba(20,20,15,0.12)';
+      gw.beginPath(); gw.arc(c.x, c.y, 15, 0, 6.284); gw.fill();
+    }
+    gw.restore();
+
+    this.compositeVision(g, L, w, h, S);
+
+    // Hearing bypasses sight entirely: ripples print onto the paper wherever they
+    // travel, unaffected by what is or isn't resolved by the eye.
+    this.paintHearing(L, w, h, S, dpr);
+    g.save();
+    g.globalCompositeOperation = 'multiply';
+    g.globalAlpha = 0.9;
+    g.drawImage(L.hear.el, 0, 0, w, h);
+    g.restore();
+
+    // The sensory layer sits over the habitat as annotation, not atmosphere:
+    // multiplied in so marks read as pigment on the same paper, never as light.
+    this.paintSense(L, w, h, S, dpr);
+    g.save();
+    g.globalCompositeOperation = 'multiply';
+    g.globalAlpha = 0.95;
+    g.drawImage(L.sense.el, 0, 0, w, h);
+    g.restore();
+
+    g.save();
+    g.translate(w / 2, h / 2); g.scale(S, S); g.translate(-this.cam.x, -this.cam.y);
+
+    const n = this.rp.length;
+    const ink = '#14140F';
+
+    for (const f of this.feet) {
+      const r = 5 * this.sizeScale + f.air * 0.18;
+      g.beginPath(); g.ellipse(f.x, f.y + f.air * 0.5 + 4, r * 1.05, r * 0.7, 0, 0, 6.284);
+      g.fillStyle = 'rgba(20,20,15,' + (0.13 - f.air * 0.004) + ')'; g.fill();
+    }
+
+    g.save();
+    g.shadowColor = 'rgba(20,20,15,0.22)'; g.shadowBlur = 26 * S; g.shadowOffsetY = 10;
+    g.beginPath();
+    for (let i = 0; i < n; i++) { const p = this.rp[i], wd = this.widthAt(i / (n - 1)); const a = p.a + Math.PI / 2; const x = p.x + Math.cos(a) * wd, y = p.y + Math.sin(a) * wd; i === 0 ? g.moveTo(x, y) : g.lineTo(x, y); }
+    for (let i = n - 1; i >= 0; i--) { const p = this.rp[i], wd = this.widthAt(i / (n - 1)); const a = p.a - Math.PI / 2; g.lineTo(p.x + Math.cos(a) * wd, p.y + Math.sin(a) * wd); }
+    g.closePath();
+    g.fillStyle = ink; g.fill();
+    g.restore();
+
+    for (const lb of this.limbs) {
+      const f = this.feet[lb.i];
+      const fx = f.x, fy = f.y - f.air;
+      const a = lb.len / 2, b = lb.len / 2;
+      let dx = fx - lb.s.x, dy = fy - lb.s.y;
+      let d = Math.max(1, Math.min(a + b - 0.01, Math.hypot(dx, dy)));
+      const base = Math.atan2(dy, dx);
+      const cosA = Math.max(-1, Math.min(1, (a * a + d * d - b * b) / (2 * a * d)));
+      const ang = base + Math.acos(cosA) * lb.side;
+      const kx = lb.s.x + Math.cos(ang) * a, ky = lb.s.y + Math.sin(ang) * a;
+      g.beginPath(); g.moveTo(lb.s.x, lb.s.y); g.lineTo(kx, ky); g.lineTo(fx, fy);
+      g.strokeStyle = ink; g.lineWidth = 4.6 * this.sizeScale; g.lineCap = 'round'; g.lineJoin = 'round'; g.stroke();
+      g.beginPath(); g.arc(fx, fy, 3.6 * this.sizeScale, 0, 6.284); g.fillStyle = ink; g.fill();
+    }
+
+    const hp = this.rp[0], ha = hp.a + Math.PI;
+    const ew = this.widthAt(0.02) * 0.55, ef = this.widthAt(0) * 0.15;
+    for (const s of [-1, 1]) {
+      const px = hp.x + Math.cos(ha + Math.PI) * ef + Math.cos(ha + Math.PI / 2) * ew * s;
+      const py = hp.y + Math.sin(ha + Math.PI) * ef + Math.sin(ha + Math.PI / 2) * ew * s;
+      g.beginPath(); g.arc(px, py, 2.5 * this.sizeScale, 0, 6.284); g.fillStyle = '#F3F1EC'; g.fill();
+    }
+
+    if (this.state.debug) {
+      g.strokeStyle = 'rgba(20,20,15,0.55)'; g.lineWidth = 1 / S;
+      g.beginPath();
+      for (let i = 0; i < n; i++) { const p = this.pts[i]; i === 0 ? g.moveTo(p.x, p.y) : g.lineTo(p.x, p.y); }
+      g.stroke();
+      for (let i = 0; i < n; i++) { const p = this.pts[i]; g.beginPath(); g.arc(p.x, p.y, 2 / S, 0, 6.284); g.fillStyle = '#F3F1EC'; g.fill(); g.stroke(); }
+      for (const lb of this.limbs) { g.beginPath(); g.arc(lb.ideal.x, lb.ideal.y, 4 / S, 0, 6.284); g.stroke(); }
+    }
+    g.restore();
+  }
+
+  pickSpecies(name) {
+    const keep = { iters: this.P.iters, stiffness: this.P.stiffness, damping: this.P.damping, maxBend: this.P.maxBend };
+    this.P = Object.assign(this.buildParams(name), keep);
+    this.setState({ species: name });
+  }
+
+  slide(e, key, min, max, stepv) {
+    const track = e.currentTarget;
+    const set = (clientX) => {
+      const r = track.getBoundingClientRect();
+      let t = (clientX - r.left) / r.width;
+      t = Math.max(0, Math.min(1, t));
+      let v = min + t * (max - min);
+      v = Math.round(v / stepv) * stepv;
+      this.P[key] = v;
+      this.setState(s => ({ v: s.v + 1 }));
+    };
+    set(e.clientX);
+    const mv = (ev) => set(ev.clientX);
+    const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+  }
+
+  renderVals() {
+    const P = this.P || this.buildParams('LIZARD');
+    const s = this.state;
+    const groups = this.SCHEMA.map(([name, rows]) => ({
+      name,
+      rows: rows.map(r => {
+        const [key, label, min, max, stepv, dec] = r;
+        if (min === null) {
+          const on = !!P[key];
+          return {
+            key, label, isSlider: false, isToggle: true, display: on ? 'ON' : 'OFF',
+            knobLeft: on ? '15px' : '3px', knobOpacity: on ? 1 : 0.28,
+            toggle: () => { P[key] = !P[key]; this.setState(st => ({ v: st.v + 1 })); }
+          };
+        }
+        const val = P[key];
+        return {
+          key, label, isSlider: true, isToggle: false,
+          display: Number(val).toFixed(dec),
+          pct: (((val - min) / (max - min)) * 100).toFixed(1) + '%',
+          onDown: (e) => this.slide(e, key, min, max, stepv)
+        };
+      })
+    }));
+
+    const level = Math.floor(s.food / 12);
+    const into = s.food - level * 12;
+
+    return {
+      canvasRef: this.canvasRef,
+      stateName: s.stateName,
+      speedText: String(s.speed).padStart(3, '0') + ' PX/S',
+      airborneText: s.airborne + '/4',
+      segmentsText: String(Math.round(P.segments)),
+      sizeText: '×' + Number(s.size).toFixed(2),
+      foodText: 'FOOD ' + String(s.food).padStart(3, '0'),
+      nextText: 'STAGE ' + String(level + 1).padStart(2, '0'),
+      growthPct: ((into / 12) * 100).toFixed(1) + '%',
+      pipTrack: Array.from({ length: 24 }, (_, i) => i),
+      legend: true,
+      hintOpacity: s.moved ? 0 : 1,
+      rowCount: groups.reduce((a, g) => a + g.rows.length, 0),
+      groups,
+      speciesShort: s.species,
+      panelOpacity: s.panel ? 1 : 0,
+      panelTransform: s.panel ? 'translateX(0)' : 'translateX(14px)',
+      panelEvents: s.panel ? 'auto' : 'none',
+      panelDot: s.panel ? '#14140F' : 'rgba(20,20,15,0.25)',
+      togglePanel: () => this.setState(st => ({ panel: !st.panel })),
+      resetParams: () => { this.P = this.buildParams(s.species); this.setState(st => ({ v: st.v + 1 })); },
+      speciesList: Object.keys(this.SPECIES).map(nm => ({
+        name: nm,
+        dot: nm === s.species ? '#14140F' : 'rgba(20,20,15,0)',
+        ink: nm === s.species ? '#14140F' : 'rgba(20,20,15,0.38)',
+        rule: nm === s.species ? '#14140F' : 'rgba(20,20,15,0.12)',
+        pick: () => this.pickSpecies(nm)
+      }))
+    };
+  }
+}
+</script>
+</body>
+</html>

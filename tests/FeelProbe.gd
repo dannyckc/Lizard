@@ -90,8 +90,13 @@ func _walk(c: Creature2, throttle: float, sprint: bool) -> void:
 	var roll_lo: float = 0.0
 	var roll_hi: float = 0.0
 	var roll_sum: float = 0.0
+	var com: PackedFloat32Array = PackedFloat32Array()
+	var idle_ticks: int = 0
 	for i in n:
 		c._physics_process(TICK)
+		com.append((c.armature.fore_carry + c.armature.hind_carry) * 0.5)
+		if c.travel.footwork.planted() == 4:
+			idle_ticks += 1
 		var down: int = 0
 		for j in fw.feet.size():
 			var f: Footwork.Foot = fw.feet[j]
@@ -128,6 +133,49 @@ func _walk(c: Creature2, throttle: float, sprint: bool) -> void:
 	print("  travelled %.0f px in %.1f s, heel %.2f°..%.2f° (mean %.2f°)"
 		% [c.centre().distance_to(start), seconds, rad_to_deg(roll_lo),
 			rad_to_deg(roll_hi), rad_to_deg(roll_sum / float(n))])
+	_com_trace(com, idle_ticks, n)
+
+
+## The user-visible truth of the rhythm: the carried weight's vertical trace.
+## A flowing gait bobs like a sine at the step frequency; a pausing one parks
+## flat between spikes, and a snapping one has cuts. Reported as the share of
+## the trace's variance a single sinusoid explains (R² at the best-fit
+## frequency), its amplitude, the worst one-tick jump, and how much of the
+## run had every foot planted.
+func _com_trace(com: PackedFloat32Array, idle_ticks: int, n: int) -> void:
+	var mean: float = 0.0
+	for x in com:
+		mean += x
+	mean /= float(n)
+	var var_sum: float = 0.0
+	for x in com:
+		var_sum += (x - mean) * (x - mean)
+	var best_r2: float = 0.0
+	var best_hz: float = 0.0
+	var hz: float = 0.4
+	while hz <= 8.0:
+		var w: float = TAU * hz * TICK
+		var a_s: float = 0.0
+		var a_c: float = 0.0
+		for i in n:
+			a_s += (com[i] - mean) * sin(w * i)
+			a_c += (com[i] - mean) * cos(w * i)
+		var power: float = (a_s * a_s + a_c * a_c) * 2.0 / float(n)
+		var r2: float = power / maxf(var_sum, 0.0001)
+		if r2 > best_r2:
+			best_r2 = r2
+			best_hz = hz
+		hz += 0.05
+	var jump: float = 0.0
+	var lo: float = INF
+	var hi: float = -INF
+	for i in n:
+		if i > 0:
+			jump = maxf(jump, absf(com[i] - com[i - 1]))
+		lo = minf(lo, com[i])
+		hi = maxf(hi, com[i])
+	print("  COM: bob %.1f px at %.1f Hz, sine R² %.2f, worst cut %.2f px/tick, all-planted %.0f%%"
+		% [hi - lo, best_hz, best_r2, jump, float(idle_ticks) / float(n) * 100.0])
 
 
 func _turn(c: Creature2, throttle: float) -> void:

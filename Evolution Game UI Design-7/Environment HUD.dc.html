@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #F3F1EC; }
+  * { box-sizing: border-box; }
+  a { color: #14140F; text-decoration: none; border-bottom: 1px solid rgba(20,20,15,0.3); }
+  a:hover { color: rgba(20,20,15,0.55); }
+  ::selection { background: #14140F; color: #F3F1EC; }
+  .om-scroll::-webkit-scrollbar { width: 3px; height: 3px; }
+  .om-scroll::-webkit-scrollbar-thumb { background: rgba(20,20,15,0.22); }
+  .om-scroll::-webkit-scrollbar-track { background: transparent; }
+</style>
+</helmet>
+<div style="position:relative;display:flex;flex-direction:column;width:100%;height:100vh;min-height:640px;overflow:hidden;background:#F3F1EC;color:#14140F;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased">
+
+  <div style="position:relative;flex:1 1 auto;min-height:0;overflow:hidden">
+    <canvas ref="{{ sceneRef }}" onClick="{{ reseed }}" style="position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair;image-rendering:pixelated"></canvas>
+
+    <div style="position:absolute;left:0;right:0;top:0;height:170px;pointer-events:none;background:linear-gradient(180deg,rgba(24,38,20,0.42),rgba(24,38,20,0))"></div>
+    <div style="position:absolute;left:0;right:0;bottom:0;height:120px;pointer-events:none;background:linear-gradient(0deg,rgba(24,38,20,0.38),rgba(24,38,20,0))"></div>
+    <div style="position:absolute;inset:14px;pointer-events:none;border:1px solid rgba(243,241,236,0.30)"></div>
+
+    <div style="position:absolute;top:30px;left:32px;display:flex;flex-direction:column;gap:16px;pointer-events:none;max-width:44vw">
+      <div style="display:flex;align-items:center;gap:11px">
+        <div style="width:7px;height:7px;background:#F3F1EC"></div>
+        <div style="font-size:11px;letter-spacing:0.34em;text-transform:uppercase;line-height:1;color:#F3F1EC;text-shadow:0 1px 3px rgba(20,30,15,0.45)">Evolution</div>
+        <div style="width:22px;height:1px;background:rgba(243,241,236,0.42)"></div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.16em;color:rgba(243,241,236,0.78);line-height:1;text-shadow:0 1px 3px rgba(20,30,15,0.45)">MEADOW&nbsp;&nbsp;TOP-DOWN&nbsp;&nbsp;0.2</div>
+      </div>
+      <div style="display:grid;grid-template-columns:auto auto;gap:4px 22px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.1em;line-height:1.4;color:#F3F1EC;text-shadow:0 1px 3px rgba(20,30,15,0.5)">
+        <span style="opacity:0.66">SEED</span><span>{{ seedText }}</span>
+        <span style="opacity:0.66">LIGHT</span><span>{{ phaseName }}</span>
+        <span style="opacity:0.66">BUFFER</span><span>{{ resText }}</span>
+        <span style="opacity:0.66">SPRITES</span><span>{{ instanceText }}</span>
+      </div>
+    </div>
+
+    <div style="position:absolute;top:30px;right:32px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+      <sc-for list="{{ phaseList }}" as="b" hint-placeholder-count="3">
+        <div onClick="{{ b.pick }}" style="position:relative;display:flex;align-items:center;gap:7px;padding:7px 12px;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;min-height:32px">
+          <div style="width:4px;height:4px;background:{{ b.dot }};transition:background 260ms ease"></div>
+          <div style="font-size:9.5px;letter-spacing:0.22em;text-transform:uppercase;line-height:1;color:{{ b.ink }};text-shadow:0 1px 3px rgba(20,30,15,0.45);transition:color 260ms ease">{{ b.name }}</div>
+          <div style="position:absolute;left:0;right:0;bottom:0;height:1px;background:{{ b.rule }};transition:background 260ms ease"></div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="position:absolute;left:32px;bottom:26px;display:flex;align-items:center;gap:22px;flex-wrap:wrap;max-width:min(620px,54vw)">
+      <div style="display:flex;align-items:center;gap:7px">
+        <div style="min-width:19px;height:19px;padding:0 6px;border:1px solid rgba(243,241,236,0.45);display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:9px;color:#F3F1EC">LMB</div>
+        <span style="font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(243,241,236,0.86);text-shadow:0 1px 3px rgba(20,30,15,0.45)">Reseed meadow</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:7px">
+        <div style="min-width:19px;height:19px;padding:0 5px;border:1px solid rgba(243,241,236,0.45);display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:9px;color:#F3F1EC">F1</div>
+        <span style="font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(243,241,236,0.86);text-shadow:0 1px 3px rgba(20,30,15,0.45)">Tuning</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:7px">
+        <div style="min-width:19px;height:19px;padding:0 5px;border:1px solid rgba(243,241,236,0.45);display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:9px;color:#F3F1EC">F2</div>
+        <span style="font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(243,241,236,0.86);text-shadow:0 1px 3px rgba(20,30,15,0.45)">Tile grid</span>
+      </div>
+    </div>
+
+    <div onClick="{{ togglePanel }}" style="position:absolute;right:32px;bottom:26px;display:flex;align-items:center;gap:9px;padding:9px 14px;min-height:36px;cursor:pointer;user-select:none;background:rgba(243,241,236,0.86);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(20,20,15,0.13);box-shadow:0 14px 34px -18px rgba(20,20,15,0.45)" style-hover="border-color:rgba(20,20,15,0.34)">
+      <div style="width:4px;height:4px;background:{{ panelDot }};transition:background 220ms ease"></div>
+      <span style="font-size:9.5px;letter-spacing:0.22em;text-transform:uppercase;line-height:1">Tuning</span>
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(20,20,15,0.38);line-height:1">F1</span>
+    </div>
+
+    <div style="position:absolute;top:76px;right:32px;bottom:78px;width:clamp(304px,26vw,336px);max-width:calc(100vw - 64px);display:flex;flex-direction:column;background:rgba(243,241,236,0.88);backdrop-filter:blur(14px) saturate(0.9);-webkit-backdrop-filter:blur(14px) saturate(0.9);border:1px solid rgba(20,20,15,0.13);box-shadow:0 26px 60px -30px rgba(20,20,15,0.55);transition:opacity 300ms ease,transform 380ms cubic-bezier(.2,.7,.2,1);opacity:{{ panelOpacity }};transform:{{ panelTransform }};pointer-events:{{ panelEvents }}">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;padding:16px 18px 13px;border-bottom:1px solid rgba(20,20,15,0.11)">
+        <div style="display:flex;align-items:center;gap:9px">
+          <div style="width:5px;height:5px;background:#14140F"></div>
+          <div style="font-size:10px;letter-spacing:0.28em;text-transform:uppercase;line-height:1">Generation</div>
+        </div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.12em;color:rgba(20,20,15,0.38)">MEADOW</div>
+      </div>
+
+      <div class="om-scroll" style="flex:1;overflow-y:auto;overflow-x:hidden;padding:4px 18px 20px">
+        <sc-for list="{{ groups }}" as="g" hint-placeholder-count="4">
+          <div style="padding-top:18px">
+            <div style="display:flex;align-items:center;gap:10px;padding-bottom:9px">
+              <div style="font-size:9px;letter-spacing:0.26em;text-transform:uppercase;color:rgba(20,20,15,0.40);line-height:1">{{ g.name }}</div>
+              <div style="flex:1;height:1px;background:rgba(20,20,15,0.11)"></div>
+            </div>
+            <sc-for list="{{ g.rows }}" as="row" hint-placeholder-count="5">
+              <div style="display:grid;grid-template-columns:minmax(0,1fr) 76px 38px;align-items:center;gap:9px;height:26px">
+                <div style="font-size:10.5px;color:rgba(20,20,15,0.78);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ row.label }}</div>
+                <sc-if value="{{ row.isSlider }}" hint-placeholder-val="{{ true }}">
+                  <div onPointerDown="{{ row.onDown }}" style="position:relative;height:26px;display:flex;align-items:center;cursor:ew-resize;touch-action:none">
+                    <div style="position:absolute;left:0;right:0;height:1px;background:rgba(20,20,15,0.20)"></div>
+                    <div style="position:absolute;left:0;height:1px;background:#14140F;width:{{ row.pct }}"></div>
+                    <div style="position:absolute;left:{{ row.pct }};width:6px;height:6px;background:#14140F;transform:translateX(-50%);box-shadow:0 0 0 3px rgba(243,241,236,0.9)"></div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ row.isToggle }}" hint-placeholder-val="{{ false }}">
+                  <div onClick="{{ row.toggle }}" style="height:26px;display:flex;align-items:center;cursor:pointer">
+                    <div style="position:relative;width:26px;height:14px;border:1px solid rgba(20,20,15,0.28)">
+                      <div style="position:absolute;top:2px;width:8px;height:8px;background:#14140F;left:{{ row.knobLeft }};opacity:{{ row.knobOpacity }};transition:left 220ms cubic-bezier(.2,.7,.2,1),opacity 220ms ease"></div>
+                    </div>
+                  </div>
+                </sc-if>
+                <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;text-align:right;color:rgba(20,20,15,0.62)">{{ row.display }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-top:1px solid rgba(20,20,15,0.11);font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(20,20,15,0.34)">
+        <span>SCHEMA · {{ rowCount }} ROWS</span>
+        <span onClick="{{ resetParams }}" style="cursor:pointer;color:rgba(20,20,15,0.55);border-bottom:1px solid rgba(20,20,15,0.22)" style-hover="color:#14140F">RESET</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="flex:none;border-top:1px solid rgba(20,20,15,0.14);background:#F3F1EC;display:{{ platesDisplay }};flex-direction:column">
+    <div style="display:flex;align-items:center;gap:14px;padding:13px 32px 0">
+      <div style="font-size:9px;letter-spacing:0.26em;text-transform:uppercase;color:rgba(20,20,15,0.42);line-height:1">Sprite plates · meadow tileset</div>
+      <div style="flex:1;height:1px;background:rgba(20,20,15,0.11)"></div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.1em;color:rgba(20,20,15,0.34)">4 VALUES MAX · LIGHT FROM UPPER-LEFT · NO ANTI-ALIAS</div>
+    </div>
+    <div class="om-scroll" style="display:flex;gap:0;overflow-x:auto;padding:12px 32px 20px">
+      <sc-for list="{{ plates }}" as="p" hint-placeholder-count="10">
+        <div style="flex:none;width:176px;display:flex;flex-direction:column;gap:8px;padding:0 14px;border-right:1px solid rgba(20,20,15,0.10)">
+          <canvas ref="{{ p.ref }}" style="width:148px;height:104px;display:block;image-rendering:pixelated"></canvas>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <div style="font-size:9px;letter-spacing:0.2em;text-transform:uppercase;line-height:1">{{ p.name }}</div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;line-height:1.55;letter-spacing:0.04em;color:rgba(20,20,15,0.44);text-wrap:pretty">{{ p.spec }}</div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900},&quot;plates&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layout&quot;},&quot;light&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;NOON&quot;,&quot;GOLDEN&quot;,&quot;OVERCAST&quot;],&quot;default&quot;:&quot;NOON&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Scene&quot;},&quot;pixelSize&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:4,&quot;min&quot;:2,&quot;max&quot;:8,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Scene&quot;}}">
+class Component extends DCLogic {
+  sceneRef = React.createRef();
+  plateRefs = Array.from({ length: 10 }, () => React.createRef());
+  state = { panel: true, phase: 'NOON', seed: 0x5eed01, grid: false, v: 0 };
+
+  // Four value steps per material, warm-leaning greens: storybook, not simulation.
+  PAL = {
+    NOON: {
+      grass: ['#a8cf6b', '#8fbe5a', '#79ab4c', '#659440', '#4e7734'],
+      tree: ['#9ed067', '#7cb44e', '#5a8d3a', '#3f682c'],
+      bush: ['#a3ca63', '#82ac48', '#5f8637', '#456429'],
+      rock: ['#c6c2b2', '#9a978a', '#6e6d64', '#4d4d48'],
+      dirt: ['#dcbb8b', '#c39f6f', '#a37f52', '#7f6140'],
+      water: ['#b6e3e6', '#84c8d6', '#54a4bf', '#3c7fa0'],
+      wood: ['#c09a6b', '#9a774f', '#6d5436'],
+      flower: ['#f8e784', '#fbf7e8', '#f0a5c0', '#bda3e0', '#f2c07d'],
+      shadow: '#4a7133', sky: '#8fbe5a'
+    },
+    GOLDEN: {
+      grass: ['#cfd075', '#bcc563', '#a3ad53', '#899244', '#697036'],
+      tree: ['#d3cf72', '#adb455', '#87903f', '#63682f'],
+      bush: ['#c7cb69', '#a4ab4d', '#7f883b', '#5d632c'],
+      rock: ['#d1c5ac', '#a49881', '#776d5c', '#544d42'],
+      dirt: ['#eccb95', '#d0a973', '#ac8555', '#846343'],
+      water: ['#d3e7d9', '#a5cdcb', '#79a8ae', '#5a8390'],
+      wood: ['#cba372', '#a37c50', '#725737'],
+      flower: ['#ffefa0', '#fffaef', '#f7b1c6', '#cbabe4', '#f9cd8e'],
+      shadow: '#7a6a34', sky: '#bcc563'
+    },
+    OVERCAST: {
+      grass: ['#93b56f', '#83a561', '#729454', '#5f7d47', '#4a6339'],
+      tree: ['#8dae66', '#749650', '#5b783e', '#42592f'],
+      bush: ['#8fb066', '#77974d', '#5d773c', '#45592e'],
+      rock: ['#bcbcb4', '#93938c', '#6a6a65', '#4b4b48'],
+      dirt: ['#cbb495', '#ae9878', '#8d7a5e', '#6c5d48'],
+      water: ['#c4d8dd', '#9dbcc7', '#7597a8', '#57748a'],
+      wood: ['#b3946e', '#8d7150', '#644f38'],
+      flower: ['#eee5a8', '#f3f1e8', '#e2adba', '#b2a7cf', '#e3c69f'],
+      shadow: '#46603a', sky: '#83a561'
+    }
+  };
+
+  // Sprites read as flat top-down shapes; chars index a material ramp.
+  SPR = {
+    tree: { map: { a: ['tree', 0], b: ['tree', 1], c: ['tree', 2], d: ['tree', 3] }, rows: [
+      '....dd.dddd.....',
+      '..ddbbddbbbdd...',
+      '.dbbbbbdbbaabd..',
+      'dbbaabbbdbaaabd.',
+      'dbaaaabbbbaabbdd',
+      'dbaaabbbdbbbbccd',
+      'ddbbbbbdddbbccdd',
+      '.dbbbbbbbdbccccd',
+      '.dbbbbbcccdcccdd',
+      '..dbbbcccccccdd.',
+      '..dbbccccccccd..',
+      '...ddcccccccd...',
+      '.....dddddd.....'
+    ] },
+    tsm: { map: { a: ['tree', 0], b: ['tree', 1], c: ['tree', 2], d: ['tree', 3] }, rows: [
+      '..dddd..',
+      '.dbaabd.',
+      'dbaaabcd',
+      'dbaabbcd',
+      'dbbbbccd',
+      '.dbbccd.',
+      '..dddd..'
+    ] },
+    bush: { map: { a: ['bush', 0], b: ['bush', 1], c: ['bush', 2], d: ['bush', 3] }, rows: [
+      '..ddddd..',
+      '.dbbaabd.',
+      'dbbaaabcd',
+      'dbbbaabcd',
+      'dbbbbbccd',
+      '.dbbbccd.',
+      '..ddddd..'
+    ] },
+    rock: { map: { l: ['rock', 0], h: ['rock', 1], s: ['rock', 2], k: ['rock', 3] }, rows: [
+      '..llll..',
+      '.lllhhh.',
+      'llllhhhh',
+      'lhhhhhss',
+      '.hhhsskk',
+      '..sskkk.'
+    ] },
+    pebble: { map: { l: ['rock', 0], h: ['rock', 1], s: ['rock', 2] }, rows: [
+      '.ll.',
+      'lhhh',
+      '.ss.'
+    ] },
+    log: { map: { w: ['wood', 0], m: ['wood', 1], n: ['wood', 2] }, rows: [
+      '..mmmmmm..',
+      '.wwwwwwmn.',
+      'wwwwwwwmmn',
+      '.mmmmmmnn.',
+      '..nnnnnn..'
+    ] },
+    mush: { map: { c: ['flower', 4], r: ['flower', 1], s: ['wood', 2] }, rows: [
+      '.cc.',
+      'crrc',
+      '.ss.'
+    ] },
+    fly0: { map: { w: ['flower', 1], b: ['wood', 2] }, rows: [
+      'ww.ww',
+      '.wbw.',
+      '..b..'
+    ] },
+    fly1: { map: { w: ['flower', 1], b: ['wood', 2] }, rows: [
+      '.w.w.',
+      'wwbww',
+      '..b..'
+    ] }
+  };
+
+  SCHEMA = [
+    ['Canvas', [
+      ['px', 'Pixel size', 2, 8, 1, 0],
+      ['dither', 'Dither strength', 0, 1, 0.02, 2],
+      ['moss', 'Value patches', 0, 1, 0.02, 2]
+    ]],
+    ['Ground', [
+      ['path', 'Trail', null],
+      ['pathWidth', 'Trail width', 4, 40, 1, 0],
+      ['pathWander', 'Trail wander', 0, 1, 0.02, 2],
+      ['pond', 'Pond', null],
+      ['pondSize', 'Pond size', 0.4, 1.8, 0.02, 2]
+    ]],
+    ['Flora', [
+      ['tufts', 'Grass tufts', 0, 1, 0.02, 2],
+      ['flowers', 'Flower clusters', 0, 1, 0.02, 2],
+      ['trees', 'Trees', 0, 18, 1, 0],
+      ['bushes', 'Bushes', 0, 30, 1, 0],
+      ['mush', 'Mushrooms', 0, 14, 1, 0]
+    ]],
+    ['Objects', [
+      ['rocks', 'Rocks', 0, 24, 1, 0],
+      ['logs', 'Fallen logs', 0, 6, 1, 0],
+      ['stones', 'Stepping stones', 0, 14, 1, 0]
+    ]],
+    ['Life & air', [
+      ['flies', 'Butterflies', 0, 10, 1, 0],
+      ['wind', 'Wind', 0, 1, 0.02, 2],
+      ['shimmer', 'Light shimmer', 0, 1, 0.02, 2]
+    ]]
+  ];
+
+  PLATE_DEFS = [
+    ['grass', 'Grass field', 'Two adjacent values only · 4×4 ordered dither at the seam'],
+    ['tuft', 'Grass tufts', '3–5 strokes, 2–3px tall · lighter tip pixel · leans with wind'],
+    ['flower', 'Flower cluster', 'Cross of 4 petals + 1 core · one hue per cluster · <4% cover'],
+    ['bush', 'Bush', '9×7 blob · highlight upper-left, dark rim closes the silhouette'],
+    ['tree', 'Tree canopy', '16×13 · four values, no outline · cast shadow offset 2px'],
+    ['rock', 'Rock', '8×6 · flat top facet, two shade steps, grounded by shadow row'],
+    ['boulder', 'Boulder cluster', 'One large + 2 small · never on a shared axis'],
+    ['log', 'Fallen log', 'Horizontal grain, three values · end caps one step darker'],
+    ['pond', 'Pond edge', 'Sand rim → shallow → deep · sparkle dashes on the light side'],
+    ['trail', 'Trail edge', 'Dirt ramp with dithered fray · stepping stones break the line']
+  ];
+
+  P = null;
+
+  componentDidMount() {
+    window.__env = this;
+    this.P = this.defaults();
+    this.P.px = this.props.pixelSize ?? 4;
+    if (this.props.light && this.PAL[this.props.light]) this.setState({ phase: this.props.light });
+    this.t = 0; this.dirty = true;
+    this.onKey = (e) => {
+      if (e.key === 'F1') { e.preventDefault(); this.setState(s => ({ panel: !s.panel })); }
+      else if (e.key === 'F2') { e.preventDefault(); this.setState(s => ({ grid: !s.grid })); }
+      else if (e.key.toLowerCase() === 'r') this.reseed();
+    };
+    window.addEventListener('keydown', this.onKey);
+    this.last = performance.now();
+    this.loop = (tm) => {
+      const dt = Math.min(0.05, (tm - this.last) / 1000); this.last = tm; this.t += dt;
+      try { this.frame(); } catch (err) { this.lastErr = String(err && err.stack || err); }
+      this.raf = requestAnimationFrame(this.loop);
+    };
+    this.raf = requestAnimationFrame(this.loop);
+    this.tick = setInterval(() => { try { this.frame(); } catch (err) { this.lastErr = String(err); } }, 400);
+    this.onResize = () => { this.dirty = true; };
+    window.addEventListener('resize', this.onResize);
+    setTimeout(this.onResize, 40);
+  }
+
+  componentDidUpdate(prev) {
+    if (prev.light !== this.props.light && this.PAL[this.props.light]) {
+      this.setState({ phase: this.props.light }, () => { this.dirty = true; });
+    }
+    if (prev.pixelSize !== this.props.pixelSize && this.props.pixelSize) {
+      this.P.px = this.props.pixelSize; this.dirty = true;
+    }
+  }
+
+  componentWillUnmount() {
+    clearInterval(this.tick);
+    cancelAnimationFrame(this.raf);
+    window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('keydown', this.onKey);
+  }
+
+  defaults() {
+    return {
+      px: 4, dither: 0.6, moss: 0.6,
+      path: true, pathWidth: 14, pathWander: 0.5,
+      pond: true, pondSize: 1,
+      tufts: 0.6, flowers: 0.5, trees: 9, bushes: 16, mush: 6,
+      rocks: 10, logs: 2, stones: 8,
+      flies: 5, wind: 0.5, shimmer: 0.55
+    };
+  }
+
+  pal() { return this.PAL[this.state.phase]; }
+
+  // ── Noise ────────────────────────────────────────────────────────────────
+  h2(x, y) {
+    let n = (Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + this.sN) | 0;
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+  }
+  n2(x, y) {
+    const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+    const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+    const a = this.h2(ix, iy), b = this.h2(ix + 1, iy), c = this.h2(ix, iy + 1), d = this.h2(ix + 1, iy + 1);
+    return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+  }
+  fbm2(x, y) { return this.n2(x, y) * 0.56 + this.n2(x * 2.1 + 5, y * 2.1 + 9) * 0.28 + this.n2(x * 4.3 + 17, y * 4.3 + 23) * 0.16; }
+  rng(seed) {
+    let a = seed >>> 0;
+    return () => { a += 0x6D2B79F5; let t = a; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  }
+  rgb(hex) { return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)]; }
+
+  BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+
+  // ── Sprite blitting ──────────────────────────────────────────────────────
+  spr(c, name, x, y, flip, s) {
+    const def = this.SPR[name], pal = this.pal(), z = s || 1;
+    for (let j = 0; j < def.rows.length; j++) {
+      const row = def.rows[j];
+      for (let i = 0; i < row.length; i++) {
+        const ch = row[i]; if (ch === '.') continue;
+        const m = def.map[ch]; if (!m) continue;
+        c.fillStyle = pal[m[0]][m[1]];
+        c.fillRect(x + (flip ? row.length - 1 - i : i) * z, y + j * z, z, z);
+      }
+    }
+  }
+
+  shade(c, x, y, rx, ry) {
+    c.fillStyle = this.pal().shadow;
+    c.globalAlpha = 0.34;
+    for (let j = -ry; j <= ry; j++) {
+      const t = 1 - (j * j) / (ry * ry + 0.001); if (t <= 0) continue;
+      const half = Math.round(rx * Math.sqrt(t));
+      c.fillRect(x - half, y + j, half * 2 + 1, 1);
+    }
+    c.globalAlpha = 1;
+  }
+
+  flower(c, x, y, col) {
+    const pal = this.pal();
+    c.fillStyle = col;
+    c.fillRect(x, y - 1, 1, 1); c.fillRect(x - 1, y, 1, 1); c.fillRect(x + 1, y, 1, 1); c.fillRect(x, y + 1, 1, 1);
+    c.fillStyle = pal.flower[0]; c.fillRect(x, y, 1, 1);
+  }
+
+  tuftDraw(c, x, y, r, lean) {
+    const pal = this.pal();
+    const n = 3 + (r() * 3 | 0);
+    for (let i = 0; i < n; i++) {
+      const bx = x + i - (n >> 1);
+      const hgt = 2 + (r() * 2 | 0);
+      c.fillStyle = pal.grass[4];
+      c.fillRect(bx, y - hgt + 1, 1, hgt);
+      c.fillStyle = pal.grass[0];
+      c.fillRect(bx + lean, y - hgt, 1, 1);
+    }
+  }
+
+  // ── World ────────────────────────────────────────────────────────────────
+  pathCx(y) {
+    const P = this.P;
+    return this.pBase + Math.sin(y * 0.018 + this.pPh) * this.lw * 0.20 * P.pathWander
+      + (this.fbm2(y * 0.02, 7.5) - 0.5) * this.lw * 0.14 * P.pathWander;
+  }
+  pathHalf(y) { return this.P.pathWidth * 0.5 * (0.72 + this.fbm2(y * 0.06, 19.5) * 0.7); }
+  onPath(x, y) { return this.P.path && Math.abs(x - this.pathCx(y)) < this.pathHalf(y) + 2; }
+  pondQ(x, y) {
+    const p = this.pondD; if (!p) return 9;
+    const dx = (x - p.x) / p.rx, dy = (y - p.y) / p.ry;
+    const a = Math.atan2(dy, dx);
+    const warp = 0.86 + this.fbm2(Math.cos(a) * 2 + 40, Math.sin(a) * 2 + 40) * 0.34;
+    return (dx * dx + dy * dy) / (warp * warp);
+  }
+
+  buildScene(lw, lh) {
+    const P = this.P;
+    this.lw = lw; this.lh = lh;
+    this.sN = this.state.seed | 0;
+    const R = this.rng(this.state.seed ^ 0x2f19);
+    this.pBase = lw * (0.3 + R() * 0.42);
+    this.pPh = R() * 6.28;
+    this.pondD = P.pond ? { x: lw * (0.16 + R() * 0.26), y: lh * (0.2 + R() * 0.5), rx: lw * 0.13 * P.pondSize, ry: lh * 0.16 * P.pondSize } : null;
+
+    const occ = new Uint8Array(lw * lh);
+    const mark = (x, y, r) => {
+      for (let j = -r; j <= r; j++) for (let i = -r; i <= r; i++) {
+        const xx = x + i, yy = y + j;
+        if (xx >= 0 && yy >= 0 && xx < lw && yy < lh) occ[yy * lw + xx] = 1;
+      }
+    };
+    const free = (x, y, r) => {
+      if (x < -2 || y < -2 || x > lw + 2 || y > lh + 2) return false;
+      for (let j = -r; j <= r; j += 2) for (let i = -r; i <= r; i += 2) {
+        const xx = x + i | 0, yy = y + j | 0;
+        if (xx < 0 || yy < 0 || xx >= lw || yy >= lh) continue;
+        if (occ[yy * lw + xx]) return false;
+      }
+      return true;
+    };
+
+    const items = [];
+    const scatter = (n, kind, rad, onPathOk) => {
+      let guard = 0;
+      for (let i = 0; i < n && guard < n * 60; guard++) {
+        const x = (R() * lw) | 0, y = (R() * lh) | 0;
+        if (this.pondQ(x, y) < 1.35) continue;
+        if (!onPathOk && this.onPath(x, y)) continue;
+        if (!free(x, y, rad)) continue;
+        items.push({ kind, x, y, flip: R() < 0.5, r: (R() * 1e6) | 0 });
+        mark(x, y, rad); i++;
+      }
+    };
+    scatter(Math.round(P.trees * 0.25), 'treeBig', 17, false);
+    scatter(Math.round(P.trees), 'tree', 10, false);
+    scatter(Math.round(P.trees * 0.6), 'treeSm', 6, false);
+    scatter(Math.round(P.bushes), 'bush', 6, false);
+    scatter(Math.round(P.rocks), 'rock', 5, false);
+    scatter(Math.round(P.logs), 'log', 7, false);
+    scatter(Math.round(P.mush), 'mush', 3, false);
+
+    // Stepping stones sit ON the trail — the one thing that may break it.
+    if (P.path) {
+      for (let i = 0; i < Math.round(P.stones); i++) {
+        const y = (R() * lh) | 0;
+        const x = (this.pathCx(y) + (R() - 0.5) * this.pathHalf(y) * 1.2) | 0;
+        items.push({ kind: 'pebble', x, y, flip: R() < 0.5, r: (R() * 1e6) | 0 });
+      }
+    }
+
+    const clusters = [];
+    const cN = Math.round(P.flowers * 26);
+    const pal = this.pal();
+    for (let i = 0; i < cN; i++) {
+      const cx = (R() * lw) | 0, cy = (R() * lh) | 0;
+      if (this.pondQ(cx, cy) < 1.3 || this.onPath(cx, cy)) continue;
+      const col = pal.flower[[2, 3, 4, 1][R() * 4 | 0]];
+      const petals = [];
+      const n = 3 + (R() * 6 | 0);
+      for (let k = 0; k < n; k++) {
+        const a = R() * 6.28, d = R() * (3 + R() * 6);
+        const x = (cx + Math.cos(a) * d) | 0, y = (cy + Math.sin(a) * d * 0.8) | 0;
+        if (occ[y * lw + x]) continue;
+        petals.push({ x, y });
+      }
+      clusters.push({ col, petals });
+    }
+
+    const tufts = [];
+    const tN = Math.round(P.tufts * (lw * lh) / 190);
+    for (let i = 0; i < tN; i++) {
+      const x = (R() * lw) | 0, y = (R() * lh) | 0;
+      if (this.pondQ(x, y) < 1.15) continue;
+      if (occ[y * lw + x]) continue;
+      tufts.push({ x, y, r: (R() * 1e6) | 0, ph: R() * 6.28, weak: this.onPath(x, y) });
+    }
+
+    const flies = [];
+    for (let i = 0; i < Math.round(P.flies); i++) {
+      flies.push({ ax: lw * (0.1 + R() * 0.8), ay: lh * (0.1 + R() * 0.8), rx: 18 + R() * 60, ry: 10 + R() * 34, sp: 0.22 + R() * 0.3, ph: R() * 6.28, ph2: R() * 6.28 });
+    }
+
+    const sparks = [];
+    if (this.pondD) {
+      for (let i = 0; i < 22; i++) {
+        const a = R() * 6.28, d = Math.sqrt(R()) * 0.85;
+        sparks.push({ x: (this.pondD.x + Math.cos(a) * this.pondD.rx * d) | 0, y: (this.pondD.y + Math.sin(a) * this.pondD.ry * d) | 0, w: 2 + (R() * 4 | 0), ph: R() * 6.28 });
+      }
+    }
+
+    const glints = [];
+    for (let i = 0; i < 900; i++) glints.push({ x: (R() * lw) | 0, y: (R() * lh) | 0 });
+
+    items.sort((a, b) => a.y - b.y);
+    this.scene = { items, clusters, tufts, flies, sparks, glints, count: items.length + clusters.length + tufts.length };
+  }
+
+  paintBase(c, lw, lh) {
+    const P = this.P, pal = this.pal();
+    const G = pal.grass.map(h => this.rgb(h));
+    const D = pal.dirt.map(h => this.rgb(h));
+    const W = pal.water.map(h => this.rgb(h));
+    const img = c.createImageData(lw, lh), d = img.data;
+    for (let y = 0; y < lh; y++) {
+      for (let x = 0; x < lw; x++) {
+        const bay = (this.BAYER[(y & 3) * 4 + (x & 3)] / 16 - 0.47) * P.dither * 0.11;
+        let v = this.fbm2(x * 0.022, y * 0.022) + bay;
+        let tier = v > 0.60 ? 0 : v > 0.52 ? 1 : v > 0.44 ? 2 : v > 0.36 ? 3 : 4;
+        const m = this.fbm2(x * 0.008 + 31, y * 0.008 + 61);
+        if (m > 0.60) tier = Math.max(0, tier - 1);
+        else if (m < 0.37) tier = Math.min(3, tier + (P.moss > 0.5 ? 1 : 0));
+        let col = G[tier];
+
+        if (P.path) {
+          const dist = Math.abs(x - this.pathCx(y)), half = this.pathHalf(y);
+          if (dist < half) {
+            const fray = (half - dist) / 3 + bay * 8 + this.fbm2(x * 0.3, y * 0.3) - 0.5;
+            if (fray > 0.15) {
+              const dv = this.fbm2(x * 0.14 + 90, y * 0.14 + 90);
+              col = D[dv > 0.58 ? 0 : dv > 0.46 ? 1 : dv > 0.36 ? 2 : 3];
+            }
+          }
+        }
+        if (this.pondD) {
+          const q = this.pondQ(x, y);
+          if (q < 1) col = W[q < 0.28 ? 3 : q < 0.58 ? 2 : q < 0.86 ? 1 : 0];
+          else if (q < 1.16) col = D[q < 1.07 ? 0 : 1];
+        }
+        const i = (y * lw + x) * 4;
+        d[i] = col[0]; d[i + 1] = col[1]; d[i + 2] = col[2]; d[i + 3] = 255;
+      }
+    }
+    c.putImageData(img, 0, 0);
+
+    const S = this.scene;
+    // Brush texture: short dashes following the value patches, so the field reads
+    // as painted grass rather than noise.
+    const TR = this.rng((this.state.seed ^ 0x51ce) >>> 0);
+    const strokes = Math.round((lw * lh) / 26 * (0.4 + P.moss * 0.9));
+    for (let i = 0; i < strokes; i++) {
+      const x = (TR() * lw) | 0, y = (TR() * lh) | 0;
+      if (this.pondQ(x, y) < 1.2 || this.onPath(x, y)) continue;
+      const v = this.fbm2(x * 0.022, y * 0.022);
+      const tier = v > 0.56 ? 1 : v > 0.44 ? 2 : 3;
+      c.fillStyle = pal.grass[TR() < 0.5 ? Math.max(0, tier - 1) : Math.min(4, tier + 1)];
+      c.fillRect(x, y, 1 + (TR() * 2 | 0), 1);
+    }
+
+    for (const cl of S.clusters) for (const p of cl.petals) this.flower(c, p.x, p.y, cl.col);
+
+    const off = this.state.phase === 'GOLDEN' ? 3 : 2;
+    for (const it of S.items) {
+      if (it.kind === 'treeBig') { this.shade(c, it.x + off * 2 + 16, it.y + 26, 15, 6); this.spr(c, 'tree', it.x - 8, it.y - 6, it.flip, 2); }
+      else if (it.kind === 'treeSm') { this.shade(c, it.x + off + 4, it.y + 7, 5, 2); this.spr(c, 'tsm', it.x - 4, it.y - 3, it.flip); }
+      else if (it.kind === 'tree') { this.shade(c, it.x + off + 8, it.y + 13, 8, 3); this.spr(c, 'tree', it.x, it.y, it.flip); }
+      else if (it.kind === 'bush') { this.shade(c, it.x + off + 4, it.y + 7, 5, 2); this.spr(c, 'bush', it.x, it.y, it.flip); }
+      else if (it.kind === 'rock') { this.shade(c, it.x + off + 4, it.y + 6, 4, 2); this.spr(c, 'rock', it.x, it.y, it.flip); }
+      else if (it.kind === 'log') { this.shade(c, it.x + off + 5, it.y + 5, 6, 2); this.spr(c, 'log', it.x, it.y, it.flip); }
+      else if (it.kind === 'mush') { this.spr(c, 'mush', it.x, it.y, it.flip); }
+      else if (it.kind === 'pebble') { this.spr(c, 'pebble', it.x, it.y, it.flip); }
+    }
+
+    if (this.state.grid) {
+      c.fillStyle = 'rgba(243,241,236,0.18)';
+      for (let x = 0; x < lw; x += 16) c.fillRect(x, 0, 1, lh);
+      for (let y = 0; y < lh; y += 16) c.fillRect(0, y, lw, 1);
+      c.fillStyle = 'rgba(243,241,236,0.7)';
+      for (const it of S.items) c.fillRect(it.x, it.y, 1, 1);
+    }
+  }
+
+  frame() {
+    const cv = this.sceneRef.current; if (!cv) return;
+    const w = cv.clientWidth, h = cv.clientHeight; if (!w || !h) return;
+    const P = this.P, px = Math.max(2, Math.round(P.px));
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+      cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); this.dirty = true;
+    }
+    const lw = Math.ceil(w / px), lh = Math.ceil(h / px);
+    if (this.dirty || !this.base || this.baseW !== lw || this.baseH !== lh) {
+      if (!this.base) { this.base = document.createElement('canvas'); this.work = document.createElement('canvas'); }
+      this.base.width = this.work.width = lw; this.base.height = this.work.height = lh;
+      this.baseW = lw; this.baseH = lh;
+      const bc = this.base.getContext('2d');
+      this.buildScene(lw, lh);
+      this.paintBase(bc, lw, lh);
+      this.drawPlates();
+      this.dirty = false;
+    }
+
+    const S = this.scene, pal = this.pal();
+    const wc = this.work.getContext('2d');
+    wc.imageSmoothingEnabled = false;
+    wc.clearRect(0, 0, lw, lh);
+    wc.drawImage(this.base, 0, 0);
+
+    // A band of light travelling across the field — grass catching the sun.
+    if (P.shimmer > 0.02) {
+      const span = lw + lh + 90;
+      const ph = (this.t * 26) % span;
+      wc.fillStyle = pal.grass[0];
+      wc.globalAlpha = 0.55 * P.shimmer;
+      for (const g of S.glints) {
+        const dd = Math.abs((g.x + g.y) - ph);
+        if (dd < 16 && ((g.x + g.y) & 1) === 0) wc.fillRect(g.x, g.y, 1, 1);
+      }
+      wc.globalAlpha = 1;
+    }
+
+    const gust = Math.sin(this.t * 1.3) * 0.6 + Math.sin(this.t * 2.4 + 1.1) * 0.4;
+    for (const tf of S.tufts) {
+      const lean = Math.round((gust + Math.sin(this.t * 2 + tf.ph) * 0.5) * P.wind * 1.4);
+      const r = this.rng(tf.r);
+      if (tf.weak && r() < 0.6) continue;
+      this.tuftDraw(wc, tf.x, tf.y, this.rng(tf.r), lean);
+    }
+
+    for (const sp of S.sparks) {
+      if (Math.sin(this.t * 2.2 + sp.ph) > 0.55) { wc.fillStyle = pal.water[0]; wc.fillRect(sp.x, sp.y, sp.w, 1); }
+    }
+
+    for (const f of S.flies) {
+      const x = Math.round(f.ax + Math.cos(this.t * f.sp + f.ph) * f.rx);
+      const y = Math.round(f.ay + Math.sin(this.t * f.sp * 1.6 + f.ph2) * f.ry);
+      this.shade(wc, x + 2, y + 4, 2, 1);
+      this.spr(wc, (this.t * 7 + f.ph | 0) % 2 ? 'fly1' : 'fly0', x, y, false);
+    }
+
+    const c = cv.getContext('2d');
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.imageSmoothingEnabled = false;
+    c.clearRect(0, 0, w, h);
+    c.drawImage(this.work, 0, 0, lw * px, lh * px);
+  }
+
+  drawPlates() {
+    const pal = this.pal();
+    const lw = 37, lh = 26, sc = 4;
+    this.PLATE_DEFS.forEach((def, i) => {
+      const cv = this.plateRefs[i].current; if (!cv) return;
+      cv.width = 148; cv.height = 104;
+      const c = cv.getContext('2d');
+      c.imageSmoothingEnabled = false;
+      const off = document.createElement('canvas'); off.width = lw; off.height = lh;
+      const o = off.getContext('2d');
+      const R = this.rng((this.state.seed ^ (i * 7919)) >>> 0);
+      const kind = def[0];
+
+      for (let y = 0; y < lh; y++) for (let x = 0; x < lw; x++) {
+        const bay = (this.BAYER[(y & 3) * 4 + (x & 3)] / 16 - 0.47) * 0.16;
+        const v = this.fbm2(x * 0.06 + i * 9, y * 0.06 + i * 5) + bay;
+        o.fillStyle = pal.grass[v > 0.58 ? 0 : v > 0.48 ? 1 : v > 0.4 ? 2 : 3];
+        o.fillRect(x, y, 1, 1);
+      }
+
+      const cx = lw >> 1, cy = lh >> 1;
+      if (kind === 'tuft') {
+        for (let k = 0; k < 16; k++) this.tuftDraw(o, 4 + (R() * 30 | 0), 6 + (R() * 16 | 0), this.rng(R() * 1e6 | 0), R() < 0.5 ? 1 : 0);
+      } else if (kind === 'flower') {
+        const col = pal.flower[2];
+        for (let k = 0; k < 12; k++) this.flower(o, 6 + (R() * 26 | 0), 5 + (R() * 17 | 0), R() < 0.7 ? col : pal.flower[4]);
+        this.tuftDraw(o, 8, 20, this.rng(3), 0); this.tuftDraw(o, 29, 9, this.rng(9), 1);
+      } else if (kind === 'bush') {
+        this.shade(o, cx + 6, cy + 4, 5, 2); this.spr(o, 'bush', cx - 4, cy - 3, false);
+      } else if (kind === 'tree') {
+        this.shade(o, cx + 2, cy + 7, 8, 3); this.spr(o, 'tree', cx - 8, cy - 6, false);
+      } else if (kind === 'rock') {
+        this.shade(o, cx + 2, cy + 4, 4, 2); this.spr(o, 'rock', cx - 4, cy - 3, false);
+        this.tuftDraw(o, cx - 7, cy + 4, this.rng(5), 0);
+      } else if (kind === 'boulder') {
+        this.shade(o, cx - 2, cy + 4, 4, 2); this.spr(o, 'rock', cx - 8, cy - 3, false);
+        this.spr(o, 'pebble', cx + 5, cy + 1, false); this.spr(o, 'pebble', cx + 2, cy - 6, true);
+      } else if (kind === 'log') {
+        this.shade(o, cx + 1, cy + 4, 6, 2); this.spr(o, 'log', cx - 5, cy - 2, false);
+        this.spr(o, 'mush', cx + 6, cy + 3, false);
+      } else if (kind === 'pond') {
+        for (let y = 0; y < lh; y++) for (let x = 0; x < lw; x++) {
+          const dx = (x - cx) / 15, dy = (y - cy) / 9.5;
+          const q = dx * dx + dy * dy + (this.fbm2(x * 0.2, y * 0.2) - 0.5) * 0.22;
+          if (q < 1) { o.fillStyle = pal.water[q < 0.3 ? 3 : q < 0.6 ? 2 : q < 0.86 ? 1 : 0]; o.fillRect(x, y, 1, 1); }
+          else if (q < 1.2) { o.fillStyle = pal.dirt[q < 1.1 ? 0 : 1]; o.fillRect(x, y, 1, 1); }
+        }
+        o.fillStyle = pal.water[0];
+        for (let k = 0; k < 5; k++) o.fillRect(cx - 10 + (R() * 20 | 0), cy - 6 + (R() * 12 | 0), 2 + (R() * 3 | 0), 1);
+        this.tuftDraw(o, 4, 20, this.rng(11), 0); this.tuftDraw(o, 33, 8, this.rng(13), 1);
+      } else if (kind === 'trail') {
+        for (let y = 0; y < lh; y++) {
+          const c0 = cx + Math.sin(y * 0.22) * 3, half = 6 + this.fbm2(y * 0.3, 3) * 2.5;
+          for (let x = 0; x < lw; x++) {
+            const dist = Math.abs(x - c0);
+            const bay = (this.BAYER[(y & 3) * 4 + (x & 3)] / 16 - 0.47);
+            if (dist < half + bay * 2.4) {
+              const dv = this.fbm2(x * 0.16 + 90, y * 0.16 + 90);
+              o.fillStyle = pal.dirt[dv > 0.56 ? 0 : dv > 0.45 ? 1 : 2];
+              o.fillRect(x, y, 1, 1);
+            }
+          }
+        }
+        this.spr(o, 'pebble', cx - 4, 8, false); this.spr(o, 'pebble', cx + 1, 17, true);
+        this.tuftDraw(o, 5, 14, this.rng(17), 0); this.tuftDraw(o, 31, 20, this.rng(19), 1);
+      }
+
+      c.clearRect(0, 0, 148, 104);
+      c.drawImage(off, 0, 0, lw * sc, lh * sc);
+      c.strokeStyle = 'rgba(20,20,15,0.16)'; c.lineWidth = 1;
+      c.strokeRect(0.5, 0.5, 147, 103);
+    });
+  }
+
+  reseed = () => { this.setState({ seed: (Math.random() * 0xffffff) | 0 }, () => { this.dirty = true; }); };
+
+  slide(e, key, min, max, stepv) {
+    const track = e.currentTarget;
+    const set = (clientX) => {
+      const r = track.getBoundingClientRect();
+      const t = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+      this.P[key] = Math.round((min + t * (max - min)) / stepv) * stepv;
+      this.dirty = true;
+      this.setState(s => ({ v: s.v + 1 }));
+    };
+    set(e.clientX);
+    const mv = (ev) => set(ev.clientX);
+    const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+  }
+
+  renderVals() {
+    const P = this.P || this.defaults();
+    const s = this.state;
+    const groups = this.SCHEMA.map(([name, rows]) => ({
+      name,
+      rows: rows.map(([key, label, min, max, stepv, dec]) => {
+        if (min === null) {
+          const on = !!P[key];
+          return {
+            key, label, isSlider: false, isToggle: true, display: on ? 'ON' : 'OFF',
+            knobLeft: on ? '15px' : '3px', knobOpacity: on ? 1 : 0.28,
+            toggle: () => { P[key] = !P[key]; this.dirty = true; this.setState(st => ({ v: st.v + 1 })); }
+          };
+        }
+        return {
+          key, label, isSlider: true, isToggle: false,
+          display: Number(P[key]).toFixed(dec),
+          pct: (((P[key] - min) / (max - min)) * 100).toFixed(1) + '%',
+          onDown: (e) => this.slide(e, key, min, max, stepv)
+        };
+      })
+    }));
+
+    return {
+      sceneRef: this.sceneRef,
+      reseed: this.reseed,
+      seedText: '0x' + (s.seed >>> 0).toString(16).toUpperCase().padStart(6, '0').slice(-6),
+      phaseName: s.phase,
+      resText: (this.baseW || 0) + '×' + (this.baseH || 0) + ' @' + Math.round(P.px) + '×',
+      instanceText: String((this.scene && this.scene.count) || 0).padStart(4, '0'),
+      groups,
+      rowCount: groups.reduce((a, g) => a + g.rows.length, 0),
+      platesDisplay: (this.props.plates ?? true) ? 'flex' : 'none',
+      plates: this.PLATE_DEFS.map((d, i) => ({ ref: this.plateRefs[i], name: d[1], spec: d[2] })),
+      panelOpacity: s.panel ? 1 : 0,
+      panelTransform: s.panel ? 'translateX(0)' : 'translateX(14px)',
+      panelEvents: s.panel ? 'auto' : 'none',
+      panelDot: s.panel ? '#14140F' : 'rgba(20,20,15,0.25)',
+      togglePanel: () => this.setState(st => ({ panel: !st.panel })),
+      resetParams: () => { const px = this.P.px; this.P = this.defaults(); this.P.px = px; this.dirty = true; this.setState(st => ({ v: st.v + 1 })); },
+      phaseList: Object.keys(this.PAL).map(nm => ({
+        name: nm,
+        dot: nm === s.phase ? '#F3F1EC' : 'rgba(243,241,236,0)',
+        ink: nm === s.phase ? '#F3F1EC' : 'rgba(243,241,236,0.58)',
+        rule: nm === s.phase ? '#F3F1EC' : 'rgba(243,241,236,0.22)',
+        pick: () => this.setState({ phase: nm }, () => { this.dirty = true; })
+      }))
+    };
+  }
+}
+</script>
+</body>
+</html>

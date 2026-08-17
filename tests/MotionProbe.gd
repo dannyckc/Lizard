@@ -78,6 +78,7 @@ func _process(_delta: float) -> bool:
 	_check_delivers(creature)
 	_check_no_creep(creature)
 	_check_pattern(creature)
+	_check_flow(creature)
 	_check_turns(creature)
 	_check_reverse(creature)
 	_check_ledge(creature)
@@ -267,6 +268,60 @@ func _check_pattern(c: Creature2) -> void:
 	notes.append("pattern from speed: stroll %.2f / trot %.2f / sprint %.2f feet down, %.0f%% diagonal at the trot, sprint %.0f px/s"
 		% [float(stroll["down"]), float(trot["down"]), float(sprint["down"]),
 			float(trot["diagonal"]) * 100.0, sprint_speed])
+
+
+## The beat flows and the weight breathes on it. At a cruise the flow law
+## keeps the gait's seats occupied, so footfalls tile the cycle instead of
+## firing as isolated events with the body parked four-square between them;
+## the carried height rises and falls with the stride (the vault — a walk is
+## an inverted pendulum, not a hover) and it does so *smoothly*: the motion
+## is solved every frame, and a cut in the carry is a pose being snapped.
+## Ordinary cruise swings keep the driven pendulum's own time — the flick is
+## reserved for genuine emergencies (a torn anchor, a rescue).
+func _check_flow(c: Creature2) -> void:
+	_calm(c)
+	c.command.throttle = 1.0
+	_tick(c, 120)
+	var fw: Footwork = c.travel.footwork
+	var idle: int = 0
+	var lo: float = INF
+	var hi: float = -INF
+	var last: float = INF
+	var jump: float = 0.0
+	var quick: float = INF
+	var n: int = 240
+	for i in n:
+		c._physics_process(TICK)
+		var up: int = 0
+		for f in fw.feet:
+			if f.swinging:
+				up += 1
+				if not f.torn and f.rescue_at.x >= INF:
+					quick = minf(quick, f.swing_time)
+		if up == 0:
+			idle += 1
+		var mid: float = (c.armature.fore_carry + c.armature.hind_carry) * 0.5
+		if last < INF:
+			jump = maxf(jump, absf(mid - last))
+		last = mid
+		lo = minf(lo, mid)
+		hi = maxf(hi, mid)
+	var a: Armature = c.armature
+	worst_stick = maxf(worst_stick, a.worst_stick_error())
+	worst_bend = maxf(worst_bend, a.worst_bend_excess())
+	worst_bone = maxf(worst_bone, a.worst_bone_error())
+	_check(float(idle) / float(n) <= 0.1,
+		"the cruise beat paused with all four feet planted %.0f%% of the time"
+		% (float(idle) / float(n) * 100.0))
+	_check(jump <= 1.6,
+		"the carried weight cut %.2f px in one tick — the motion snapped" % jump)
+	_check(hi - lo >= 0.8,
+		"the cruise glides at one height (%.2f px of bob) — the vault is gone"
+		% (hi - lo))
+	_check(quick >= 0.15,
+		"an ordinary cruise swing took %.0f ms — the flick is back" % (quick * 1000.0))
+	notes.append("the beat flows: seats empty %.0f%% of cruise ticks, %.1f px of smooth bob (worst cut %.2f px), quickest ordinary swing %.0f ms"
+		% [float(idle) / float(n) * 100.0, hi - lo, jump, quick * 1000.0])
 
 
 func _check_turns(c: Creature2) -> void:

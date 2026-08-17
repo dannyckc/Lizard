@@ -21,7 +21,17 @@
 ## the body is built in (the v1 Froude lesson: a crouch must not inflate the
 ## regime).
 ##
-## The rules, each a statement about support rather than about style:
+## The ladder answers two questions, and they are one fact at two grains:
+##
+##   * **`flow`** — how many feet, on average, a body at this regime carries in
+##     the air. This is the duty factor read the other way round (walk 0.75,
+##     trot 0.5, gallop toward 0.3 — the quantity every gait study measures),
+##     and it is what makes the beat *continuous*: Footwork prices the stride
+##     so the swings tile the cycle at exactly this occupancy, and the grant
+##     below keeps the seats filled. A gait whose seats sit empty between
+##     steps is a body pausing mid-walk, which is not a rhythm at all.
+##   * **`choose`** — which feet take those seats, in what company. The rules,
+##     each a statement about support rather than about style:
 ##
 ##   * **Count** — how many feet may swing at once grows with the regime,
 ##     because a slow body needs its support continuous and a fast one gets it
@@ -32,11 +42,14 @@
 ##     on nothing. Desperation overrides it (a stumbling body takes the step
 ##     it needs) — and past the run regime the lockout *inverts*: the pair is
 ##     invited onto one beat, which is what a gallop's gathered beats are.
-##   * **Diagonal coupling** — when a foot is released at pace, its diagonal
-##     partner is invited onto the same beat if its own drift has it most of
-##     the way to asking. The invitation strength is the spec's
-##     `beat_coupling`, and it fades as the bound takes over: a gallop is not
-##     a fast trot, and the two couplings trade rather than stack.
+##   * **Diagonal company** — at pace, the seat beside a swinging foot belongs
+##     to its diagonal partner, because two diagonal feet carry the trunk
+##     across its own middle and two lateral feet ask the body to balance on
+##     one side of itself. So the grant *prefers* the diagonal of whatever is
+##     already up — it may take the seat a little before its own drift is due,
+##     as hard as the spec's `beat_coupling` prefers it — and the preference
+##     fades as the bound takes over: a gallop is not a fast trot, and the two
+##     couplings trade rather than stack.
 ##   * **The gathered beat** — at the bound, a released foot pulls its own
 ##     girdle partner onto the beat. How hard is not authored per gait: it is
 ##     the girdle's own `attach_hold` — the cat's hind girdle is bone on bone
@@ -75,6 +88,20 @@ const FROUDE_BOUND: float = 0.065316
 ## spine's own freedom takes its share.
 const BOUND_SPAN: float = 2.0
 
+## The occupancy ladder — how many feet, on average, each regime carries in
+## the air. These are the duty factors of the gait literature written as
+## airborne feet (mean up = 4·(1 − duty)): a slow walk keeps three feet and a
+## bit down (duty toward 0.75), a trot swings its diagonal pairs for half the
+## cycle (duty 0.5), and a developed gallop is airborne more than it is not
+## (duty toward 0.3). Pinned once, like the Froude boundaries they sit on,
+## and then true of whatever body is asking — the *cycle length* that delivers
+## the occupancy comes from each body's own swing times, never from here.
+const SEAT_WALK_GAIN: float = 0.4
+const SEAT_TROT: float = 1.4
+const SEAT_RUN: float = 1.8
+const SEAT_TOP: float = 2.2
+const SEAT_BOUND: float = 2.8
+
 ## Least a foot rests between steps, seconds. A rhythm floor, not a physics
 ## one: it stops a marginal trigger fluttering a foot on and off the ground.
 const COOLDOWN: float = 0.10
@@ -83,12 +110,35 @@ const COOLDOWN: float = 0.10
 ## (1.0 = the foot just crossed its own step trigger).
 const DESPERATE: float = 1.6
 
-## How much of the way to its own trigger a diagonal partner must be for the
-## coupling to pull it onto the beat, at full `beat_coupling`. The spec's
-## coupling scales the reach of the invitation, not this floor.
-const COUPLE_FLOOR: float = 0.55
+## How much of the way to its own trigger a foot must be for the flow to take
+## it early — the handover. A flowing gait hands support over continuously,
+## so when the regime's seats are not all taken, the most-ready planted foot
+## is released a little before its own drift is due rather than leaving the
+## beat with a hole in it. The stride it gives up is bounded by this floor,
+## and a body that is not travelling never hands anything over at all.
+const EAGER: float = 0.8
 
-## The same floor for the gathered beat's girdle partner, at full bound and a
+## The same floor for the *diagonal* of a foot already in the air, at full
+## `beat_coupling` — deliberately deeper than EAGER, because this is the one
+## early release that reorganises a gait: taking the diagonal partner onto
+## the beat ahead of a more-urgent lateral neighbour is exactly a walk's
+## four-beat dissolving into a trot's two, and the one short stride it costs
+## is the shuffle-step every animal takes changing gait. The spec's coupling
+## scales how deep the preference reaches, not this floor.
+const COUPLE_FLOOR: float = 0.45
+
+## How much the diagonal preference outranks plain urgency in the queue, at
+## full coupling — enough to take the seat from a lateral neighbour that is
+## merely a little more overdue, never enough to outrank an emergency.
+const AFFINITY: float = 0.35
+
+## The speed below which nothing flows, px/s — the same gate Footwork's
+## travel measurement uses. A standing body's steps are tidy-ups and
+## rescues; keeping seats warm on a body going nowhere would be a march on
+## the spot.
+const FLOWING: float = 2.0
+
+## The eager floor for the gathered beat's girdle partner, at full bound and a
 ## rigid girdle. Lower than the diagonal's because a bounding pair works as one
 ## limb and the second foot is pulled onto the beat early — the pair lands
 ## together or it is not a pair.
@@ -111,10 +161,11 @@ const BOUND: int = 3
 ## watching the loop; nothing here reads them back.
 var seats: int = 1
 var most: int = 2
-## Which regime the last decision was made in, and how developed the bound is,
-## 0..1 — readouts on the same terms.
+## Which regime the last decision was made in, how developed the bound is
+## (0..1), and the occupancy the flow owes — readouts on the same terms.
 var regime: int = WALK
 var bound: float = 0.0
+var flow_seats: float = 1.0
 
 
 ## Where a forward speed sits on this body's own Froude ladder. `rest_hip` is
@@ -134,15 +185,37 @@ func froude_of(speed_along: float, rest_hip: float) -> float:
 	return speed_along * speed_along / (Gravity.PULL * maxf(rest_hip, 1.0))
 
 
+## How many feet, on average, this regime carries in the air — the occupancy
+## the flow owes, continuous along the whole ladder so an accelerating body's
+## gait *develops* rather than switching. Footwork divides the body's four
+## swing times by this to get the stride cycle, which is the one seam through
+## which the duty factor becomes a beat. Pure, like `regime_of`.
+func flow(speed_along: float, rest_hip: float) -> float:
+	var fr: float = froude_of(speed_along, rest_hip)
+	if fr < FROUDE_TROT:
+		# Within the walk the occupancy creeps up from one — a slow walk rests
+		# between steps, a brisk one is about to need its second seat.
+		var x: float = fr / FROUDE_TROT
+		return 1.0 + SEAT_WALK_GAIN * x * x
+	if fr < FROUDE_RUN:
+		return lerpf(SEAT_TROT, SEAT_RUN,
+			(fr - FROUDE_TROT) / (FROUDE_RUN - FROUDE_TROT))
+	if fr < FROUDE_BOUND:
+		return lerpf(SEAT_RUN, SEAT_TOP,
+			(fr - FROUDE_RUN) / (FROUDE_BOUND - FROUDE_RUN))
+	return lerpf(SEAT_TOP, SEAT_BOUND,
+		clampf((fr - FROUDE_BOUND) / (FROUDE_BOUND * BOUND_SPAN), 0.0, 1.0))
+
+
 ## Decides which of the asking feet may lift this tick.
 ##
 ## `urgency` is per-foot drift in trigger units (≥ 1.0 is a request, 0 for a
 ## foot already swinging), `swinging` which feet are already up, `since`
 ## seconds since each foot last landed. `speed_along` is the body's forward
 ## travel (a shove sideways is not a gait), `rest_hip` its built standing hip
-## height, `coupling` the spec's diagonal invitation, `pair_hold` each
+## height, `coupling` the spec's diagonal preference, `pair_hold` each
 ## girdle's attach hold (fore in x, hind in y), `freedom` the spine the body
-## has to bound with. Returns the indices to release, most urgent first.
+## has to bound with. Returns the indices to release, best company first.
 ## Pure — the caller owns all state — so a probe can ask it hypotheticals.
 func choose(urgency: PackedFloat32Array, swinging: PackedByteArray,
 		since: PackedFloat32Array, speed_along: float, rest_hip: float,
@@ -162,6 +235,7 @@ func choose(urgency: PackedFloat32Array, swinging: PackedByteArray,
 	if regime == BOUND:
 		bound = clampf((froude - FROUDE_BOUND) / (FROUDE_BOUND * BOUND_SPAN),
 			0.0, 1.0) * clampf(freedom, 0.0, 1.0)
+	flow_seats = flow(speed_along, rest_hip)
 
 	seats = 1 if regime == WALK else 2
 	# The absolute ceiling even desperation honours. At a walk or a trot a body
@@ -171,18 +245,47 @@ func choose(urgency: PackedFloat32Array, swinging: PackedByteArray,
 	# overlap, and the moment all four are up is not a failure of support, it
 	# is the suspension the gait is made of.
 	most = 2 if regime < RUN else (3 if regime < BOUND else 4)
+	# ...and how many the flow actually keeps occupied — the handover's target,
+	# never past what desperation itself would honour. The handover belongs to
+	# the tiling gaits: a bound's air comes from its own suspension, and an
+	# eager third foot lifted under a galloping body was support taken from
+	# the one gait that can least spare it.
+	var fill: int = clampi(roundi(flow_seats), 1, most if bound <= 0.0 else 2)
+	var flowing: bool = speed_along > FLOWING
 
-	# Requests, most urgent first. Insertion sort on four entries.
+	# The diagonal preference: alive at pace, gone at a walk (whose four-beat
+	# order is the sequence, not the diagonal), and traded away as the bound's
+	# own coupling takes over.
+	var diag: float = 0.0
+	if regime != WALK:
+		diag = clampf(coupling, 0.0, 1.0) * (1.0 - bound)
+
+	# The queue: every planted foot that is due — or near enough due for the
+	# company to take it — scored by urgency plus the company the regime
+	# prefers, best first. Insertion sort on four entries.
 	var order := PackedInt32Array()
+	var score := PackedFloat32Array()
 	for i in urgency.size():
-		if swinging[i] != 0 or urgency[i] < 1.0:
+		if swinging[i] != 0:
 			continue
+		var floor_i: float = 1.0
+		var boost: float = 0.0
+		if flowing:
+			floor_i = EAGER
+			if diag > 0.0 and swinging[DIAGONAL[i]] != 0:
+				# The seat beside a swinging foot belongs to its diagonal.
+				floor_i = lerpf(EAGER, COUPLE_FLOOR, diag)
+				boost = diag * AFFINITY
+		if urgency[i] < floor_i:
+			continue
+		var s: float = urgency[i] + boost
 		var at: int = order.size()
 		for j in order.size():
-			if urgency[i] > urgency[order[j]]:
+			if s > score[j]:
 				at = j
 				break
 		order.insert(at, i)
+		score.insert(at, s)
 
 	for i in order:
 		if up >= most:
@@ -197,8 +300,15 @@ func choose(urgency: PackedFloat32Array, swinging: PackedByteArray,
 			# bound a desperate pair goes anyway, and a pair whose partner is
 			# already through its beat follows it.
 			continue
-		if up >= seats and not desperate and bound <= 0.0:
-			continue
+		if urgency[i] >= 1.0:
+			# A due request takes a seat on the old terms.
+			if up >= seats and not desperate and bound <= 0.0:
+				continue
+		else:
+			# An early release is the flow's, and only fills the seats the
+			# flow actually owes.
+			if up >= fill or (up >= seats and bound <= 0.0):
+				continue
 		out.append(i)
 		up += 1
 
@@ -216,25 +326,5 @@ func choose(urgency: PackedFloat32Array, swinging: PackedByteArray,
 				if urgency[p] >= gather:
 					out.append(p)
 					up += 1
-
-		# The diagonal invitation: at pace, the partner most of the way to its
-		# own ask joins the beat — subject to its own girdle and cooldown. It
-		# fades as the bound develops: the two couplings trade, they do not
-		# stack, which is exactly a trot dissolving into a gallop.
-		var diag: float = coupling * (1.0 - bound)
-		if regime == WALK or diag <= 0.0:
-			continue
-		var d: int = DIAGONAL[i]
-		if swinging[d] != 0 or (d in out) or since[d] < COOLDOWN:
-			continue
-		var invite: float = lerpf(1.0, COUPLE_FLOOR, clampf(diag, 0.0, 1.0))
-		if urgency[d] < invite:
-			continue
-		if swinging[PAIR[d]] != 0 or (PAIR[d] in out):
-			continue
-		if up >= most or (up >= seats and urgency[d] < DESPERATE and bound <= 0.0):
-			continue
-		out.append(d)
-		up += 1
 
 	return out
